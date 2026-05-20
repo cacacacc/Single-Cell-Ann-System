@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* 针对数据表格的深色科技风格重置 */
+    .table-dark-fluent {
+        color: var(--text-main);
+        vertical-align: middle;
+    }
+    .table-dark-fluent thead th {
+        background-color: rgba(255, 255, 255, 0.03);
+        color: var(--text-muted);
+        border-bottom: 2px solid var(--nankai-purple);
+        font-weight: 600;
+        padding: 15px;
+    }
+    .table-dark-fluent tbody td {
+        background-color: transparent;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        padding: 15px;
+        color: #d1d5db;
+    }
+    .table-dark-fluent tbody tr:hover td {
+        background-color: rgba(111, 38, 86, 0.1); /* 南开紫极浅的悬浮底色 */
+    }
+
+    /* 顶部命令栏按钮 */
+    .cmd-btn {
+        background-color: #222B45;
+        color: var(--text-main);
+        border: 1px solid rgba(255,255,255,0.1);
+        padding: 8px 16px;
+        border-radius: 6px;
+        margin-right: 10px;
+        transition: all 0.2s;
+    }
+    .cmd-btn:hover { background-color: #2e3a59; color: white; }
+    .cmd-btn-primary { background-color: var(--nankai-purple); border-color: var(--nankai-purple); }
+    .cmd-btn-primary:hover { background-color: #8a316d; }
+
+    /* 操作列小图标按钮 */
+    .action-icon {
+        color: var(--text-muted);
+        cursor: pointer;
+        margin: 0 8px;
+        font-size: 1.1rem;
+        transition: color 0.2s;
+    }
+    .action-icon:hover { color: var(--text-main); }
+    .action-icon.build { color: #4A90E2; }
+    .action-icon.delete:hover { color: #ff6b6b; }
+
+    /* 右侧抽屉样式覆盖 */
+    .offcanvas-dark {
+        background-color: var(--bg-card);
+        color: var(--text-main);
+        border-left: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    /* 拖拽上传区域 */
+    .upload-zone {
+        border: 2px dashed rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        padding: 50px 20px;
+        text-align: center;
+        background-color: rgba(0,0,0,0.2);
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+        border-color: var(--nankai-purple);
+        background-color: rgba(111, 38, 86, 0.1);
+    }
+</style>
+
+<!-- 顶部操作栏 (Command Bar) -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="fw-bold m-0" style="letter-spacing: 1px;">数据管理中心</h3>
+    <div>
+        <button class="cmd-btn cmd-btn-primary" data-bs-toggle="offcanvas" data-bs-target="#uploadPanel">
+            <i class="fa-solid fa-cloud-arrow-up me-2"></i>上传数据集
+        </button>
+        <button class="cmd-btn">
+            <i class="fa-solid fa-trash me-2"></i>批量删除
+        </button>
+        <button class="cmd-btn" onclick="location.reload()">
+            <i class="fa-solid fa-rotate-right me-2"></i>刷新
+        </button>
+    </div>
+</div>
+
+<!-- 主内容区：数据表格卡片 -->
+<div class="dark-card" style="padding: 0; overflow: hidden;">
+    <table class="table table-dark-fluent mb-0 w-100">
+        <thead>
+            <tr>
+                <th style="width: 50px; text-align: center;"><input type="checkbox" class="form-check-input"></th>
+                <th>数据集 ID / 名称</th>
+                <th>细胞总数</th>
+                <th>基因维度</th>
+                <th>上传者 & 时间</th>
+                <th>当前索引状态</th>
+                <th class="text-center">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- 示例数据行 1 -->
+            <tr>
+                <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                <td>
+                    <div class="fw-bold text-white">Adult_Liver_Atlas</div>
+                    <small style="color: var(--text-muted);">kidney_healthy.h5ad</small>
+                </td>
+                <td>107,344</td>
+                <td>2,000</td>
+                <td>
+                    <div>陆皓喆</div>
+                    <small style="color: var(--text-muted);">2024-05-18 14:30</small>
+                </td>
+                <td><span class="badge" style="background-color: var(--nankai-purple); padding: 6px 10px;">FAISS-HNSW</span></td>
+                <td class="text-center">
+                    <i class="fa-solid fa-circle-info action-icon" title="详情"></i>
+                    <i class="fa-solid fa-microchip action-icon build" title="重新构建索引" data-bs-toggle="modal" data-bs-target="#buildIndexModal" onclick="setTargetData('Adult_Liver_Atlas')"></i>
+                    <i class="fa-solid fa-trash action-icon delete" title="删除"></i>
+                </td>
+            </tr>
+            <!-- 示例数据行 2 -->
+            <tr>
+                <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                <td>
+                    <div class="fw-bold text-white">Pediatric_Liver_CZI</div>
+                    <small style="color: var(--text-muted);">pediatric.h5ad</small>
+                </td>
+                <td>56,021</td>
+                <td>2,500</td>
+                <td>
+                    <div>系统导入</div>
+                    <small style="color: var(--text-muted);">2024-05-17 09:15</small>
+                </td>
+                <td><span class="badge bg-secondary" id="status-badge-2" style="padding: 6px 10px;">未建索引</span></td>
+                <td class="text-center">
+                    <i class="fa-solid fa-circle-info action-icon" title="详情"></i>
+                    <!-- 点击这个齿轮，弹出建库模态框 -->
+                    <i class="fa-solid fa-microchip action-icon build" title="构建索引" data-bs-toggle="modal" data-bs-target="#buildIndexModal" onclick="setTargetData('Pediatric_Liver_CZI')"></i>
+                    <i class="fa-solid fa-trash action-icon delete" title="删除"></i>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- ================= 1. 右侧滑出抽屉：上传数据集 ================= -->
+<div class="offcanvas offcanvas-end offcanvas-dark" tabindex="-1" id="uploadPanel" style="width: 450px;">
+    <div class="offcanvas-header border-bottom border-secondary">
+        <h5 class="offcanvas-title fw-bold"><i class="fa-solid fa-cloud-arrow-up me-2" style="color: var(--nankai-purple);"></i>新增单细胞数据</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body">
+        <div class="mb-4">
+            <label class="form-label text-muted">支持格式：.h5ad / .csv</label>
+            <!-- 拖拽区 -->
+            <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                <i class="fa-solid fa-file-arrow-up fa-3x mb-3" style="color: #4A90E2;"></i>
+                <h5 class="text-white">点击或将文件拖拽至此处</h5>
+                <p class="text-muted small mb-0">最大支持文件大小: 2GB</p>
+                <input type="file" id="file-input" style="display: none;" accept=".h5ad,.csv">
+            </div>
+        </div>
+
+        <!-- 进度条区域 (默认隐藏) -->
+        <div id="upload-progress-area" style="display: none;">
+            <div class="d-flex justify-content-between mb-1">
+                <span id="progress-text" style="font-size: 0.9rem; color: #4A90E2;">格式校验中...</span>
+                <span id="progress-percent" style="font-size: 0.9rem;">0%</span>
+            </div>
+            <div class="progress" style="height: 8px; background-color: rgba(255,255,255,0.1);">
+                <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" id="upload-bar" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 2. 居中模态弹窗：构建索引 ================= -->
+<div class="modal fade" id="buildIndexModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="background-color: var(--bg-card); color: white; border: 1px solid rgba(255,255,255,0.1);">
+            <div class="modal-header border-bottom border-secondary">
+                <h5 class="modal-title fw-bold"><i class="fa-solid fa-microchip me-2" style="color: #4A90E2;"></i>ANN 索引构建</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" style="padding: 30px;">
+                <!-- 优化 1：提亮“目标数据集”前缀文字 -->
+                <p class="mb-4" style="color: #A0AABF; font-size: 1.05rem;">
+                    目标数据集：<strong id="target-dataset-name" class="text-white ms-1"></strong>
+                </p>
+                
+                <!-- 优化 2：提亮说明性标题 -->
+                <label class="form-label mb-3" style="color: #A0AABF;">选择底层算法结构</label>
+                
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="annAlgo" id="algoHNSW" checked>
+                    <label class="form-check-label text-white" for="algoHNSW">
+                        <strong>FAISS - HNSW</strong> <span style="color: #2ecc71; font-size: 0.9rem;">(推荐)</span><br>
+                        <!-- 优化 3：大幅提亮小字说明，并增加行高 -->
+                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
+                            查询速度极快，召回率高，但内存占用较大。
+                        </div>
+                    </label>
+                </div>
+                
+                <div class="form-check mb-4">
+                    <input class="form-check-input" type="radio" name="annAlgo" id="algoIVF">
+                    <label class="form-check-label text-white" for="algoIVF">
+                        <strong>FAISS - IVF + PQ</strong><br>
+                        <!-- 优化 4：大幅提亮小字说明 -->
+                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
+                            经过向量压缩，极低内存占用，适合超大规模数据。
+                        </div>
+                    </label>
+                </div>
+
+                <!-- 建库进度 (默认隐藏) -->
+                <div id="build-progress-area" style="display: none; text-align: center; margin-top: 20px;">
+                    <div class="spinner-border text-primary mb-3" role="status"></div>
+                    <div style="color: #A0AABF; font-size: 0.95rem;">正在构建高维向量网络，请耐心等待...</div>
+                </div>
+            </div>
+            <div class="modal-footer border-top border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn cmd-btn-primary" id="start-build-btn" onclick="startBuilding()">开始构建</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- 必须引入 Bootstrap JS 才能触发弹窗和抽屉 -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    // ================= 1. 上传进度条模拟交互 =================
+    const fileInput = document.getElementById('file-input');
+    const uploadArea = document.getElementById('upload-progress-area');
+    const uploadBar = document.getElementById('upload-bar');
+    const progressText = document.getElementById('progress-text');
+    const progressPercent = document.getElementById('progress-percent');
+
+    fileInput.addEventListener('change', function() {
+        if(this.files.length > 0) {
+            uploadArea.style.display = 'block';
+            let progress = 0;
+            
+            // 模拟 格式校验 -> 预处理 -> 成功的进度条动画
+            const interval = setInterval(() => {
+                progress += Math.floor(Math.random() * 15);
+                if(progress >= 100) progress = 100;
+                
+                uploadBar.style.width = progress + '%';
+                progressPercent.innerText = progress + '%';
+
+                if(progress < 30) progressText.innerText = "格式校验中...";
+                else if(progress < 80) progressText.innerText = "提取表达矩阵中 (预处理)...";
+                else progressText.innerText = "上传成功，正在刷新列表!";
+
+                if(progress === 100) {
+                    clearInterval(interval);
+                    uploadBar.classList.replace('bg-primary', 'bg-success');
+                    // 实际项目中这里会调用 location.reload() 刷新页面
+                }
+            }, 500);
+        }
+    });
+
+    // ================= 2. 构建索引模拟交互 =================
+    function setTargetData(name) {
+        // 打开弹窗时，把数据集名字填上去
+        document.getElementById('target-dataset-name').innerText = name;
+        // 重置 UI 状态
+        document.getElementById('build-progress-area').style.display = 'none';
+        document.getElementById('start-build-btn').style.display = 'block';
+    }
+
+    function startBuilding() {
+        // 隐藏按钮，显示转圈动画
+        document.getElementById('start-build-btn').style.display = 'none';
+        document.getElementById('build-progress-area').style.display = 'block';
+
+        // 模拟向后端发请求建库耗时 2.5 秒
+        setTimeout(() => {
+            // 1. 关闭弹窗
+            var modalEl = document.getElementById('buildIndexModal');
+            var modal = bootstrap.Modal.getInstance(modalEl);
+            modal.hide();
+
+            // 2. 将页面上第2行的状态强行改为成功 (为了中期演示效果)
+            let badge = document.getElementById('status-badge-2');
+            if(badge) {
+                badge.className = "badge";
+                badge.style.backgroundColor = "var(--nankai-purple)";
+                badge.innerText = document.getElementById('algoHNSW').checked ? "FAISS-HNSW" : "FAISS-IVF";
+            }
+            alert("索引构建成功！该数据集现已支持近似近邻检索。");
+        }, 2500);
+    }
+</script>
+{% endblock %}

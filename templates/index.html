@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 第一排：核心指标区 -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="dark-card d-flex justify-content-between align-items-center">
+            <div>
+                <div class="mb-1" style="font-size: 0.9rem; color: var(--text-muted);">总细胞样本量</div>
+                <div class="fs-2 fw-bold mb-1">1,520,344</div>
+                <div style="font-size: 0.85rem; color: #2ecc71;"><i class="fa-solid fa-arrow-trend-up"></i> +15% 较昨日</div>
+            </div>
+            <i class="fa-solid fa-vial-virus fa-2x" style="color: #222B45;"></i>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="dark-card d-flex justify-content-between align-items-center">
+            <div>
+                <div class="mb-1" style="font-size: 0.9rem; color: var(--text-muted);">加载数据集数量</div>
+                <div class="fs-2 fw-bold mb-1">4</div>
+                <div style="font-size: 0.85rem; color: #2ecc71;"><i class="fa-solid fa-plus"></i> 本周新增 1 个</div>
+            </div>
+            <i class="fa-solid fa-layer-group fa-2x" style="color: #222B45;"></i>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="dark-card d-flex justify-content-between align-items-center">
+            <div>
+                <div class="mb-1" style="font-size: 0.9rem; color: var(--text-muted);">系统当前内存</div>
+                <div class="fs-2 fw-bold mb-1">1.2 GB</div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);"><i class="fa-solid fa-check-circle text-success"></i> 运行健康</div>
+            </div>
+            <i class="fa-solid fa-memory fa-2x" style="color: #222B45;"></i>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="dark-card d-flex justify-content-between align-items-center">
+            <div>
+                <div class="mb-1" style="font-size: 0.9rem; color: var(--text-muted);">平均检索响应耗时</div>
+                <div class="fs-2 fw-bold mb-1">12 ms</div>
+                <div style="font-size: 0.85rem; color: #2ecc71;"><i class="fa-solid fa-arrow-trend-down"></i> -2% 较昨日</div>
+            </div>
+            <i class="fa-solid fa-bolt fa-2x" style="color: #222B45;"></i>
+        </div>
+    </div>
+</div>
+
+<!-- 第二排：图表监控区 -->
+<div class="row">
+    <!-- 左侧 60%：折线图 -->
+    <div class="col-md-8">
+        <div class="dark-card">
+            <h5 class="mb-4 fw-bold">系统查询热度趋势 (过去7天)</h5>
+            <div id="queryChart" style="width: 100%; height: 300px;"></div>
+        </div>
+    </div>
+    
+    <!-- 右侧 40%：索引状态条 -->
+    <div class="col-md-4">
+        <div class="dark-card">
+            <h5 class="mb-4 fw-bold">各数据集索引状态</h5>
+            
+            <div class="mb-4">
+                <div class="d-flex justify-content-between mb-2">
+                    <span class="fw-semibold">Adult_Liver.h5ad</span>
+                    <span class="badge" style="background-color: var(--nankai-purple);">HNSW 运行中</span>
+                </div>
+                <!-- 进度条底色改为深色 -->
+                <div class="progress" style="height: 6px; background-color: #222B45;">
+                    <div class="progress-bar" role="progressbar" style="width: 100%; background-color: var(--nankai-purple);"></div>
+                </div>
+                <div class="mt-1" style="font-size: 0.85rem; color: var(--text-muted);">占用内存: 450MB | 状态: 正常</div>
+            </div>
+
+            <div class="mb-4">
+                <div class="d-flex justify-content-between mb-2">
+                    <span class="fw-semibold">Pediatric_Liver.h5ad</span>
+                    <span class="badge bg-success">IVF 运行中</span>
+                </div>
+                <div class="progress" style="height: 6px; background-color: #222B45;">
+                    <div class="progress-bar bg-success" role="progressbar" style="width: 100%;"></div>
+                </div>
+                <div class="mt-1" style="font-size: 0.85rem; color: var(--text-muted);">占用内存: 120MB | 状态: 正常</div>
+            </div>
+
+            <div class="mb-4">
+                <div class="d-flex justify-content-between mb-2">
+                    <span class="fw-semibold">Kidney_Cells.h5ad</span>
+                    <span class="badge bg-secondary">未建索引</span>
+                </div>
+                <div class="progress" style="height: 6px; background-color: #222B45;">
+                    <div class="progress-bar bg-secondary" role="progressbar" style="width: 0%;"></div>
+                </div>
+                <div class="mt-1" style="font-size: 0.85rem; color: var(--text-muted);">仅支持精确暴力检索</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // 恢复 ECharts 的 dark 模式，但让背景透明以透出深蓝卡片色
+    var myChart = echarts.init(document.getElementById('queryChart'));
+
+    var option = {
+        backgroundColor: 'transparent',
+        tooltip: { 
+            trigger: 'axis',
+            backgroundColor: '#222B45', // 深色提示框
+            textStyle: { color: '#fff' }
+        },
+        grid: {
+            left: '3%', right: '4%', bottom: '3%', top: '5%', containLabel: true
+        },
+        xAxis: {
+            type: 'category',
+            data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+            axisLine: { lineStyle: { color: '#8A96A8' } },
+            axisLabel: { color: '#8A96A8' }
+        },
+        yAxis: {
+            type: 'value',
+            splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.05)' } }, // 极暗的网格线
+            axisLabel: { color: '#8A96A8' }
+        },
+        series: [{
+            data: [120, 200, 150, 480, 260, 110, 310],
+            type: 'line',
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 8,
+            lineStyle: {
+                color: '#6F2656', 
+                width: 3
+            },
+            areaStyle: {
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                    { offset: 0, color: 'rgba(111, 38, 86, 0.5)' },
+                    { offset: 1, color: 'rgba(111, 38, 86, 0.0)' }
+                ])
+            },
+            itemStyle: { 
+                color: '#6F2656',
+                borderColor: '#141A30', // 边框颜色和背景色一致，制造镂空感
+                borderWidth: 2
+            }
+        }]
+    };
+
+    myChart.setOption(option);
+
+    window.addEventListener('resize', function() {
+        myChart.resize();
+    });
+</script>
+{% endblock %}

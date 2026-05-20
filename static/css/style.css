@@ -1,0 +1,197 @@
+/* 深蓝科技大屏变量 (仿海洋牧场) */
+:root {
+    --bg-main: #0B1021;       /* 最底层的深邃海军蓝 */
+    --bg-card: #141A30;       /* 侧边栏和卡片的底色 (稍浅一点) */
+    --text-main: #FFFFFF;     /* 主文字纯白 */
+    --text-muted: #8A96A8;    /* 次要文字灰蓝色 */
+    --nankai-purple: #6F2656; /* 南开紫保留，用于强调色 */
+    --menu-active-bg: #222B45;/* 侧边栏选中的底色 */
+    --border-color: rgba(255, 255, 255, 0.05);
+}
+
+body {
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    margin: 0;
+    overflow-x: hidden;
+}
+
+/* ================= 侧边导航栏 (复刻参考图) ================= */
+.sidebar {
+    width: 260px;
+    height: 100vh;
+    background-color: var(--bg-card);
+    position: fixed;
+    top: 0;
+    left: 0;
+    padding-top: 20px;
+    z-index: 1000;
+}
+
+/* 顶部 Logo 区域 */
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    padding: 0 18px; /* 将 25px 缩小到 18px，给右侧文字腾出更多空间 */
+    margin-bottom: 40px;
+}
+
+.logo-box {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--text-main);
+    border-radius: 4px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-right: 12px;
+    flex-shrink: 0; /* 防止图标被压缩 */
+}
+
+.sidebar-brand span {
+    font-size: 1.05rem; /* 稍微缩小一点点字号 */
+    font-weight: 600;
+    white-space: nowrap; /* 核心属性：绝对禁止文字换行 */
+}
+
+/* 菜单项 */
+.nav-link {
+    color: var(--text-muted);
+    padding: 12px 25px;
+    margin: 4px 15px;
+    border-radius: 8px; /* 微软风格的圆角 */
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+}
+
+.nav-link i {
+    width: 24px;
+    font-size: 1.1rem;
+    margin-right: 12px;
+}
+
+.nav-link:hover {
+    color: var(--text-main);
+}
+
+/* 选中状态 */
+.nav-link.active {
+    background-color: var(--menu-active-bg);
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.nav-link.active i {
+    color: #4A90E2; /* 参考图中的蓝色图标强调 */
+}
+
+/* ================= 主内容区 ================= */
+.main-content {
+    margin-left: 260px;
+    padding: 20px 30px;
+    min-height: 100vh;
+}
+
+/* ================= 顶部状态栏 (复刻参考图) ================= */
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 30px;
+    padding-top: 10px;
+}
+
+/* 新增的 ANN 引擎状态样式 */
+.topbar-left .engine-status {
+    font-size: 0.85rem;
+    color: #2ecc71; /* 科技绿色 */
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* 呼吸闪烁的绿灯特效 */
+.status-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #2ecc71;
+    border-radius: 50%;
+    margin-right: 8px;
+    box-shadow: 0 0 8px #2ecc71;
+    animation: pulse-green 2s infinite;
+}
+
+@keyframes pulse-green {
+    0% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); }
+    70% { box-shadow: 0 0 0 6px rgba(46, 204, 113, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+}
+
+
+.topbar-left .datetime {
+    font-size: 1.1rem;
+    font-weight: bold;
+}
+
+.topbar-right {
+    display: flex;
+    align-items: center;
+}
+
+/* 搜索框 */
+.search-box {
+    background-color: #222B45;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    margin-right: 20px;
+    width: 200px;
+}
+
+.search-box i {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-right: 8px;
+}
+
+.search-box input {
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    outline: none;
+    width: 100%;
+    font-size: 0.9rem;
+}
+
+.search-box input::placeholder {
+    color: var(--text-muted);
+}
+
+/* 右侧操作图标 */
+.topbar-actions a {
+    color: var(--text-main);
+    text-decoration: none;
+    margin-left: 20px;
+    font-size: 0.95rem;
+}
+
+.topbar-actions a i {
+    margin-right: 5px;
+}
+
+/* ================= 卡片样式 ================= */
+.dark-card {
+    background-color: var(--bg-card);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    height: 100%;
+    /* 移除边框，使用纯色块，更符合参考图风格 */
+}
