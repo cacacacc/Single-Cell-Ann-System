@@ -69,6 +69,47 @@
         color: var(--text-main);
         border-left: 1px solid rgba(255,255,255,0.1);
     }
+    /* 1. 彻底抹杀原生复选框样式，重绘一个完美的暗色复选框 */
+    .table-dark-fluent input[type="checkbox"] {
+        appearance: none; /* 干掉操作系统和浏览器的默认样式 */
+        -webkit-appearance: none;
+        width: 18px;
+        height: 18px;
+        background-color: rgba(0, 0, 0, 0.4) !important; /* 强制暗色底 */
+        border: 1px solid #8A96A8 !important; /* 灰色边框 */
+        border-radius: 4px;
+        cursor: pointer;
+        display: inline-block;
+        position: relative;
+        outline: none !important; /* 绝对禁止出现焦点白框 */
+        box-shadow: none !important; /* 绝对禁止出现任何发光晕 */
+        margin: 0;
+        vertical-align: middle;
+    }
+
+    /* 2. 选中时的南开紫状态 */
+    .table-dark-fluent input[type="checkbox"]:checked {
+        background-color: var(--nankai-purple) !important;
+        border-color: var(--nankai-purple) !important;
+    }
+
+    /* 3. 自己画一个纯白色的对号 (✓) */
+    .table-dark-fluent input[type="checkbox"]:checked::after {
+        content: '';
+        position: absolute;
+        left: 5px;
+        top: 2px;
+        width: 5px;
+        height: 10px;
+        border: solid white;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+    }
+    
+    /* 4. 让整行鼠标变成手型，提示用户可以点击整行 */
+    .table-dark-fluent tbody tr {
+        cursor: pointer;
+    }
     
     /* 拖拽上传区域 */
     .upload-zone {
@@ -93,7 +134,7 @@
         <button class="cmd-btn cmd-btn-primary" data-bs-toggle="offcanvas" data-bs-target="#uploadPanel">
             <i class="fa-solid fa-cloud-arrow-up me-2"></i>上传数据集
         </button>
-        <button class="cmd-btn">
+        <button class="cmd-btn" onclick="batchDelete()">
             <i class="fa-solid fa-trash me-2"></i>批量删除
         </button>
         <button class="cmd-btn" onclick="location.reload()">
@@ -107,7 +148,7 @@
     <table class="table table-dark-fluent mb-0 w-100">
         <thead>
             <tr>
-                <th style="width: 50px; text-align: center;"><input type="checkbox" class="form-check-input"></th>
+                <th style="width: 50px; text-align: center;"><input type="checkbox" id="selectAll" class="table-checkbox"></th>
                 <th>数据集 ID / 名称</th>
                 <th>细胞总数</th>
                 <th>基因维度</th>
@@ -119,7 +160,7 @@
         <tbody>
             <!-- 示例数据行 1 -->
             <tr>
-                <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                <td class="text-center"><input type="checkbox" class="table-checkbox row-checkbox"></td>
                 <td>
                     <div class="fw-bold text-white">Adult_Liver_Atlas</div>
                     <small style="color: var(--text-muted);">kidney_healthy.h5ad</small>
@@ -127,7 +168,7 @@
                 <td>107,344</td>
                 <td>2,000</td>
                 <td>
-                    <div>陆皓喆</div>
+                    <div>maruko</div>
                     <small style="color: var(--text-muted);">2024-05-18 14:30</small>
                 </td>
                 <td><span class="badge" style="background-color: var(--nankai-purple); padding: 6px 10px;">FAISS-HNSW</span></td>
@@ -139,7 +180,7 @@
             </tr>
             <!-- 示例数据行 2 -->
             <tr>
-                <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                <td class="text-center"><input type="checkbox" class="table-checkbox row-checkbox"></td>
                 <td>
                     <div class="fw-bold text-white">Pediatric_Liver_CZI</div>
                     <small style="color: var(--text-muted);">pediatric.h5ad</small>
@@ -148,7 +189,7 @@
                 <td>2,500</td>
                 <td>
                     <div>系统导入</div>
-                    <small style="color: var(--text-muted);">2024-05-17 09:15</small>
+                    <small style="color: var(--text-muted);">2026-05-21 09:15</small>
                 </td>
                 <td><span class="badge bg-secondary" id="status-badge-2" style="padding: 6px 10px;">未建索引</span></td>
                 <td class="text-center">
@@ -315,6 +356,83 @@
             }
             alert("索引构建成功！该数据集现已支持近似近邻检索。");
         }, 2500);
+
     }
+    // ================= 3. 表格全选交互 =================
+    const selectAll = document.getElementById('selectAll');
+    const rowCheckboxes = document.querySelectorAll('tbody .row-checkbox');
+
+    function getRowCheckboxes() {
+        return document.querySelectorAll('tbody .row-checkbox');
+    }
+
+    function syncSelectAllState() {
+        const rows = getRowCheckboxes();
+        const checkedCount = document.querySelectorAll('tbody .row-checkbox:checked').length;
+        selectAll.checked = checkedCount === rows.length && rows.length > 0;
+        selectAll.indeterminate = checkedCount > 0 && checkedCount < rows.length;
+    }
+
+    selectAll.addEventListener('change', function(e) {
+        const isChecked = e.target.checked;
+        getRowCheckboxes().forEach(box => {
+            box.checked = isChecked;
+        });
+        selectAll.indeterminate = false;
+    });
+
+    rowCheckboxes.forEach(box => {
+        box.addEventListener('change', syncSelectAllState);
+    });
+
+    // ================= 4. 批量删除交互 =================
+    function batchDelete() {
+        // 找出 tbody 里所有被勾选的复选框
+        const checkedBoxes = document.querySelectorAll('tbody .row-checkbox:checked');
+        const count = checkedBoxes.length;
+
+        // 如果一个都没选
+        if (count === 0) {
+            alert("⚠️ 请先勾选需要删除的数据集！");
+            return;
+        }
+
+        // 如果选了，弹出二次确认框
+        if (confirm(`确定要彻底删除选中的 ${count} 个数据集及其底层的 ANN 索引吗？\n警告：此操作不可恢复！`)) {
+            
+            // 遍历所有被勾选的框，把它所在的整行 (tr) 从页面上移除
+            checkedBoxes.forEach(box => {
+                box.closest('tr').remove();
+            });
+            
+            // 把全选框的勾去掉
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+            
+            alert("✅ 批量删除成功！");
+        }
+    }
+
+    // ================= 5. 点击整行自动勾选复选框 =================
+    document.querySelectorAll('.table-dark-fluent tbody tr').forEach(row => {
+        row.addEventListener('click', function(e) {
+            // 如果用户点击的是右侧的操作图标，则不触发勾选（防止冲突）
+            if (e.target.tagName.toLowerCase() === 'i' || e.target.classList.contains('action-icon')) {
+                return;
+            }
+            if (e.target.tagName.toLowerCase() === 'input') {
+                return;
+            }
+
+            // 找到这行里的复选框
+            const checkbox = this.querySelector('input[type="checkbox"]');
+
+            // 如果用户点击的不是复选框本身，我们用代码帮他点一下
+            if (checkbox) {
+                checkbox.checked = !checkbox.checked;
+                checkbox.dispatchEvent(new Event('change'));
+            }
+        });
+    });
 </script>
 {% endblock %}
