@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .profile-header {
+        background: linear-gradient(135deg, rgba(74, 144, 226, 0.1) 0%, rgba(111, 38, 86, 0.1) 100%);
+        border-radius: 12px;
+        padding: 30px;
+        display: flex;
+        align-items: center;
+        border: 1px solid rgba(255,255,255,0.05);
+        margin-bottom: 24px;
+    }
+    
+    .avatar-large {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        border: 3px solid #4A90E2;
+        margin-right: 30px;
+        box-shadow: 0 0 20px rgba(74, 144, 226, 0.3);
+    }
+
+    .dark-input {
+        background-color: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: white;
+    }
+    .dark-input:focus {
+        background-color: rgba(0, 0, 0, 0.4);
+        border-color: #4A90E2;
+        box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.2);
+        color: white;
+    }
+    
+    .btn-glow-purple {
+        background-color: #923a73;
+        border: none;
+        color: white;
+        padding: 10px 24px;
+        border-radius: 6px;
+        transition: all 0.3s;
+    }
+    .btn-glow-purple:hover {
+        background-color: #a84685;
+        box-shadow: 0 0 15px rgba(168, 70, 133, 0.5);
+    }
+</style>
+
+<div class="row">
+    <div class="col-12">
+        <h3 class="fw-bold mb-4" style="letter-spacing: 1px;">
+            <i class="fa-solid fa-id-badge me-2" style="color: #4A90E2;"></i>个人信息中心
+        </h3>
+    </div>
+
+    <!-- 顶部个人名片 -->
+    <div class="col-12">
+        <div class="profile-header">
+            <img src="https://ui-avatars.com/api/?name=Admin&background=6F2656&color=fff&size=200" alt="Avatar" class="avatar-large">
+            <div>
+                <h3 class="fw-bold text-white mb-2">陆皓喆</h3>
+                <div class="mb-2">
+                    <span class="badge" style="background-color: var(--nankai-purple); font-size: 0.9rem;"><i class="fa-solid fa-shield-halved me-1"></i> 系统超级管理员</span>
+                </div>
+                <div style="color: #8A96A8; font-size: 0.95rem;">
+                    <i class="fa-solid fa-envelope me-1"></i> admin@nankai.edu.cn &nbsp;&nbsp;|&nbsp;&nbsp; 
+                    <i class="fa-solid fa-clock me-1"></i> 注册于: 2023-09-01
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 左右分栏：基本信息 与 安全设置 -->
+    <div class="col-md-6">
+        <div class="dark-card">
+            <h5 class="fw-bold text-white mb-4 border-bottom pb-3" style="border-color: rgba(255,255,255,0.05) !important;">
+                基本资料修改
+            </h5>
+            <form>
+                <div class="mb-3">
+                    <label class="form-label" style="color: #8A96A8;">登录账号 (不可修改)</label>
+                    <input type="text" class="form-control dark-input" value="admin_lhz" disabled style="opacity: 0.6;">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" style="color: #8A96A8;">真实姓名</label>
+                    <input type="text" class="form-control dark-input" value="陆皓喆">
+                </div>
+                <div class="mb-4">
+                    <label class="form-label" style="color: #8A96A8;">联系邮箱</label>
+                    <input type="email" class="form-control dark-input" value="admin@nankai.edu.cn">
+                </div>
+                <button type="button" class="btn btn-glow-purple" onclick="alert('资料保存成功！')">保存修改</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="dark-card">
+            <h5 class="fw-bold text-white mb-4 border-bottom pb-3" style="border-color: rgba(255,255,255,0.05) !important;">
+                安全与密码设置
+            </h5>
+            <form>
+                <div class="mb-3">
+                    <label class="form-label" style="color: #8A96A8;">原密码</label>
+                    <input type="password" class="form-control dark-input" placeholder="输入当前登录密码">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" style="color: #8A96A8;">新密码</label>
+                    <input type="password" class="form-control dark-input" placeholder="至少8位字母数字组合">
+                </div>
+                <div class="mb-4">
+                    <label class="form-label" style="color: #8A96A8;">确认新密码</label>
+                    <input type="password" class="form-control dark-input" placeholder="再次输入新密码">
+                </div>
+                <button type="button" class="btn btn-outline-danger" onclick="alert('密码修改成功，请重新登录。')">强制修改密码</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

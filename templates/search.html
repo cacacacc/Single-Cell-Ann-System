@@ -2,12 +2,29 @@
 
 {% block content %}
 <style>
-    /* ================= 专属表单暗黑样式 ================= */
-    .form-label {
-        color: var(--text-muted);
-        font-size: 0.9rem;
-        margin-bottom: 8px;
+    /* ================= 坚如磐石的 Flex 布局 ================= */
+    .search-layout {
+        display: flex;
+        gap: 24px;
+        /* 极其关键的一步：让左侧控制台保持自身高度，不要和右边等高，否则吸顶绝对会失效！ */
+        align-items: flex-start; 
     }
+    
+    .search-sidebar {
+        width: 320px; /* 左侧宽度永久固定，绝对不会被挤没 */
+        flex-shrink: 0;
+        position: sticky;
+        top: 24px; /* 向下滚动时，吸附在距离屏幕顶部 24px 的位置 */
+        z-index: 10;
+    }
+    
+    .search-main {
+        flex: 1; /* 右侧自动填满剩余空间 */
+        min-width: 0; /* 防止大图表撑破容器 */
+    }
+
+    /* ================= 表单与组件样式 ================= */
+    .form-label { color: #8A96A8; font-size: 0.9rem; margin-bottom: 8px; }
     
     .dark-control {
         background-color: rgba(0, 0, 0, 0.25);
@@ -16,7 +33,6 @@
         border-radius: 6px;
         padding: 10px 15px;
     }
-
     .dark-control:focus {
         background-color: rgba(0, 0, 0, 0.4);
         border-color: #4A90E2;
@@ -24,15 +40,10 @@
         color: white;
         outline: none;
     }
-
-    /* 修复 select 下拉菜单在暗黑模式下的选项颜色 */
     .dark-control option { background-color: #141A30; color: white; }
 
-    /* 滑动条样式自定义 */
     .form-range::-webkit-slider-thumb { background: #923a73; }
-    .form-range::-webkit-slider-thumb:active { background: #a84685; }
-
-    /* 紫色发光主按钮 (复用你刚改好的样式) */
+    
     .btn-glow-purple {
         background-color: #923a73;
         border: none;
@@ -45,40 +56,50 @@
     .btn-glow-purple:hover {
         background-color: #a84685;
         box-shadow: 0 0 15px rgba(168, 70, 133, 0.5);
-        transform: translateY(-1px);
+        color: white;
     }
 
-    /* ================= 图表与表格样式 ================= */
+    /* ================= 图表与原生暗黑表格 ================= */
     .chart-box {
-        background-color: #050814; /* 比卡片更深的星空背景 */
+        background-color: #050814; 
         border-radius: 8px;
         border: 1px solid rgba(255,255,255,0.05);
-        position: relative;
     }
 
-    .table-dark-fluent { color: var(--text-main); vertical-align: middle; }
-    .table-dark-fluent thead th {
-        background-color: rgba(255, 255, 255, 0.03);
-        color: var(--text-muted);
-        border-bottom: 2px solid #4A90E2; /* 用蓝色底边强调 */
-        padding: 12px 15px;
+    .table-dark-custom {
+        --bs-table-bg: transparent;
+        color: #FFFFFF;
+        vertical-align: middle;
+        margin-bottom: 0;
     }
-    .table-dark-fluent tbody td {
+    .table-dark-custom thead th {
+        background-color: rgba(0, 0, 0, 0.2);
+        color: #8A96A8;
+        border-bottom: 2px solid #4A90E2;
+        font-weight: 600;
+        padding: 15px;
+    }
+    .table-dark-custom tbody td {
+        padding: 15px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        padding: 12px 15px;
+    }
+    .table-dark-custom tbody tr:hover td {
+        background-color: rgba(111, 38, 86, 0.15); 
     }
 </style>
 
-<div class="row">
-    <!-- ================= 左侧 30%：参数控制台 ================= -->
-    <div class="col-xl-3 col-lg-4 mb-4">
-        <div class="dark-card">
+<!-- 采用全新的 Flex 容器 -->
+<div class="search-layout">
+    
+    <!-- ================= 左侧：参数控制台 (自带完美吸顶) ================= -->
+    <div class="search-sidebar">
+        <!-- 去掉了底部的 mb-4，因为高度由自身决定了 -->
+        <div class="dark-card m-0">
             <h5 class="fw-bold mb-4" style="letter-spacing: 1px;">
                 <i class="fa-solid fa-sliders me-2" style="color: #4A90E2;"></i>检索参数设置
             </h5>
             
             <form id="searchForm">
-                <!-- 数据集选择 -->
                 <div class="mb-4">
                     <label class="form-label">目标数据集</label>
                     <select class="form-select dark-control">
@@ -87,13 +108,11 @@
                     </select>
                 </div>
 
-                <!-- 细胞 ID 输入 -->
                 <div class="mb-4">
                     <label class="form-label">查询细胞编号 (Cell ID)</label>
                     <input type="text" class="form-control dark-control" id="queryCellId" placeholder="例如: AAACCTGAG..." value="AAACCTGAGCTAGT-1">
                 </div>
 
-                <!-- Top-K 滑动条 -->
                 <div class="mb-4">
                     <label class="form-label d-flex justify-content-between">
                         <span>返回相似数量 (Top-K)</span>
@@ -102,7 +121,6 @@
                     <input type="range" class="form-range" min="5" max="100" step="5" value="20" id="topKSlider">
                 </div>
 
-                <!-- 细胞类型过滤 (条件检索加分项) -->
                 <div class="mb-5">
                     <label class="form-label">限定细胞类型 (可选过滤)</label>
                     <select class="form-select dark-control">
@@ -113,7 +131,6 @@
                     </select>
                 </div>
 
-                <!-- 提交按钮 -->
                 <button type="button" class="btn btn-glow-purple w-100" id="startSearchBtn">
                     <i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索
                 </button>
@@ -121,28 +138,60 @@
         </div>
     </div>
 
-    <!-- ================= 右侧 70%：大图可视化与数据表 ================= -->
-    <div class="col-xl-9 col-lg-8">
+    <!-- ================= 右侧：大图可视化与数据表 ================= -->
+    <div class="search-main">
         
-        <!-- 上方：UMAP 可视化 -->
-        <div class="dark-card mb-4" style="padding: 15px;">
-            <div class="d-flex justify-content-between align-items-center mb-2 px-2">
-                <span class="fw-bold"><i class="fa-solid fa-chart-scatter me-2" style="color: #4A90E2;"></i>UMAP 聚类星空图</span>
-                <span id="search-status" class="badge bg-secondary">等待查询...</span>
+        <!-- 上部：UMAP 可视化大卡片 -->
+        <div class="dark-card mb-4" style="padding: 20px;">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <span class="fw-bold fs-5 text-white">UMAP 预览</span>
+                <div class="d-flex align-items-center gap-3" style="font-size: 0.9rem;">
+                    <div class="form-check form-check-inline m-0">
+                        <input class="form-check-input" type="checkbox" id="bgSample" checked style="background-color: transparent; border-color: #4A90E2;">
+                        <label class="form-check-label text-white" for="bgSample">背景抽样</label>
+                    </div>
+                    <div class="form-check form-check-inline m-0">
+                        <input class="form-check-input" type="checkbox" id="showLegend" checked style="background-color: transparent; border-color: #4A90E2;">
+                        <label class="form-check-label text-white" for="showLegend">图例</label>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="text-white">着色</span>
+                        <select class="form-select form-select-sm dark-control py-1" style="width: auto; background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                            <option>cell_type</option>
+                            <option>tissue</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-sm text-white" id="redrawBtn" style="border: 1px solid rgba(255,255,255,0.2); background: transparent;">重绘</button>
+                </div>
             </div>
-            <!-- ECharts 容器 -->
-            <div id="umapChart" class="chart-box" style="width: 100%; height: 450px;"></div>
+
+            <!-- ECharts 渲染容器 (高度适度收紧到 420px，消除下方过多空白) -->
+            <div id="umapChart" class="chart-box" style="width: 100%; height: 420px;"></div>
+
+            <!-- 底部自定义图例区 -->
+            <div id="custom-legend-box" class="mt-3 p-3" style="background-color: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">
+                <div class="d-flex flex-wrap gap-3" id="legend-container">
+                    <!-- JS 动态填入图例 -->
+                </div>
+                <div style="color: #8A96A8; font-size: 0.8rem; margin-top: 12px;">
+                    背景为随机抽样；按所选字段着色；检索后高亮查询细胞与近邻。
+                </div>
+            </div>
         </div>
 
-        <!-- 下方：数据表格 -->
+        <!-- 下部：数据表格卡片 -->
         <div class="dark-card" style="padding: 0; overflow: hidden;">
-            <div class="px-4 pt-4 pb-2 d-flex justify-content-between align-items-center">
-                <span class="fw-bold"><i class="fa-solid fa-table-list me-2" style="color: #4A90E2;"></i>Top-K 详细结果</span>
-                <button class="btn btn-sm btn-outline-secondary" style="color: var(--text-muted); border-color: rgba(255,255,255,0.1);">
-                    <i class="fa-solid fa-download me-1"></i>导出 CSV
-                </button>
+            <div class="px-4 py-3 d-flex justify-content-between align-items-center" style="background-color: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <span class="fw-bold fs-5 text-white"><i class="fa-solid fa-table-list me-2" style="color: #4A90E2;"></i>Top-K 详细结果</span>
+                <div>
+                    <span id="search-status" class="badge bg-secondary me-3">等待查询...</span>
+                    <button class="btn btn-sm" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);">
+                        <i class="fa-solid fa-download me-1"></i>导出 CSV
+                    </button>
+                </div>
             </div>
-            <table class="table table-dark-fluent mb-0 w-100">
+            
+            <table class="table table-dark-custom w-100">
                 <thead>
                     <tr>
                         <th class="ps-4">Rank</th>
@@ -153,161 +202,172 @@
                     </tr>
                 </thead>
                 <tbody id="result-tbody">
-                    <!-- 初始化时为空状态 -->
                     <tr>
-                        <td colspan="5" class="text-center py-5 text-muted">
-                            <i class="fa-solid fa-inbox fa-3x mb-3" style="opacity: 0.2;"></i><br>
-                            请在左侧设定参数并点击检索
+                        <td colspan="5" class="text-center py-5">
+                            <i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i>
+                            <div style="color: #8A96A8;">请在左侧设定参数并点击【开始近似检索】</div>
                         </td>
                     </tr>
                 </tbody>
             </table>
         </div>
+
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // 1. 监听滑动条数字变化
     const slider = document.getElementById('topKSlider');
     const kValue = document.getElementById('k-value');
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
 
-    // 2. 初始化 ECharts
-    const chartDom = document.getElementById('umapChart');
-    const myChart = echarts.init(chartDom);
-    
-    // 生成一些模拟的背景星空点 (假装是未查询时的几万个细胞)
-    function generateBackgroundData(count) {
+    const cellCategories = [
+        { name: 'T cell', color: '#4A90E2', count: 341, center: [-20, 20] },
+        { name: 'Hepatocyte', color: '#E83E8C', count: 603, center: [10, -15] },
+        { name: 'Macrophage', color: '#2ECC71', count: 255, center: [25, 30] },
+        { name: 'Endothelial cell', color: '#F5A623', count: 138, center: [35, -25] },
+        { name: 'Monocyte', color: '#9B59B6', count: 104, center: [-30, -10] },
+        { name: 'NK cell', color: '#1ABC9C', count: 80, center: [0, 40] }
+    ];
+
+    const legendContainer = document.getElementById('legend-container');
+    let legendHTML = '';
+    cellCategories.forEach(cat => {
+        legendHTML += `
+            <div class="d-flex align-items-center" style="font-size: 0.85rem; color: #FFFFFF;">
+                <div style="width: 12px; height: 12px; background-color: ${cat.color}; border-radius: 2px; margin-right: 6px;"></div>
+                ${cat.name} <span style="color: #A0AABF; margin-left: 4px;">(${cat.count})</span>
+            </div>
+        `;
+    });
+    legendContainer.innerHTML = legendHTML;
+
+    document.getElementById('showLegend').addEventListener('change', function(e) {
+        document.getElementById('custom-legend-box').style.display = e.target.checked ? 'block' : 'none';
+    });
+
+    function generateCluster(center, color, count, typeName) {
         let data = [];
         for (let i = 0; i < count; i++) {
-            data.push([
-                Math.random() * 100 - 50, // X
-                Math.random() * 100 - 50  // Y
-            ]);
+            let x = center[0] + (Math.random() + Math.random() + Math.random() - 1.5) * 15;
+            let y = center[1] + (Math.random() + Math.random() + Math.random() - 1.5) * 15;
+            data.push({ value: [x, y], name: `Cell_${Math.floor(Math.random()*10000)}`, type: typeName, itemStyle: { color: color } });
         }
         return data;
     }
-    const bgData = generateBackgroundData(2000);
 
-    // 基础图表配置
-    const baseOption = {
+    let allBackgroundData = [];
+    cellCategories.forEach(cat => {
+        allBackgroundData = allBackgroundData.concat(generateCluster(cat.center, cat.color, cat.count, cat.name));
+    });
+
+    const chartDom = document.getElementById('umapChart');
+    const myChart = echarts.init(chartDom);
+    
+    let baseOption = {
         backgroundColor: 'transparent',
         tooltip: {
             backgroundColor: 'rgba(20, 26, 48, 0.9)',
             borderColor: '#4A90E2',
             textStyle: { color: '#fff' },
             formatter: function (params) {
-                if(params.seriesName === '背景') return null;
-                return `ID: ${params.data.name}<br>Type: ${params.data.type}<br>Dist: ${params.data.dist}`;
+                if(params.seriesName === '查询目标' || params.seriesName === 'Top-K 结果') {
+                    return `ID: ${params.data.name}<br>Type: <span style="color:${params.color}">${params.data.type}</span><br>Dist: ${params.data.dist}`;
+                }
+                return `ID: ${params.data.name}<br>Type: <span style="color:${params.color}">${params.data.type}</span>`;
             }
         },
-        dataZoom: [
-            { type: 'inside', xAxisIndex: 0, yAxisIndex: 0 },
-            { type: 'slider', show: false } // 支持鼠标滚轮缩放
-        ],
-        xAxis: { show: false, min: -60, max: 60 },
-        yAxis: { show: false, min: -60, max: 60 },
+        dataZoom: [{ type: 'inside' }, { type: 'slider', show: false }],
+        xAxis: { show: true, min: -60, max: 60, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,0.03)' } }, axisLabel: {show: false}, axisLine: {show: false}, axisTick: {show: false} },
+        yAxis: { show: true, min: -60, max: 60, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,0.03)' } }, axisLabel: {show: false}, axisLine: {show: false}, axisTick: {show: false} },
         series: [{
-            name: '背景',
+            name: '背景聚类',
             type: 'scatter',
-            symbolSize: 2,
-            itemStyle: { color: '#2A365C', opacity: 0.6 }, // 幽暗的背景蓝
-            data: bgData,
+            symbolSize: 3,
+            itemStyle: { opacity: 0.7 },
+            data: allBackgroundData,
             large: true
         }]
     };
     myChart.setOption(baseOption);
 
-    // 3. 点击【开始检索】按钮的交互逻辑
+    document.getElementById('redrawBtn').addEventListener('click', function() {
+        this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        setTimeout(() => {
+            myChart.setOption(baseOption, true);
+            document.getElementById('result-tbody').innerHTML = '<tr><td colspan="5" class="text-center py-5"><i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i><div style="color: #8A96A8;">已重绘图谱，请重新执行检索</div></td></tr>';
+            document.getElementById('search-status').className = 'badge bg-secondary me-3';
+            document.getElementById('search-status').innerText = '等待查询...';
+            this.innerHTML = '重绘';
+        }, 500);
+    });
+
     document.getElementById('startSearchBtn').addEventListener('click', function() {
         const btn = this;
-        const statusBadge = document.getElementById('search-status');
         const tbody = document.getElementById('result-tbody');
+        const statusBadge = document.getElementById('search-status');
         const topK = parseInt(slider.value);
         const cellId = document.getElementById('queryCellId').value;
 
-        // UI 状态切换为 Loading
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>检索中...';
         btn.disabled = true;
-        statusBadge.className = 'badge bg-warning text-dark';
-        statusBadge.innerHTML = '<span class="spinner-grow spinner-grow-sm me-1"></span>FAISS 引擎计算中';
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">正在计算高维向量距离...</td></tr>';
+        statusBadge.className = 'badge bg-warning text-dark me-3';
+        statusBadge.innerHTML = '<span class="spinner-grow spinner-grow-sm me-1"></span>引擎计算中';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">正在进行高维空间近邻计算...</td></tr>';
 
-        // 模拟网络请求 (真实开发时这里换成 fetch('/api/search') )
         setTimeout(() => {
-            // A. 模拟后端返回的数据
-            const targetPoint = [10, 15]; // 查询目标点的坐标
+            const targetPoint = [12, -12]; 
             const resultData = [];
             let tableHTML = '';
             
-            const cellTypes = ['Hepatocyte', 'T cell', 'Macrophage'];
-            
             for(let i = 0; i < topK; i++) {
-                // 模拟分布在目标点周围的 K 个最近邻居
-                let rx = targetPoint[0] + (Math.random() - 0.5) * 8;
-                let ry = targetPoint[1] + (Math.random() - 0.5) * 8;
-                let dist = (Math.random() * 0.05).toFixed(4); // 模拟 L2 距离
-                let cType = cellTypes[Math.floor(Math.random() * cellTypes.length)];
+                let rx = targetPoint[0] + (Math.random() - 0.5) * 10;
+                let ry = targetPoint[1] + (Math.random() - 0.5) * 10;
+                let dist = (Math.random() * 0.05).toFixed(4); 
                 let cid = `AAACCTG${Math.floor(Math.random()*10000)}...`;
                 
-                resultData.push({ value: [rx, ry], name: cid, type: cType, dist: dist });
+                resultData.push({ value: [rx, ry], name: cid, type: 'Hepatocyte', dist: dist });
 
-                // B. 生成表格行 HTML
                 tableHTML += `
                     <tr>
                         <td class="ps-4 fw-bold" style="color: #4A90E2;">#${i+1}</td>
-                        <td>${cid}</td>
-                        <td><span class="badge" style="background-color: #222B45; border: 1px solid rgba(255,255,255,0.1);">${cType}</span></td>
-                        <td style="color: #2ecc71;">${dist}</td>
-                        <td><i class="fa-solid fa-crosshairs text-muted" style="cursor:pointer;" title="在图中定位"></i></td>
+                        <td class="text-white">${cid}</td>
+                        <td><span class="badge" style="background-color: #E83E8C; padding: 6px 10px;">Hepatocyte</span></td>
+                        <td style="color: #2ecc71; font-family: monospace; font-size: 1.1rem;">${dist}</td>
+                        <td><button class="btn btn-sm" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);"><i class="fa-solid fa-crosshairs"></i></button></td>
                     </tr>
                 `;
             }
 
-            // C. 更新 ECharts 图表 (叠加高亮目标点和结果点)
             myChart.setOption({
                 series: [
-                    baseOption.series[0], // 保留背景点
+                    baseOption.series[0], 
                     {
                         name: 'Top-K 结果',
                         type: 'scatter',
                         symbolSize: 8,
-                        itemStyle: { 
-                            color: '#F5A623', // 明亮的橙黄色
-                            shadowBlur: 10,
-                            shadowColor: '#F5A623'
-                        },
+                        itemStyle: { color: '#FFE600', shadowBlur: 10, shadowColor: '#FFE600', opacity: 1 },
                         data: resultData
                     },
                     {
                         name: '查询目标',
                         type: 'scatter',
-                        symbolSize: 15,
-                        itemStyle: { 
-                            color: '#ff4757', // 醒目的荧光红
-                            borderColor: '#fff',
-                            borderWidth: 2,
-                            shadowBlur: 15,
-                            shadowColor: '#ff4757'
-                        },
+                        symbolSize: 18,
+                        itemStyle: { color: '#ff4757', borderColor: '#fff', borderWidth: 2, shadowBlur: 15, shadowColor: '#ff4757' },
                         data: [{ value: targetPoint, name: cellId, type: 'Query Target', dist: '0.0000' }]
                     }
                 ]
             });
 
-            // D. 恢复 UI 状态，渲染表格
             tbody.innerHTML = tableHTML;
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
-            statusBadge.className = 'badge bg-success';
-            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>耗时 18ms | HNSW 索引`;
-
-        }, 1200); // 模拟 1.2 秒的延迟
+            statusBadge.className = 'badge bg-success me-3';
+            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>耗时 16ms | HNSW`;
+        }, 1200); 
     });
 
-    // 窗口调整适配
     window.addEventListener('resize', () => myChart.resize());
 </script>
 {% endblock %}

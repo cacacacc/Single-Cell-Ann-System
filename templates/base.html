@@ -21,12 +21,23 @@
         </div>
         
         <div class="nav flex-column">
+            <!-- 1. 首页 -->
             <a class="nav-link" href="/"><i class="fa-solid fa-desktop"></i> 主要信息</a>
+            
+            <!-- 2. 数据管理页 -->
             <a class="nav-link" href="/data"><i class="fa-solid fa-database"></i> 数据管理</a>
+            
+            <!-- 3. 相似检索页 -->
             <a class="nav-link" href="/search"><i class="fa-solid fa-magnifying-glass-chart"></i> 相似检索</a>
-            <a class="nav-link" href="#"><i class="fa-solid fa-stopwatch"></i> 性能评测</a>
-            <a class="nav-link" href="#"><i class="fa-solid fa-user"></i> 个人信息</a>
-            <a class="nav-link" href="#"><i class="fa-solid fa-users-gear"></i> 管理员管理界面</a>
+            
+            <!-- 4. 性能评测页 (暂时用 # 占位，或者等以后写了 benchmark.html 再指过去) -->
+            <a class="nav-link" href="/benchmark"><i class="fa-solid fa-stopwatch"></i> 性能评测</a>
+            
+            <!-- 5. 个人信息页 (指向 /profile，我们上一轮刚写好的页面) -->
+            <a class="nav-link" href="/profile"><i class="fa-solid fa-user"></i> 个人信息</a>
+            
+            <!-- 6. 用户管理页 (对应你的 /users 路由) -->
+            <a class="nav-link" href="/users"><i class="fa-solid fa-users-gear"></i> 管理员管理界面</a>
         </div>
     </nav>
 

@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* 复用暗黑原生表格样式 */
+    .table-dark-custom {
+        --bs-table-bg: transparent;
+        color: #FFFFFF;
+        vertical-align: middle;
+        margin-bottom: 0;
+    }
+    .table-dark-custom thead th {
+        background-color: rgba(0, 0, 0, 0.2);
+        color: #8A96A8;
+        border-bottom: 2px solid #4A90E2;
+        font-weight: 600;
+        padding: 15px;
+    }
+    .table-dark-custom tbody td {
+        padding: 15px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .table-dark-custom tbody tr:hover td {
+        background-color: rgba(111, 38, 86, 0.15); 
+    }
+
+    /* 顶部命令栏按钮 */
+    .cmd-btn {
+        background-color: #222B45;
+        color: var(--text-main);
+        border: 1px solid rgba(255,255,255,0.1);
+        padding: 8px 16px;
+        border-radius: 6px;
+        margin-right: 10px;
+        transition: all 0.2s;
+    }
+    .cmd-btn:hover { background-color: #2e3a59; color: white; }
+    
+    .btn-glow-purple {
+        background-color: #923a73;
+        border: none;
+        color: white;
+        font-weight: 500;
+        padding: 8px 16px;
+        border-radius: 6px;
+        transition: all 0.3s;
+    }
+    .btn-glow-purple:hover {
+        background-color: #a84685;
+        box-shadow: 0 0 15px rgba(168, 70, 133, 0.5);
+        color: white;
+    }
+
+    /* 操作图标 */
+    .action-icon {
+        color: #8A96A8;
+        cursor: pointer;
+        margin: 0 10px;
+        font-size: 1.1rem;
+        transition: color 0.2s;
+    }
+    .action-icon:hover { color: white; }
+    .action-icon.danger:hover { color: #ff4757; }
+    .action-icon.warning:hover { color: #F5A623; }
+
+    /* 弹窗输入框暗黑化 */
+    .dark-input {
+        background-color: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: white;
+        padding: 10px 15px;
+    }
+    .dark-input:focus {
+        background-color: rgba(0, 0, 0, 0.4);
+        border-color: #4A90E2;
+        box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.2);
+        color: white;
+    }
+    .dark-input::placeholder { color: #5A6A85; }
+</style>
+
+<!-- 顶部操作栏 (Command Bar) -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="fw-bold m-0" style="letter-spacing: 1px;">
+        <i class="fa-solid fa-users-gear me-2" style="color: #4A90E2;"></i>系统用户管理
+    </h3>
+    <div>
+        <!-- 搜索框 -->
+        <div class="d-inline-block me-3 position-relative">
+            <i class="fa-solid fa-magnifying-glass position-absolute" style="top: 10px; left: 12px; color: #8A96A8;"></i>
+            <input type="text" class="form-control dark-input" style="padding-left: 35px; width: 250px; border-radius: 20px;" placeholder="搜索账号或姓名...">
+        </div>
+        
+        <button class="btn btn-glow-purple me-2" data-bs-toggle="modal" data-bs-target="#addUserModal">
+            <i class="fa-solid fa-user-plus me-2"></i>添加用户
+        </button>
+        <button class="cmd-btn">
+            <i class="fa-solid fa-ban me-2"></i>批量禁用
+        </button>
+    </div>
+</div>
+
+<!-- 主内容区：用户表格卡片 -->
+<div class="dark-card" style="padding: 0; overflow: hidden;">
+    <table class="table table-dark-custom mb-0 w-100">
+        <thead>
+            <tr>
+                <th style="width: 50px; text-align: center;"><input type="checkbox" class="form-check-input" style="background-color: transparent; border-color: #8A96A8;"></th>
+                <th>系统账号</th>
+                <th>真实姓名</th>
+                <th>系统角色</th>
+                <th>注册时间</th>
+                <th>账号状态</th>
+                <th class="text-center">安全操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- 示例用户 1：管理员 -->
+            <tr>
+                <td class="text-center"><input type="checkbox" class="form-check-input" style="background-color: transparent; border-color: #8A96A8;"></td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <img src="https://ui-avatars.com/api/?name=Admin&background=6F2656&color=fff" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px;">
+                        <span class="fw-bold text-white">admin_lhz</span>
+                    </div>
+                </td>
+                <td>陆皓喆</td>
+                <td><span class="badge" style="background-color: var(--nankai-purple); padding: 6px 10px;">系统管理员</span></td>
+                <td style="color: #8A96A8;">2023-09-01 10:00</td>
+                <td><span class="badge bg-success" style="padding: 6px 10px;"><i class="fa-solid fa-circle-check me-1"></i>正常启用</span></td>
+                <td class="text-center text-muted">
+                    不可操作超级管理员
+                </td>
+            </tr>
+            
+            <!-- 示例用户 2：普通用户 -->
+            <tr>
+                <td class="text-center"><input type="checkbox" class="form-check-input" style="background-color: transparent; border-color: #8A96A8;"></td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <img src="https://ui-avatars.com/api/?name=User&background=4A90E2&color=fff" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px;">
+                        <span class="fw-bold text-white">researcher_01</span>
+                    </div>
+                </td>
+                <td>张科研</td>
+                <td><span class="badge bg-secondary" style="padding: 6px 10px;">普通用户</span></td>
+                <td style="color: #8A96A8;">2024-03-15 14:22</td>
+                <td><span class="badge bg-success" style="padding: 6px 10px;"><i class="fa-solid fa-circle-check me-1"></i>正常启用</span></td>
+                <td class="text-center">
+                    <i class="fa-solid fa-key action-icon warning" title="重置密码" onclick="resetPassword('researcher_01')"></i>
+                    <i class="fa-solid fa-ban action-icon danger" title="禁用账号"></i>
+                </td>
+            </tr>
+
+            <!-- 示例用户 3：已禁用用户 -->
+            <tr>
+                <td class="text-center"><input type="checkbox" class="form-check-input" style="background-color: transparent; border-color: #8A96A8;"></td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <img src="https://ui-avatars.com/api/?name=Guest&background=2A365C&color=8A96A8" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px; opacity: 0.5;">
+                        <span class="fw-bold" style="color: #8A96A8;">guest_temp</span>
+                    </div>
+                </td>
+                <td style="color: #8A96A8;">李临时</td>
+                <td><span class="badge bg-secondary" style="padding: 6px 10px;">普通用户</span></td>
+                <td style="color: #8A96A8;">2024-05-10 09:11</td>
+                <td><span class="badge bg-danger" style="padding: 6px 10px;"><i class="fa-solid fa-circle-xmark me-1"></i>已禁用</span></td>
+                <td class="text-center">
+                    <i class="fa-solid fa-unlock action-icon" style="color: #2ecc71;" title="恢复启用"></i>
+                    <i class="fa-solid fa-trash action-icon danger" title="彻底删除"></i>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <!-- 底部简易分页器 -->
+    <div class="d-flex justify-content-between align-items-center p-3 border-top" style="border-color: rgba(255,255,255,0.05) !important;">
+        <span style="color: #8A96A8; font-size: 0.9rem;">共 3 条记录</span>
+        <ul class="pagination pagination-sm mb-0">
+            <li class="page-item disabled"><a class="page-link" href="#" style="background-color: #141A30; border-color: rgba(255,255,255,0.1); color: #8A96A8;">上一页</a></li>
+            <li class="page-item active"><a class="page-link" href="#" style="background-color: var(--nankai-purple); border-color: var(--nankai-purple);">1</a></li>
+            <li class="page-item disabled"><a class="page-link" href="#" style="background-color: #141A30; border-color: rgba(255,255,255,0.1); color: #8A96A8;">下一页</a></li>
+        </ul>
+    </div>
+</div>
+
+<!-- ================= 居中模态弹窗：添加新用户 ================= -->
+<div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="background-color: var(--bg-card); color: white; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 15px 35px rgba(0,0,0,0.5);">
+            <div class="modal-header border-bottom border-secondary">
+                <h5 class="modal-title fw-bold"><i class="fa-solid fa-user-plus me-2" style="color: #4A90E2;"></i>添加新系统用户</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-3">
+                    <label class="form-label" style="color: #8A96A8;">系统账号 (必须唯一)</label>
+                    <input type="text" class="form-control dark-input" placeholder="输入英文/数字账号">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" style="color: #8A96A8;">真实姓名</label>
+                    <input type="text" class="form-control dark-input" placeholder="输入真实姓名">
+                </div>
+                <div class="mb-4">
+                    <label class="form-label" style="color: #8A96A8;">分配角色</label>
+                    <select class="form-select dark-input">
+                        <option value="user" selected>普通用户 (仅查询权限)</option>
+                        <option value="admin">系统管理员 (完全控制权限)</option>
+                    </select>
+                </div>
+                <div class="alert" style="background-color: rgba(74, 144, 226, 0.1); border: 1px solid rgba(74, 144, 226, 0.3); color: #4A90E2; font-size: 0.85rem;">
+                    <i class="fa-solid fa-circle-info me-2"></i>默认初始密码为: <strong>Nankai@123</strong>，首次登录需强制修改。
+                </div>
+            </div>
+            <div class="modal-footer border-top border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" style="background-color: #222B45; border: none;">取消</button>
+                <button type="button" class="btn btn-glow-purple" data-bs-dismiss="modal">确认添加</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<!-- 确保引入了 Bootstrap 的 JS 以支持 Modal 弹窗 -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    // 模拟重置密码的交互逻辑
+    function resetPassword(username) {
+        if(confirm(`确定要将用户 [${username}] 的密码重置为系统默认密码吗？`)) {
+            alert("密码重置成功！");
+            // 实际开发中，这里需要发送 ajax 请求给后端修改数据库
+        }
+    }
+</script>
+{% endblock %}

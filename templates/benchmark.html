@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* ================= 坚如磐石的 Flex 布局 (复用) ================= */
+    .search-layout { display: flex; gap: 24px; align-items: flex-start; }
+    .search-sidebar { width: 320px; flex-shrink: 0; position: sticky; top: 24px; z-index: 10; }
+    .search-main { flex: 1; min-width: 0; }
+
+    /* ================= 表单与组件样式 ================= */
+    .form-label { color: #8A96A8; font-size: 0.9rem; margin-bottom: 8px; }
+    .dark-control {
+        background-color: rgba(0, 0, 0, 0.25);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: white;
+        border-radius: 6px;
+        padding: 10px 15px;
+    }
+    .dark-control:focus {
+        background-color: rgba(0, 0, 0, 0.4);
+        border-color: #4A90E2;
+        box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.2);
+        color: white;
+        outline: none;
+    }
+    .dark-control option { background-color: #141A30; color: white; }
+    .form-range::-webkit-slider-thumb { background: #923a73; }
+    
+    .btn-glow-purple {
+        background-color: #923a73;
+        border: none;
+        color: white;
+        font-weight: 600;
+        padding: 12px;
+        border-radius: 6px;
+        transition: all 0.3s;
+    }
+    .btn-glow-purple:hover {
+        background-color: #a84685;
+        box-shadow: 0 0 15px rgba(168, 70, 133, 0.5);
+        color: white;
+    }
+
+    /* 图表容器 */
+    .chart-box {
+        background-color: #050814; 
+        border-radius: 8px;
+        border: 1px solid rgba(255,255,255,0.05);
+        padding: 15px;
+    }
+    
+    /* 顶部小数据卡片 */
+    .stat-badge {
+        background-color: rgba(74, 144, 226, 0.1);
+        border: 1px solid rgba(74, 144, 226, 0.3);
+        color: #4A90E2;
+        padding: 8px 15px;
+        border-radius: 6px;
+        font-weight: 600;
+        font-family: monospace;
+        font-size: 1.1rem;
+    }
+</style>
+
+<div class="search-layout">
+    
+    <!-- ================= 左侧：参数控制台 ================= -->
+    <div class="search-sidebar">
+        <div class="dark-card m-0">
+            <h5 class="fw-bold mb-4" style="letter-spacing: 1px;">
+                <i class="fa-solid fa-stopwatch me-2" style="color: #4A90E2;"></i>跑分实验设置
+            </h5>
+            
+            <form id="benchmarkForm">
+                <div class="mb-4">
+                    <label class="form-label">评测数据集</label>
+                    <select class="form-select dark-control">
+                        <option>Adult_Liver_Atlas (10万级)</option>
+                        <option>Pediatric_Liver_CZI (5万级)</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label">算法比对组</label>
+                    <div class="p-3" style="background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" checked disabled>
+                            <label class="form-check-label text-white">精确检索 (暴力计算 KNN)</label>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" checked disabled>
+                            <label class="form-check-label text-white">近似检索 (FAISS-HNSW)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" checked disabled>
+                            <label class="form-check-label text-white">近似检索 (FAISS-IVF)</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label">随机抽样查询次数</label>
+                    <input type="number" class="form-control dark-control" id="queryCount" value="500" min="10" max="5000">
+                    <small class="text-muted mt-1 d-block">系统将随机抽取这些数量的细胞进行并发查询跑分。</small>
+                </div>
+
+                <div class="mb-5">
+                    <label class="form-label d-flex justify-content-between">
+                        <span>Top-K 召回数量</span>
+                        <strong id="k-value" style="color: #4A90E2;">20</strong>
+                    </label>
+                    <input type="range" class="form-range" min="10" max="100" step="10" value="20" id="topKSlider">
+                </div>
+
+                <button type="button" class="btn btn-glow-purple w-100" id="startBenchmarkBtn">
+                    <i class="fa-solid fa-rocket me-2"></i>开始性能跑分
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ================= 右侧：评测报告面板 ================= -->
+    <div class="search-main">
+        
+        <!-- 头部跑分摘要 -->
+        <div class="dark-card mb-4 d-flex justify-content-between align-items-center" style="padding: 15px 25px;">
+            <div class="fw-bold fs-5 text-white">
+                <i class="fa-solid fa-chart-line me-2" style="color: #4A90E2;"></i>实验结果评估报告
+            </div>
+            <div class="d-flex gap-3">
+                <div class="stat-badge" id="stat-time">Avg Time: -- ms</div>
+                <div class="stat-badge" id="stat-recall" style="color: #2ecc71; border-color: rgba(46,204,113,0.3); background-color: rgba(46,204,113,0.1);">Recall: -- %</div>
+            </div>
+        </div>
+
+        <!-- 1. 速度对比柱状图 -->
+        <div class="dark-card mb-4" style="padding: 20px;">
+            <h6 class="text-white mb-3 fw-bold">查询响应时间对比 (Latency)</h6>
+            <div id="timeChart" class="chart-box" style="width: 100%; height: 300px;"></div>
+        </div>
+
+        <!-- 2. 精度对比折线图 -->
+        <div class="dark-card" style="padding: 20px; margin-bottom: 0;">
+            <h6 class="text-white mb-3 fw-bold">算法召回率/准确率曲线 (Recall @ K)</h6>
+            <div id="recallChart" class="chart-box" style="width: 100%; height: 300px;"></div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // 滑动条联动
+    const slider = document.getElementById('topKSlider');
+    const kValue = document.getElementById('k-value');
+    slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
+
+    // ================= 初始化 ECharts 实例 =================
+    const timeChart = echarts.init(document.getElementById('timeChart'));
+    const recallChart = echarts.init(document.getElementById('recallChart'));
+
+    // 公共暗黑风格配置
+    const commonTheme = {
+        backgroundColor: 'transparent',
+        tooltip: { backgroundColor: 'rgba(20, 26, 48, 0.9)', borderColor: '#4A90E2', textStyle: { color: '#fff' } },
+        xAxis: { axisLine: { lineStyle: { color: '#8A96A8' } }, axisLabel: { color: '#8A96A8' } },
+        yAxis: { splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }, axisLabel: { color: '#8A96A8' } },
+        legend: { textStyle: { color: '#fff' } }
+    };
+
+    // 1. 初始化空的速度对比图
+    const timeOption = {
+        ...commonTheme,
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        grid: { left: '3%', right: '4%', bottom: '3%', top: '15%', containLabel: true },
+        xAxis: { type: 'category', data: ['精确搜索 (Exact KNN)', '近似搜索 (FAISS-HNSW)', '近似搜索 (FAISS-IVF)'], ...commonTheme.xAxis },
+        yAxis: { type: 'value', name: '平均耗时 (ms)', nameTextStyle: { color: '#8A96A8' }, ...commonTheme.yAxis },
+        series: [{
+            type: 'bar',
+            barWidth: '40%',
+            itemStyle: { borderRadius: [4, 4, 0, 0] },
+            data: [0, 0, 0] // 初始数据为0
+        }]
+    };
+    timeChart.setOption(timeOption);
+
+    // 2. 初始化空的精度曲线图
+    const recallOption = {
+        ...commonTheme,
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['精确搜索', 'FAISS-HNSW', 'FAISS-IVF'], ...commonTheme.legend },
+        grid: { left: '3%', right: '4%', bottom: '3%', top: '20%', containLabel: true },
+        xAxis: { type: 'category', data: ['Top-10', 'Top-20', 'Top-50', 'Top-100'], name: 'K值', ...commonTheme.xAxis },
+        yAxis: { type: 'value', name: '召回率 (%)', min: 80, max: 100, ...commonTheme.yAxis },
+        series: [
+            { name: '精确搜索', type: 'line', data: [100, 100, 100, 100], lineStyle: { type: 'dashed', color: '#8A96A8' }, itemStyle: { color: '#8A96A8' } },
+            { name: 'FAISS-HNSW', type: 'line', data: [null, null, null, null], itemStyle: { color: '#4A90E2' }, smooth: true },
+            { name: 'FAISS-IVF', type: 'line', data: [null, null, null, null], itemStyle: { color: '#E83E8C' }, smooth: true }
+        ]
+    };
+    recallChart.setOption(recallOption);
+
+    // ================= 点击【开始跑分】的交互逻辑 =================
+    document.getElementById('startBenchmarkBtn').addEventListener('click', function() {
+        const btn = this;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>正在压测计算...';
+        btn.disabled = true;
+
+        // 图表进入 Loading 状态
+        timeChart.showLoading({ text: '引擎运算中...', color: '#4A90E2', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
+        recallChart.showLoading({ text: '召回率评估中...', color: '#E83E8C', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
+
+        // 模拟后端处理时间 (2秒)
+        setTimeout(() => {
+            timeChart.hideLoading();
+            recallChart.hideLoading();
+
+            // 1. 填入模拟的速度对比数据 (极大的反差以体现ANN的价值)
+            timeChart.setOption({
+                series: [{
+                    data: [
+                        { value: 1250.4, itemStyle: { color: '#ff4757' } }, // 精确搜索很慢，标红
+                        { value: 12.5, itemStyle: { color: '#4A90E2' } },  // HNSW 极快
+                        { value: 25.8, itemStyle: { color: '#E83E8C' } }   // IVF 也很快
+                    ]
+                }]
+            });
+
+            // 2. 填入模拟的精度数据 (HNSW精度极高，IVF稍弱)
+            recallChart.setOption({
+                series: [
+                    { name: '精确搜索', data: [100, 100, 100, 100] },
+                    { name: 'FAISS-HNSW', data: [96.5, 98.2, 99.1, 99.8] },
+                    { name: 'FAISS-IVF', data: [91.2, 94.5, 96.8, 98.5] }
+                ]
+            });
+
+            // 3. 更新顶部数据徽章
+            document.getElementById('stat-time').innerText = "HNSW: 12.5 ms";
+            document.getElementById('stat-recall').innerText = "HNSW Recall: 98.2 %";
+
+            // 恢复按钮状态
+            btn.innerHTML = '<i class="fa-solid fa-rocket me-2"></i>重新开始跑分';
+            btn.disabled = false;
+        }, 2000);
+    });
+
+    // 窗口调整适配
+    window.addEventListener('resize', () => {
+        timeChart.resize();
+        recallChart.resize();
+    });
+</script>
+{% endblock %}

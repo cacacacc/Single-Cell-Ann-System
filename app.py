@@ -23,5 +23,23 @@ def data_manage():
 def similarity_search():
     return render_template('search.html')
 
+# ================================
+# 用户管理页路由 (仅管理员可见)
+# ================================
+@app.route('/users')
+def user_management():
+    return render_template('users.html')
+
+@app.route('/profile')
+def profile():
+    return render_template('profile.html')
+
+# ================================
+# 性能评测页路由
+# ================================
+@app.route('/benchmark')
+def benchmark():
+    return render_template('benchmark.html')
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
