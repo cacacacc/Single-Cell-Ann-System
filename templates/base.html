@@ -59,19 +59,131 @@
                     <i class="fa-solid fa-magnifying-glass"></i>
                     <input type="text" placeholder="输入搜索...">
                 </div>
-                <div class="topbar-actions">
-                    <!-- 重点看这一行：把 href="#" 改成了 href="/login" -->
-                    <a href="/login"><i class="fa-solid fa-arrow-right-from-bracket"></i> 注销</a>
+                <div class="topbar-actions d-flex align-items-center">
                     
-                    <a href="#"><i class="fa-solid fa-gear"></i></a>
-                    <a href="#"><i class="fa-solid fa-bell"></i></a>
+                    <!-- 1. 小齿轮：全局 ANN 引擎设置 (点击唤出弹窗) -->
+                    <a href="#" data-bs-toggle="modal" data-bs-target="#engineSettingsModal" title="引擎高级配置">
+                        <i class="fa-solid fa-gear"></i>
+                    </a>
+
+                    <!-- 2. 小铃铛：消息通知中心 (点击唤出下拉列表) -->
+                    <div class="dropdown">
+                        <a href="#" class="position-relative" id="notificationDropdown" data-bs-toggle="dropdown" aria-expanded="false" title="系统通知">
+                            <i class="fa-solid fa-bell"></i>
+                            <!-- 呼吸闪烁的未读红点 -->
+                            <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle notification-dot">
+                                <span class="visually-hidden">New alerts</span>
+                            </span>
+                        </a>
+                        
+                        <!-- 暗黑风格的消息下拉菜单 -->
+                        <ul class="dropdown-menu dropdown-menu-end dark-dropdown shadow-lg" aria-labelledby="notificationDropdown" style="width: 320px; border-radius: 8px;">
+                            <li class="px-3 py-2 border-bottom border-secondary d-flex justify-content-between align-items-center">
+                                <span class="fw-bold text-white">系统通知中心</span>
+                                <span class="badge bg-danger rounded-pill" id="noti-count">3 未读</span>
+                            </li>
+                            <div class="noti-list" style="max-height: 300px; overflow-y: auto;">
+                                <li>
+                                    <a class="dropdown-item noti-item unread" href="#">
+                                        <div class="d-flex align-items-start">
+                                            <i class="fa-solid fa-circle-check text-success mt-1 me-2"></i>
+                                            <div>
+                                                <div class="text-white text-wrap" style="font-size: 0.9rem;">Adult_Liver_Atlas 的 FAISS-HNSW 索引已构建完毕。</div>
+                                                <small class="text-muted">2 分钟前</small>
+                                            </div>
+                                        </div>
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="dropdown-item noti-item unread" href="#">
+                                        <div class="d-flex align-items-start">
+                                            <i class="fa-solid fa-triangle-exclamation text-warning mt-1 me-2"></i>
+                                            <div>
+                                                <div class="text-white text-wrap" style="font-size: 0.9rem;">警告：高维数据解析导致内存占用短暂峰值超过 85%。</div>
+                                                <small class="text-muted">1 小时前</small>
+                                            </div>
+                                        </div>
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="dropdown-item noti-item unread" href="#">
+                                        <div class="d-flex align-items-start">
+                                            <i class="fa-solid fa-user-plus" style="color: #4A90E2; margin-top: 4px; margin-right: 8px;"></i>
+                                            <div>
+                                                <div class="text-white text-wrap" style="font-size: 0.9rem;">新用户 researcher_02 已注册，请等待管理员分配权限。</div>
+                                                <small class="text-muted">昨天 16:30</small>
+                                            </div>
+                                        </div>
+                                    </a>
+                                </li>
+                            </div>
+                            <li class="px-3 py-2 border-top border-secondary text-center">
+                                <a href="#" class="text-decoration-none" style="font-size: 0.85rem; color: #4A90E2;" onclick="markAllRead(event)">标为全读</a>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- 注销按钮 -->
+                    <a href="/login" class="ms-3 text-danger" title="安全退出">
+                        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                    </a>
                 </div>
             </div>
         </header>
 
         {% block content %}{% endblock %}
     </main>
+    </main> <!-- 这个是原来就有的 -->
 
+    <!-- ================= 居中模态弹窗：全局 ANN 引擎设置 ================= -->
+    <div class="modal fade" id="engineSettingsModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background-color: #141A30; color: white; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 15px 35px rgba(0,0,0,0.5);">
+                <div class="modal-header border-bottom border-secondary">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-server me-2" style="color: #4A90E2;"></i>ANN 检索引擎高级配置</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    
+                    <!-- 设置项 1：硬件加速 -->
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <div>
+                            <div class="fw-bold mb-1">启用 GPU 硬件加速 (CUDA)</div>
+                            <small style="color: #8A96A8;">大幅提升高维张量点积计算速度，需 NVIDIA 显卡支持。</small>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" checked style="width: 40px; height: 20px; cursor: pointer; border-color: #4A90E2;">
+                        </div>
+                    </div>
+
+                    <!-- 设置项 2：距离度量标准 -->
+                    <div class="mb-4">
+                        <div class="fw-bold mb-2">默认距离度量算法 (Distance Metric)</div>
+                        <select class="form-select" style="background-color: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white;">
+                            <option value="L2">L2 欧氏距离 (Euclidean Distance)</option>
+                            <option value="IP" selected>内积 / 余弦相似度 (Inner Product / Cosine)</option>
+                            <option value="L1">L1 曼哈顿距离 (Manhattan Distance)</option>
+                        </select>
+                    </div>
+
+                    <!-- 设置项 3：最大并发线程数 -->
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="fw-bold">引擎最大并发线程池 (OMP_NUM_THREADS)</span>
+                            <span class="badge bg-secondary" id="thread-val">16 Threads</span>
+                        </div>
+                        <input type="range" class="form-range" min="1" max="32" step="1" value="16" oninput="document.getElementById('thread-val').innerText = this.value + ' Threads'">
+                        <small style="color: #8A96A8;">调整 FAISS 底层检索时调用的物理核心数。</small>
+                    </div>
+
+                </div>
+                <div class="modal-footer border-top border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" style="background-color: transparent; border: none;">取消</button>
+                    <button type="button" class="btn" data-bs-dismiss="modal" style="background-color: var(--nankai-purple); color: white;" onclick="alert('系统提示：引擎底层参数已热更新生效！')">应用并重启引擎</button>
+                </div>
+            </div>
+        </div>
+    </div>
     <!-- 时钟脚本 -->
     <script>
         setInterval(() => {

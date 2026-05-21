@@ -32,7 +32,21 @@
         box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.2);
         color: white;
     }
-    
+    /* ... 之前的 dark-input:focus 代码 ... */
+
+    /* 强制提亮所有状态下的占位符文字颜色 */
+    .dark-input::placeholder {
+        color: #8A96A8 !important; /* 明亮的灰蓝色 */
+        opacity: 1 !important;     /* 强制不透明，防止有些浏览器自动变淡 */
+        font-weight: 400;
+    }
+
+    /* 针对被禁用(disabled)的输入框，也稍微提亮一点，防止像截图里那样灰成一块 */
+    .dark-input:disabled {
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        color: #A0AABF !important;
+        opacity: 1 !important;
+    }
     .btn-glow-purple {
         background-color: #923a73;
         border: none;
