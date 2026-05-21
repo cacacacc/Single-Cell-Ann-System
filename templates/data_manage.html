@@ -35,7 +35,20 @@
         transition: all 0.2s;
     }
     .cmd-btn:hover { background-color: #2e3a59; color: white; }
-    .cmd-btn-primary { background-color: var(--nankai-purple); border-color: var(--nankai-purple); }
+    /* 提亮变浅的紫色，并增加质感 */
+    .cmd-btn-primary { 
+        background-color: #923a73; /* 更浅、更明亮的紫红色 */
+        border-color: #923a73; 
+        color: white;
+        font-weight: 500;
+    }
+    .cmd-btn-primary:hover { 
+        background-color: #a84685; /* 鼠标放上去时进一步变浅 */
+        border-color: #a84685;
+        color: white;
+        /* 增加一层漂亮的科技感发光特效 */
+        box-shadow: 0 0 15px rgba(168, 70, 133, 0.5); 
+    }
     .cmd-btn-primary:hover { background-color: #8a316d; }
 
     /* 操作列小图标按钮 */

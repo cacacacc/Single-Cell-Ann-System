@@ -16,5 +16,12 @@ def login():
 def data_manage():
     return render_template('data_manage.html')
 
+# ================================
+# 相似检索页路由
+# ================================
+@app.route('/search')
+def similarity_search():
+    return render_template('search.html')
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

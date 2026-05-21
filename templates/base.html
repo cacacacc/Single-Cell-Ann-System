@@ -21,9 +21,9 @@
         </div>
         
         <div class="nav flex-column">
-            <a class="nav-link active" href="/"><i class="fa-solid fa-desktop"></i> 主要信息</a>
+            <a class="nav-link" href="/"><i class="fa-solid fa-desktop"></i> 主要信息</a>
             <a class="nav-link" href="/data"><i class="fa-solid fa-database"></i> 数据管理</a>
-            <a class="nav-link" href="#"><i class="fa-solid fa-magnifying-glass-chart"></i> 相似检索</a>
+            <a class="nav-link" href="/search"><i class="fa-solid fa-magnifying-glass-chart"></i> 相似检索</a>
             <a class="nav-link" href="#"><i class="fa-solid fa-stopwatch"></i> 性能评测</a>
             <a class="nav-link" href="#"><i class="fa-solid fa-user"></i> 个人信息</a>
             <a class="nav-link" href="#"><i class="fa-solid fa-users-gear"></i> 管理员管理界面</a>
@@ -73,6 +73,24 @@
                             String(now.getSeconds()).padStart(2, '0');
             document.getElementById('clock').innerText = dateStr + ' ' + timeStr;
         }, 1000);
+    </script>
+
+    <!-- 自动高亮当前菜单栏的魔法脚本 -->
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // 1. 获取浏览器当前的网址路径 (比如 "/" 或者 "/data")
+            const currentPath = window.location.pathname;
+            
+            // 2. 找到侧边栏所有的超链接
+            const navLinks = document.querySelectorAll('.sidebar .nav-link');
+            
+            // 3. 循环比对，如果超链接的网址和当前页面网址一样，就给它加上 active 样式
+            navLinks.forEach(link => {
+                if (link.getAttribute('href') === currentPath) {
+                    link.classList.add('active');
+                }
+            });
+        });
     </script>
 
     {% block scripts %}{% endblock %}
