@@ -117,57 +117,70 @@
         <tbody>
             <!-- 示例用户 1：管理员 -->
             <tr>
-                <td class="text-center"><input type="checkbox" class="form-check-input" style="background-color: transparent; border-color: #8A96A8;"></td>
+                <td class="text-center">
+                    <input type="checkbox" class="custom-checkbox row-checkbox">
+                </td>
                 <td>
                     <div class="d-flex align-items-center">
                         <img src="https://ui-avatars.com/api/?name=Admin&background=6F2656&color=fff" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px;">
                         <span class="fw-bold text-white">admin_lhz</span>
                     </div>
                 </td>
-                <td>maruko</td>
+                <td style="color: #d1d5db;">陆皓喆</td>
                 <td><span class="badge" style="background-color: var(--nankai-purple); padding: 6px 10px;">系统管理员</span></td>
                 <td style="color: #8A96A8;">2023-09-01 10:00</td>
                 <td><span class="badge bg-success" style="padding: 6px 10px;"><i class="fa-solid fa-circle-check me-1"></i>正常启用</span></td>
-                <td class="text-center text-muted">
-                    不可操作超级管理员
+                <!-- 统一的操作列 -->
+                <td class="text-center">
+                    <i class="fa-solid fa-circle-info action-icon" title="查看详情" onclick="showUserDetail('admin_lhz', '系统管理员')"></i>
+                    <i class="fa-solid fa-pen-to-square action-icon warning" title="编辑权限" onclick="editUserRole('admin_lhz')"></i>
+                    <i class="fa-solid fa-trash action-icon danger" title="删除用户" onclick="deleteUser(this, 'admin_lhz', true)"></i>
                 </td>
             </tr>
             
             <!-- 示例用户 2：普通用户 -->
             <tr>
-                <td class="text-center"><input type="checkbox" class="form-check-input" style="background-color: transparent; border-color: #8A96A8;"></td>
+                <td class="text-center">
+                    <input type="checkbox" class="custom-checkbox row-checkbox">
+                </td>
                 <td>
                     <div class="d-flex align-items-center">
                         <img src="https://ui-avatars.com/api/?name=User&background=4A90E2&color=fff" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px;">
                         <span class="fw-bold text-white">researcher_01</span>
                     </div>
                 </td>
-                <td>张科研</td>
+                <td style="color: #d1d5db;">张科研</td>
                 <td><span class="badge bg-secondary" style="padding: 6px 10px;">普通用户</span></td>
                 <td style="color: #8A96A8;">2024-03-15 14:22</td>
                 <td><span class="badge bg-success" style="padding: 6px 10px;"><i class="fa-solid fa-circle-check me-1"></i>正常启用</span></td>
+                <!-- 统一的操作列 -->
                 <td class="text-center">
-                    <i class="fa-solid fa-key action-icon warning" title="重置密码" onclick="resetPassword('researcher_01')"></i>
-                    <i class="fa-solid fa-ban action-icon danger" title="禁用账号"></i>
+                    <i class="fa-solid fa-circle-info action-icon" title="查看详情" onclick="showUserDetail('researcher_01', '普通用户')"></i>
+                    <i class="fa-solid fa-pen-to-square action-icon warning" title="编辑权限" onclick="editUserRole('researcher_01')"></i>
+                    <i class="fa-solid fa-trash action-icon danger" title="删除用户" onclick="deleteUser(this, 'researcher_01', false)"></i>
                 </td>
             </tr>
 
-            <!-- 示例用户 3：已禁用用户 -->
+            <!-- 示例用户 3：普通用户 -->
             <tr>
-                <td class="text-center"><input type="checkbox" class="form-check-input" style="background-color: transparent; border-color: #8A96A8;"></td>
+                <td class="text-center">
+                    <input type="checkbox" class="custom-checkbox row-checkbox">
+                </td>
                 <td>
                     <div class="d-flex align-items-center">
-                        <img src="https://ui-avatars.com/api/?name=Guest&background=2A365C&color=8A96A8" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px; opacity: 0.5;">
-                        <span class="fw-bold" style="color: #8A96A8;">guest_temp</span>
+                        <img src="https://ui-avatars.com/api/?name=Guest&background=2A365C&color=8A96A8" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px;">
+                        <span class="fw-bold text-white">guest_temp</span>
                     </div>
                 </td>
-                <td style="color: #8A96A8;">李临时</td>
+                <td style="color: #d1d5db;">李临时</td>
                 <td><span class="badge bg-secondary" style="padding: 6px 10px;">普通用户</span></td>
                 <td style="color: #8A96A8;">2024-05-10 09:11</td>
-                <td><span class="badge bg-danger" style="padding: 6px 10px;"><i class="fa-solid fa-circle-xmark me-1"></i>已禁用</span></td>
+                <td><span class="badge bg-success" style="padding: 6px 10px;"><i class="fa-solid fa-circle-check me-1"></i>正常启用</span></td>
+                <!-- 统一的操作列 -->
                 <td class="text-center">
-                    <i class="fa-solid fa-unlock action-icon" style="color: #2ecc71;" title="恢复启用"></i>
-                    <i class="fa-solid fa-trash action-icon danger" title="彻底删除"></i>
+                    <i class="fa-solid fa-circle-info action-icon" title="查看详情" onclick="showUserDetail('guest_temp', '普通用户')"></i>
+                    <i class="fa-solid fa-pen-to-square action-icon warning" title="编辑权限" onclick="editUserRole('guest_temp')"></i>
+                    <i class="fa-solid fa-trash action-icon danger" title="删除用户" onclick="deleteUser(this, 'guest_temp', false)"></i>
                 </td>
             </tr>
         </tbody>
@@ -232,6 +245,36 @@
         if(confirm(`确定要将用户 [${username}] 的密码重置为系统默认密码吗？`)) {
             alert("密码重置成功！");
             // 实际开发中，这里需要发送 ajax 请求给后端修改数据库
+        }
+    }
+
+    // 查看详情弹窗 (演示用)
+    function showUserDetail(username, roleLabel) {
+        alert(`用户详情\n账号: ${username}\n角色: ${roleLabel}\n状态: 正常启用`);
+    }
+
+    // 编辑权限弹窗 (演示用)
+    function editUserRole(username) {
+        const nextRole = confirm(`是否将用户 [${username}] 提升为系统管理员？\n取消则保持为普通用户。`);
+        if (nextRole) {
+            alert(`已将 ${username} 设置为系统管理员。`);
+        } else {
+            alert(`已将 ${username} 保持为普通用户。`);
+        }
+    }
+
+    // 删除用户交互 (演示用)
+    function deleteUser(iconEl, username, isAdmin) {
+        if (isAdmin) {
+            alert("系统管理员账号不可删除！");
+            return;
+        }
+        if (confirm(`确定要删除用户 [${username}] 吗？此操作不可恢复。`)) {
+            const row = iconEl.closest('tr');
+            if (row) {
+                row.remove();
+            }
+            alert("用户已删除。");
         }
     }
 </script>
