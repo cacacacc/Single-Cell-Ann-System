@@ -220,3 +220,8 @@ __marimo__/
 # dataset
 *.h5ad
 data/
+# macOS
+.DS_Store
+
+# generated ANN indexes
+indexes/

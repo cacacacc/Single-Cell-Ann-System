@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -134,13 +135,13 @@ def create_app() -> Flask:
     @app.get("/api/health")
     def health():
         status_code = 200 if service.ready else 503
-        return jsonify(service.status_payload()), status_code
+        return _json_response(service.status_payload(), status_code)
 
     @app.get("/api/metadata")
     def metadata():
         if not service.ready:
-            return jsonify({"error": service.startup_error}), 503
-        return jsonify(service.status_payload())
+            return _json_response({"error": service.startup_error}, 503)
+        return _json_response(service.status_payload())
 
     @app.route("/api/search", methods=["GET", "POST"])
     def search():
@@ -151,17 +152,33 @@ def create_app() -> Flask:
             include_self = _parse_bool(payload.get("include_self"), default=False)
 
             if k <= 0:
-                return jsonify({"error": "k must be a positive integer"}), 400
+                return _json_response({"error": "k must be a positive integer"}, 400)
             if k > MAX_TOP_K:
-                return jsonify({"error": f"k must not exceed {MAX_TOP_K}"}), 400
+                return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
 
-            return jsonify(service.search(cell_index, k, include_self=include_self))
+            return _json_response(service.search(cell_index, k, include_self=include_self))
         except (TypeError, ValueError, KeyError, IndexError) as exc:
-            return jsonify({"error": str(exc)}), 400
+            return _json_response({"error": str(exc)}, 400)
         except RuntimeError as exc:
-            return jsonify({"error": str(exc)}), 503
+            return _json_response({"error": str(exc)}, 503)
 
     return app
+
+
+def _json_response(payload: Any, status_code: int = 200):
+    return jsonify(_json_safe(payload)), status_code
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 
 def _request_payload() -> Dict[str, Any]:
