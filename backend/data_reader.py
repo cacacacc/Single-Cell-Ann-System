@@ -35,6 +35,7 @@ class DataLoader:
 
         self._adata: AnnData = sc.read_h5ad(str(path))
         self._file_path = path
+        self._cell_id_to_index: Optional[Dict[str, int]] = None
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -156,6 +157,19 @@ class DataLoader:
                 val = str(val)
             info[col] = val
         return info
+
+    def cell_index_from_id(self, cell_id: str) -> int:
+        """通过细胞 ID 获取索引位置。"""
+        if not isinstance(cell_id, str) or not cell_id.strip():
+            raise ValueError("cell_id must be a non-empty string")
+        if self._cell_id_to_index is None:
+            self._cell_id_to_index = {
+                str(item): idx for idx, item in enumerate(self._adata.obs_names)
+            }
+        key = cell_id.strip()
+        if key not in self._cell_id_to_index:
+            raise KeyError(f"cell_id not found: {cell_id}")
+        return int(self._cell_id_to_index[key])
 
     # ------------------------------------------------------------------
     # 便捷属性

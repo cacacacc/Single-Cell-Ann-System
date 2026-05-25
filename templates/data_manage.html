@@ -157,46 +157,10 @@
                 <th class="text-center">操作</th>
             </tr>
         </thead>
-        <tbody>
-            <!-- 示例数据行 1 -->
+        <tbody id="dataset-tbody">
             <tr>
-                <td class="text-center"><input type="checkbox" class="table-checkbox row-checkbox"></td>
-                <td>
-                    <div class="fw-bold text-white">Adult_Liver_Atlas</div>
-                    <small style="color: var(--text-muted);">kidney_healthy.h5ad</small>
-                </td>
-                <td>107,344</td>
-                <td>2,000</td>
-                <td>
-                    <div>maruko</div>
-                    <small style="color: var(--text-muted);">2024-05-18 14:30</small>
-                </td>
-                <td><span class="badge" style="background-color: var(--nankai-purple); padding: 6px 10px;">FAISS-HNSW</span></td>
-                <td class="text-center">
-                    <i class="fa-solid fa-circle-info action-icon" title="详情"></i>
-                    <i class="fa-solid fa-microchip action-icon build" title="重新构建索引" data-bs-toggle="modal" data-bs-target="#buildIndexModal" onclick="setTargetData('Adult_Liver_Atlas')"></i>
-                    <i class="fa-solid fa-trash action-icon delete" title="删除"></i>
-                </td>
-            </tr>
-            <!-- 示例数据行 2 -->
-            <tr>
-                <td class="text-center"><input type="checkbox" class="table-checkbox row-checkbox"></td>
-                <td>
-                    <div class="fw-bold text-white">Pediatric_Liver_CZI</div>
-                    <small style="color: var(--text-muted);">pediatric.h5ad</small>
-                </td>
-                <td>56,021</td>
-                <td>2,500</td>
-                <td>
-                    <div>系统导入</div>
-                    <small style="color: var(--text-muted);">2026-05-21 09:15</small>
-                </td>
-                <td><span class="badge bg-secondary" id="status-badge-2" style="padding: 6px 10px;">未建索引</span></td>
-                <td class="text-center">
-                    <i class="fa-solid fa-circle-info action-icon" title="详情"></i>
-                    <!-- 点击这个齿轮，弹出建库模态框 -->
-                    <i class="fa-solid fa-microchip action-icon build" title="构建索引" data-bs-toggle="modal" data-bs-target="#buildIndexModal" onclick="setTargetData('Pediatric_Liver_CZI')"></i>
-                    <i class="fa-solid fa-trash action-icon delete" title="删除"></i>
+                <td colspan="7" class="text-center py-5" style="color: #8A96A8;">
+                    正在加载数据集列表...
                 </td>
             </tr>
         </tbody>
@@ -293,82 +257,127 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-    // ================= 1. 上传进度条模拟交互 =================
+    const datasetTbody = document.getElementById('dataset-tbody');
     const fileInput = document.getElementById('file-input');
     const uploadArea = document.getElementById('upload-progress-area');
     const uploadBar = document.getElementById('upload-bar');
     const progressText = document.getElementById('progress-text');
     const progressPercent = document.getElementById('progress-percent');
+    const selectAll = document.getElementById('selectAll');
+    let targetDatasetId = null;
 
-    fileInput.addEventListener('change', function() {
-        if(this.files.length > 0) {
-            uploadArea.style.display = 'block';
-            let progress = 0;
-            
-            // 模拟 格式校验 -> 预处理 -> 成功的进度条动画
-            const interval = setInterval(() => {
-                progress += Math.floor(Math.random() * 15);
-                if(progress >= 100) progress = 100;
-                
-                uploadBar.style.width = progress + '%';
-                progressPercent.innerText = progress + '%';
+    function formatNumber(val) {
+        if (val === null || val === undefined) return '-';
+        return Number(val).toLocaleString();
+    }
 
-                if(progress < 30) progressText.innerText = "格式校验中...";
-                else if(progress < 80) progressText.innerText = "提取表达矩阵中 (预处理)...";
-                else progressText.innerText = "上传成功，正在刷新列表!";
-
-                if(progress === 100) {
-                    clearInterval(interval);
-                    uploadBar.classList.replace('bg-primary', 'bg-success');
-                    // 实际项目中这里会调用 location.reload() 刷新页面
-                }
-            }, 500);
+    function renderDatasets(datasets) {
+        if (!datasets || datasets.length === 0) {
+            datasetTbody.innerHTML = '<tr><td colspan="7" class="text-center py-5" style="color: #8A96A8;">暂无数据集</td></tr>';
+            return;
         }
-    });
 
-    // ================= 2. 构建索引模拟交互 =================
-    function setTargetData(name) {
-        // 打开弹窗时，把数据集名字填上去
-        document.getElementById('target-dataset-name').innerText = name;
-        // 重置 UI 状态
+        datasetTbody.innerHTML = datasets.map(ds => {
+            const statusBadge = ds.index_status === 'ready'
+                ? `<span class="badge" style="background-color: var(--nankai-purple); padding: 6px 10px;">${ds.index_backend || 'READY'}</span>`
+                : '<span class="badge bg-secondary" style="padding: 6px 10px;">未建索引</span>';
+            const metaLine = ds.modified_at ? ds.modified_at : '-';
+            return `
+                <tr data-dataset-id="${ds.id}">
+                    <td class="text-center"><input type="checkbox" class="table-checkbox row-checkbox"></td>
+                    <td>
+                        <div class="fw-bold text-white">${ds.id}</div>
+                        <small style="color: var(--text-muted);">${ds.filename || '-'}</small>
+                    </td>
+                    <td>${formatNumber(ds.n_cells)}</td>
+                    <td>${formatNumber(ds.n_genes)}</td>
+                    <td>
+                        <div>系统导入</div>
+                        <small style="color: var(--text-muted);">${metaLine}</small>
+                    </td>
+                    <td>${statusBadge}</td>
+                    <td class="text-center">
+                        <i class="fa-solid fa-circle-info action-icon" title="详情" data-action="info"></i>
+                        <i class="fa-solid fa-microchip action-icon build" title="构建索引" data-action="build" data-bs-toggle="modal" data-bs-target="#buildIndexModal"></i>
+                        <i class="fa-solid fa-trash action-icon delete" title="删除" data-action="delete"></i>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        syncSelectAllState();
+    }
+
+    async function loadDatasets() {
+        try {
+            const res = await fetch('/api/datasets');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '加载失败');
+            renderDatasets(data.datasets || []);
+        } catch (err) {
+            datasetTbody.innerHTML = '<tr><td colspan="7" class="text-center py-5" style="color: #ff6b6b;">加载失败</td></tr>';
+        }
+    }
+
+    function setTargetData(datasetId) {
+        targetDatasetId = datasetId;
+        document.getElementById('target-dataset-name').innerText = datasetId || '-';
         document.getElementById('build-progress-area').style.display = 'none';
         document.getElementById('start-build-btn').style.display = 'block';
     }
 
-    function startBuilding() {
-        // 隐藏按钮，显示转圈动画
+    async function startBuilding() {
+        if (!targetDatasetId) {
+            alert('请先选择数据集');
+            return;
+        }
+
         document.getElementById('start-build-btn').style.display = 'none';
         document.getElementById('build-progress-area').style.display = 'block';
 
-        // 模拟向后端发请求建库耗时 2.5 秒
-        setTimeout(() => {
-            // 1. 关闭弹窗
-            var modalEl = document.getElementById('buildIndexModal');
-            var modal = bootstrap.Modal.getInstance(modalEl);
+        try {
+            const res = await fetch('/api/index/build', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dataset_id: targetDatasetId })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '构建失败');
+
+            const modalEl = document.getElementById('buildIndexModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
             modal.hide();
-
-            // 2. 将页面上第2行的状态强行改为成功 (为了中期演示效果)
-            let badge = document.getElementById('status-badge-2');
-            if(badge) {
-                badge.className = "badge";
-                badge.style.backgroundColor = "var(--nankai-purple)";
-                badge.innerText = document.getElementById('algoHNSW').checked ? "FAISS-HNSW" : "FAISS-IVF";
-            }
-            alert("索引构建成功！该数据集现已支持近似近邻检索。");
-        }, 2500);
-
+            await loadDatasets();
+            alert('索引构建成功！');
+        } catch (err) {
+            alert(err.message || '构建失败');
+        } finally {
+            document.getElementById('build-progress-area').style.display = 'none';
+            document.getElementById('start-build-btn').style.display = 'block';
+        }
     }
-    // ================= 3. 表格全选交互 =================
-    const selectAll = document.getElementById('selectAll');
-    const rowCheckboxes = document.querySelectorAll('tbody .row-checkbox');
+
+    async function deleteDataset(datasetId) {
+        if (!confirm(`确定删除数据集 ${datasetId} 吗？此操作不可恢复。`)) {
+            return;
+        }
+        try {
+            const res = await fetch(`/api/datasets/${datasetId}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '删除失败');
+            await loadDatasets();
+        } catch (err) {
+            alert(err.message || '删除失败');
+        }
+    }
 
     function getRowCheckboxes() {
-        return document.querySelectorAll('tbody .row-checkbox');
+        return document.querySelectorAll('#dataset-tbody .row-checkbox');
     }
 
     function syncSelectAllState() {
         const rows = getRowCheckboxes();
-        const checkedCount = document.querySelectorAll('tbody .row-checkbox:checked').length;
+        const checkedCount = document.querySelectorAll('#dataset-tbody .row-checkbox:checked').length;
         selectAll.checked = checkedCount === rows.length && rows.length > 0;
         selectAll.indeterminate = checkedCount > 0 && checkedCount < rows.length;
     }
@@ -381,58 +390,97 @@
         selectAll.indeterminate = false;
     });
 
-    rowCheckboxes.forEach(box => {
-        box.addEventListener('change', syncSelectAllState);
+    function batchDelete() {
+        const checkedBoxes = document.querySelectorAll('#dataset-tbody .row-checkbox:checked');
+        const ids = Array.from(checkedBoxes).map(box => box.closest('tr').dataset.datasetId);
+        if (ids.length === 0) {
+            alert('⚠️ 请先勾选需要删除的数据集！');
+            return;
+        }
+        if (!confirm(`确定要彻底删除选中的 ${ids.length} 个数据集及其索引吗？\n警告：此操作不可恢复！`)) {
+            return;
+        }
+        Promise.all(ids.map(id => fetch(`/api/datasets/${id}`, { method: 'DELETE' })))
+            .then(() => loadDatasets())
+            .catch(() => alert('批量删除失败'));
+    }
+
+    function uploadFile(file) {
+        uploadArea.style.display = 'block';
+        uploadBar.style.width = '0%';
+        uploadBar.classList.remove('bg-success');
+        uploadBar.classList.add('bg-primary');
+        progressText.innerText = '开始上传...';
+        progressPercent.innerText = '0%';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/datasets/upload');
+        xhr.upload.onprogress = function(evt) {
+            if (!evt.lengthComputable) return;
+            const percent = Math.round((evt.loaded / evt.total) * 100);
+            uploadBar.style.width = percent + '%';
+            progressPercent.innerText = percent + '%';
+            progressText.innerText = percent < 90 ? '上传中...' : '即将完成...';
+        };
+        xhr.onload = function() {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                uploadBar.classList.replace('bg-primary', 'bg-success');
+                progressText.innerText = '上传成功，正在刷新列表...';
+                loadDatasets();
+            } else {
+                progressText.innerText = '上传失败';
+                alert('上传失败，请检查文件格式');
+            }
+        };
+        xhr.onerror = function() {
+            progressText.innerText = '上传失败';
+            alert('上传失败，请检查网络或后端');
+        };
+        xhr.send(formData);
+    }
+
+    fileInput.addEventListener('change', function() {
+        if (this.files.length > 0) {
+            uploadFile(this.files[0]);
+        }
     });
 
-    // ================= 4. 批量删除交互 =================
-    function batchDelete() {
-        // 找出 tbody 里所有被勾选的复选框
-        const checkedBoxes = document.querySelectorAll('tbody .row-checkbox:checked');
-        const count = checkedBoxes.length;
+    datasetTbody.addEventListener('click', function(e) {
+        const row = e.target.closest('tr');
+        if (!row) return;
+        const datasetId = row.dataset.datasetId;
 
-        // 如果一个都没选
-        if (count === 0) {
-            alert("⚠️ 请先勾选需要删除的数据集！");
+        if (e.target.classList.contains('action-icon')) {
+            const action = e.target.dataset.action;
+            if (action === 'build') {
+                setTargetData(datasetId);
+                return;
+            }
+            if (action === 'delete') {
+                deleteDataset(datasetId);
+                return;
+            }
+            if (action === 'info') {
+                alert(`数据集: ${datasetId}`);
+                return;
+            }
+        }
+
+        if (e.target.tagName.toLowerCase() === 'input') {
+            syncSelectAllState();
             return;
         }
 
-        // 如果选了，弹出二次确认框
-        if (confirm(`确定要彻底删除选中的 ${count} 个数据集及其底层的 ANN 索引吗？\n警告：此操作不可恢复！`)) {
-            
-            // 遍历所有被勾选的框，把它所在的整行 (tr) 从页面上移除
-            checkedBoxes.forEach(box => {
-                box.closest('tr').remove();
-            });
-            
-            // 把全选框的勾去掉
-            selectAll.checked = false;
-            selectAll.indeterminate = false;
-            
-            alert("✅ 批量删除成功！");
+        const checkbox = row.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            syncSelectAllState();
         }
-    }
-
-    // ================= 5. 点击整行自动勾选复选框 =================
-    document.querySelectorAll('.table-dark-fluent tbody tr').forEach(row => {
-        row.addEventListener('click', function(e) {
-            // 如果用户点击的是右侧的操作图标，则不触发勾选（防止冲突）
-            if (e.target.tagName.toLowerCase() === 'i' || e.target.classList.contains('action-icon')) {
-                return;
-            }
-            if (e.target.tagName.toLowerCase() === 'input') {
-                return;
-            }
-
-            // 找到这行里的复选框
-            const checkbox = this.querySelector('input[type="checkbox"]');
-
-            // 如果用户点击的不是复选框本身，我们用代码帮他点一下
-            if (checkbox) {
-                checkbox.checked = !checkbox.checked;
-                checkbox.dispatchEvent(new Event('change'));
-            }
-        });
     });
+
+    loadDatasets();
 </script>
 {% endblock %}

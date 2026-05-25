@@ -102,9 +102,8 @@
             <form id="searchForm">
                 <div class="mb-4">
                     <label class="form-label">目标数据集</label>
-                    <select class="form-select dark-control">
-                        <option>Adult_Liver_Atlas.h5ad</option>
-                        <option>Pediatric_Liver_CZI.h5ad</option>
+                    <select class="form-select dark-control" id="datasetSelect">
+                        <option value="" disabled selected>正在加载数据集...</option>
                     </select>
                 </div>
 
@@ -220,6 +219,7 @@
 <script>
     const slider = document.getElementById('topKSlider');
     const kValue = document.getElementById('k-value');
+    const datasetSelect = document.getElementById('datasetSelect');
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
 
     const cellCategories = [
@@ -303,12 +303,41 @@
         }, 500);
     });
 
-    document.getElementById('startSearchBtn').addEventListener('click', function() {
+    async function loadDatasets() {
+        try {
+            const res = await fetch('/api/datasets');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '数据集加载失败');
+            if (!data.datasets || data.datasets.length === 0) {
+                datasetSelect.innerHTML = '<option value="" disabled selected>暂无数据集</option>';
+                datasetSelect.disabled = true;
+                return;
+            }
+            datasetSelect.innerHTML = data.datasets
+                .map(ds => `<option value="${ds.id}">${ds.filename}</option>`)
+                .join('');
+        } catch (err) {
+            datasetSelect.innerHTML = '<option value="" disabled selected>加载失败</option>';
+            datasetSelect.disabled = true;
+        }
+    }
+
+    document.getElementById('startSearchBtn').addEventListener('click', async function() {
         const btn = this;
         const tbody = document.getElementById('result-tbody');
         const statusBadge = document.getElementById('search-status');
         const topK = parseInt(slider.value);
-        const cellId = document.getElementById('queryCellId').value;
+        const cellId = document.getElementById('queryCellId').value.trim();
+        const datasetId = datasetSelect.value;
+
+        if (!datasetId) {
+            alert('请先选择数据集');
+            return;
+        }
+        if (!cellId) {
+            alert('请输入 Cell ID');
+            return;
+        }
 
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>检索中...';
         btn.disabled = true;
@@ -316,57 +345,47 @@
         statusBadge.innerHTML = '<span class="spinner-grow spinner-grow-sm me-1"></span>引擎计算中';
         tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">正在进行高维空间近邻计算...</td></tr>';
 
-        setTimeout(() => {
-            const targetPoint = [12, -12]; 
-            const resultData = [];
-            let tableHTML = '';
-            
-            for(let i = 0; i < topK; i++) {
-                let rx = targetPoint[0] + (Math.random() - 0.5) * 10;
-                let ry = targetPoint[1] + (Math.random() - 0.5) * 10;
-                let dist = (Math.random() * 0.05).toFixed(4); 
-                let cid = `AAACCTG${Math.floor(Math.random()*10000)}...`;
-                
-                resultData.push({ value: [rx, ry], name: cid, type: 'Hepatocyte', dist: dist });
-
-                tableHTML += `
-                    <tr>
-                        <td class="ps-4 fw-bold" style="color: #4A90E2;">#${i+1}</td>
-                        <td class="text-white">${cid}</td>
-                        <td><span class="badge" style="background-color: #E83E8C; padding: 6px 10px;">Hepatocyte</span></td>
-                        <td style="color: #2ecc71; font-family: monospace; font-size: 1.1rem;">${dist}</td>
-                        <td><button class="btn btn-sm" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);"><i class="fa-solid fa-crosshairs"></i></button></td>
-                    </tr>
-                `;
-            }
-
-            myChart.setOption({
-                series: [
-                    baseOption.series[0], 
-                    {
-                        name: 'Top-K 结果',
-                        type: 'scatter',
-                        symbolSize: 8,
-                        itemStyle: { color: '#FFE600', shadowBlur: 10, shadowColor: '#FFE600', opacity: 1 },
-                        data: resultData
-                    },
-                    {
-                        name: '查询目标',
-                        type: 'scatter',
-                        symbolSize: 18,
-                        itemStyle: { color: '#ff4757', borderColor: '#fff', borderWidth: 2, shadowBlur: 15, shadowColor: '#ff4757' },
-                        data: [{ value: targetPoint, name: cellId, type: 'Query Target', dist: '0.0000' }]
-                    }
-                ]
+        try {
+            const res = await fetch('/api/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dataset_id: datasetId, cell_id: cellId, k: topK })
             });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '检索失败');
+
+            let tableHTML = '';
+            if (!data.results || data.results.length === 0) {
+                tableHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">未找到结果</td></tr>';
+            } else {
+                data.results.forEach((row, idx) => {
+                    tableHTML += `
+                        <tr>
+                            <td class="ps-4 fw-bold" style="color: #4A90E2;">#${idx + 1}</td>
+                            <td class="text-white">${row.cell_id || '-'}</td>
+                            <td><span class="badge" style="background-color: #E83E8C; padding: 6px 10px;">${row.cell_type || 'unknown'}</span></td>
+                            <td style="color: #2ecc71; font-family: monospace; font-size: 1.1rem;">${row.distance}</td>
+                            <td><button class="btn btn-sm" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);"><i class="fa-solid fa-crosshairs"></i></button></td>
+                        </tr>
+                    `;
+                });
+            }
 
             tbody.innerHTML = tableHTML;
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
             statusBadge.className = 'badge bg-success me-3';
-            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>耗时 16ms | HNSW`;
-        }, 1200); 
+            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>耗时 ${data.elapsed_ms}ms | ${data.index_backend || 'ANN'}`;
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #ff6b6b;">检索失败，请检查输入或后端日志</td></tr>';
+            btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
+            btn.disabled = false;
+            statusBadge.className = 'badge bg-danger me-3';
+            statusBadge.innerText = err.message || '检索失败';
+        }
     });
+
+    loadDatasets();
 
     window.addEventListener('resize', () => myChart.resize());
 </script>

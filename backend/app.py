@@ -120,8 +120,21 @@ class SearchService:
         }
 
 
-def create_app() -> Flask:
-    app = Flask(__name__)
+def create_app(
+    template_folder: Optional[Path] = None, static_folder: Optional[Path] = None
+) -> Flask:
+    if template_folder is not None and static_folder is not None:
+        app = Flask(
+            __name__,
+            template_folder=str(template_folder),
+            static_folder=str(static_folder),
+        )
+    elif template_folder is not None:
+        app = Flask(__name__, template_folder=str(template_folder))
+    elif static_folder is not None:
+        app = Flask(__name__, static_folder=str(static_folder))
+    else:
+        app = Flask(__name__)
     CORS(app)
 
     service = SearchService(
@@ -131,6 +144,16 @@ def create_app() -> Flask:
     )
     service.initialize()
     app.config["search_service"] = service
+
+    @app.get("/api")
+    def api_root():
+        return _json_response(
+            {
+                "message": "Single-Cell ANN API",
+                "endpoints": ["/api/health", "/api/metadata", "/api/search"],
+                "status": service.status_payload(),
+            }
+        )
 
     @app.get("/api/health")
     def health():
