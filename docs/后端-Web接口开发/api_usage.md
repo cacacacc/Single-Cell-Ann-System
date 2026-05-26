@@ -24,7 +24,7 @@ backend/app.py
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-api.txt
+pip install -r requirements.txt
 ```
 
 默认数据文件路径为：
