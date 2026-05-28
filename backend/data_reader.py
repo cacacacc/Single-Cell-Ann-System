@@ -526,6 +526,62 @@ class DatasetManager:
         idx_dir.mkdir(parents=True, exist_ok=True)
         return idx_dir / filename
 
+    def get_available_reps(self, dataset_id: str) -> List[str]:
+        """返回指定数据集可用的向量表示列表（如 X_pca、X_umap 等）。
+
+        供 API 层在构建索引时展示可选的 ``use_rep`` 选项。
+
+        Parameters
+        ----------
+        dataset_id:
+            数据集 ID。
+
+        Returns
+        -------
+        list of str
+            ``obsm`` 中所有可用的降维表示键名，例如 ``["X_pca", "X_umap", "X_tsne"]``。
+
+        Raises
+        ------
+        KeyError
+            数据集不存在。
+        """
+        return self.get_loader(dataset_id).available_reps
+
+    def get_dataset_info(self, dataset_id: str) -> Dict[str, Any]:
+        """返回数据集完整信息：元信息 + 运行时统计（细胞数、基因数、可用向量类型等）。
+
+        供 ``GET /api/metadata`` 接口一次性返回完整元数据，无需调用方再单独 get_loader。
+
+        Parameters
+        ----------
+        dataset_id:
+            数据集 ID。
+
+        Returns
+        -------
+        dict
+            包含以下字段：
+
+            - 所有 ``get_meta()`` 字段（dataset_id、name、filename、registered_at 等）
+            - ``n_cells``：细胞总数
+            - ``n_genes``：基因数量
+            - ``available_reps``：可用向量表示列表（如 ``["X_pca", "X_umap"]``）
+            - ``obs_columns``：细胞元数据字段名列表
+
+        Raises
+        ------
+        KeyError
+            数据集不存在。
+        """
+        info = self.get_meta(dataset_id)
+        loader = self.get_loader(dataset_id)
+        info["n_cells"] = loader.n_cells
+        info["n_genes"] = loader.n_genes
+        info["available_reps"] = loader.available_reps
+        info["obs_columns"] = loader.obs_columns
+        return info
+
     def __iter__(self) -> Iterator[str]:
         """遍历所有 dataset_id。"""
         for data_file in self._data_dir.glob(f"*{self._DATA_SUFFIX}"):
