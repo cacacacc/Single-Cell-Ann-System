@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import shutil
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Iterator, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -232,3 +236,376 @@ class DataLoader:
             f"available_reps={self.available_reps}"
             f")"
         )
+
+
+# ---------------------------------------------------------------------------
+# 多数据集管理
+# ---------------------------------------------------------------------------
+
+class DatasetManager:
+    """多数据集管理器：支持 .h5ad 数据集的增删查、上传校验和元信息维护。
+
+    目录结构::
+
+        data_dir/
+            <dataset_id>.h5ad          # 数据文件
+        index_dir/
+            <dataset_id>/              # 该数据集的索引目录（由算法模块写入）
+        meta_dir/
+            <dataset_id>.json          # 元信息缓存
+
+    使用方式::
+
+        manager = DatasetManager()
+        dataset_id = manager.register("data/liver.h5ad", name="Liver Atlas")
+        loader     = manager.get_loader(dataset_id)
+        manager.list_datasets()
+        manager.delete_dataset(dataset_id)
+    """
+
+    _META_SUFFIX = ".json"
+    _DATA_SUFFIX = ".h5ad"
+
+    def __init__(
+        self,
+        data_dir: Union[str, Path] = "data",
+        index_dir: Union[str, Path] = "indexes",
+        meta_dir: Union[str, Path] = "data/.meta",
+    ) -> None:
+        self._data_dir = Path(data_dir)
+        self._index_dir = Path(index_dir)
+        self._meta_dir = Path(meta_dir)
+
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._index_dir.mkdir(parents=True, exist_ok=True)
+        self._meta_dir.mkdir(parents=True, exist_ok=True)
+
+        # 内存缓存：dataset_id -> DataLoader
+        self._loader_cache: Dict[str, DataLoader] = {}
+
+    # ------------------------------------------------------------------
+    # 核心增删查接口
+    # ------------------------------------------------------------------
+
+    def register(
+        self,
+        source_path: Union[str, Path],
+        name: Optional[str] = None,
+        copy: bool = True,
+    ) -> str:
+        """注册一个已有的 .h5ad 文件到管理器。
+
+        Parameters
+        ----------
+        source_path:
+            源文件路径。
+        name:
+            数据集展示名称，默认取文件名（不含扩展名）。
+        copy:
+            True（默认）：将文件复制到 data_dir；False：原地注册（文件必须已在 data_dir 内）。
+
+        Returns
+        -------
+        str
+            分配的 dataset_id（不可变唯一标识）。
+        """
+        source = Path(source_path)
+        _validate_h5ad_file(source)
+
+        dataset_id = _make_dataset_id(source)
+
+        # 目标路径
+        dest = self._data_dir / f"{dataset_id}{self._DATA_SUFFIX}"
+        if not dest.exists():
+            if copy:
+                shutil.copy2(str(source), str(dest))
+            else:
+                if source.resolve() != dest.resolve():
+                    raise ValueError(
+                        f"copy=False 时文件必须已经位于 data_dir 内，"
+                        f"期望路径：{dest}，实际路径：{source}"
+                    )
+
+        meta = self._load_meta(dataset_id) or {}
+        meta.setdefault("dataset_id", dataset_id)
+        meta.setdefault("name", name or source.stem)
+        meta.setdefault("filename", dest.name)
+        meta.setdefault("registered_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
+        meta["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self._save_meta(dataset_id, meta)
+
+        return dataset_id
+
+    def upload(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        name: Optional[str] = None,
+    ) -> str:
+        """校验并上传 .h5ad 文件（字节流形式，适合 Flask 接口调用）。
+
+        Parameters
+        ----------
+        file_bytes:
+            文件原始字节内容（``request.files["file"].read()``）。
+        filename:
+            原始文件名，用于后缀校验。
+        name:
+            数据集展示名称，默认取文件名（不含扩展名）。
+
+        Returns
+        -------
+        str
+            分配的 dataset_id。
+
+        Raises
+        ------
+        ValueError
+            文件后缀不是 .h5ad，或文件内容校验不通过。
+        """
+        if not filename.lower().endswith(self._DATA_SUFFIX):
+            raise ValueError(f"仅支持 .h5ad 文件，收到：{filename}")
+        if len(file_bytes) == 0:
+            raise ValueError("上传的文件内容为空")
+
+        # 先写到临时位置做校验
+        tmp_path = self._data_dir / f"_tmp_{int(time.time()*1000)}.h5ad"
+        try:
+            tmp_path.write_bytes(file_bytes)
+            _validate_h5ad_file(tmp_path)  # 内容校验
+            dataset_id = _make_dataset_id_from_bytes(file_bytes)
+            dest = self._data_dir / f"{dataset_id}{self._DATA_SUFFIX}"
+            if not dest.exists():
+                shutil.move(str(tmp_path), str(dest))
+            else:
+                tmp_path.unlink(missing_ok=True)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+        stem = Path(filename).stem
+        meta = self._load_meta(dataset_id) or {}
+        meta.setdefault("dataset_id", dataset_id)
+        meta.setdefault("name", name or stem)
+        meta.setdefault("original_filename", filename)
+        meta.setdefault("filename", dest.name)
+        meta.setdefault("registered_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
+        meta["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self._save_meta(dataset_id, meta)
+
+        return dataset_id
+
+    def delete_dataset(self, dataset_id: str) -> None:
+        """删除指定数据集的文件、索引目录和元信息缓存。
+
+        Parameters
+        ----------
+        dataset_id:
+            要删除的数据集 ID。
+
+        Raises
+        ------
+        KeyError
+            数据集不存在。
+        """
+        _validate_dataset_id(dataset_id)
+        data_file = self._data_path(dataset_id)
+        if not data_file.exists():
+            raise KeyError(f"数据集不存在：{dataset_id}")
+
+        # 1. 移除内存缓存
+        self._loader_cache.pop(dataset_id, None)
+
+        # 2. 删除数据文件
+        data_file.unlink()
+
+        # 3. 删除索引目录（如果存在）
+        index_dir = self._index_dir / dataset_id
+        if index_dir.exists():
+            shutil.rmtree(str(index_dir))
+
+        # 4. 删除元信息文件
+        meta_file = self._meta_path(dataset_id)
+        if meta_file.exists():
+            meta_file.unlink()
+
+    def get_loader(self, dataset_id: str) -> DataLoader:
+        """获取指定数据集的 DataLoader（带内存缓存，不重复读文件）。
+
+        Parameters
+        ----------
+        dataset_id:
+            数据集 ID。
+
+        Returns
+        -------
+        DataLoader
+        """
+        _validate_dataset_id(dataset_id)
+        if dataset_id not in self._loader_cache:
+            path = self._data_path(dataset_id)
+            if not path.exists():
+                raise KeyError(f"数据集不存在：{dataset_id}")
+            self._loader_cache[dataset_id] = DataLoader(path)
+        return self._loader_cache[dataset_id]
+
+    def list_datasets(self) -> List[Dict[str, Any]]:
+        """列出所有已注册的数据集及其元信息。
+
+        Returns
+        -------
+        list of dict
+            每个 dict 包含 ``dataset_id``、``name``、``filename`` 等字段。
+        """
+        result: List[Dict[str, Any]] = []
+        for data_file in sorted(self._data_dir.glob(f"*{self._DATA_SUFFIX}")):
+            dataset_id = data_file.stem
+            if dataset_id.startswith("_"):
+                continue  # 跳过临时文件
+            meta = self._load_meta(dataset_id) or {
+                "dataset_id": dataset_id,
+                "name": dataset_id,
+                "filename": data_file.name,
+            }
+            meta["file_size_bytes"] = data_file.stat().st_size
+            result.append(meta)
+        return result
+
+    def get_meta(self, dataset_id: str) -> Dict[str, Any]:
+        """获取指定数据集的元信息字典。
+
+        Raises
+        ------
+        KeyError
+            数据集不存在。
+        """
+        _validate_dataset_id(dataset_id)
+        if not self._data_path(dataset_id).exists():
+            raise KeyError(f"数据集不存在：{dataset_id}")
+        meta = self._load_meta(dataset_id) or {"dataset_id": dataset_id}
+        meta["file_size_bytes"] = self._data_path(dataset_id).stat().st_size
+        return meta
+
+    def update_meta(self, dataset_id: str, **kwargs: Any) -> None:
+        """更新指定数据集的元信息字段（只允许改展示性字段，不影响文件）。
+
+        Parameters
+        ----------
+        **kwargs:
+            要更新的键值对，例如 ``name="新名称"``。
+        """
+        _validate_dataset_id(dataset_id)
+        if not self._data_path(dataset_id).exists():
+            raise KeyError(f"数据集不存在：{dataset_id}")
+        _IMMUTABLE_META_KEYS = {"dataset_id", "filename", "registered_at"}
+        for key in kwargs:
+            if key in _IMMUTABLE_META_KEYS:
+                raise ValueError(f"字段 '{key}' 不可修改")
+        meta = self._load_meta(dataset_id) or {"dataset_id": dataset_id}
+        meta.update(kwargs)
+        meta["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self._save_meta(dataset_id, meta)
+
+    def index_path_for(self, dataset_id: str, filename: str = "cell_index.index") -> Path:
+        """返回该数据集对应的索引文件路径，供算法模块使用。
+
+        Parameters
+        ----------
+        dataset_id:
+            数据集 ID。
+        filename:
+            索引文件名，默认 ``cell_index.index``。
+
+        Returns
+        -------
+        Path
+            索引文件的完整路径（目录会自动创建）。
+        """
+        _validate_dataset_id(dataset_id)
+        idx_dir = self._index_dir / dataset_id
+        idx_dir.mkdir(parents=True, exist_ok=True)
+        return idx_dir / filename
+
+    def __iter__(self) -> Iterator[str]:
+        """遍历所有 dataset_id。"""
+        for data_file in self._data_dir.glob(f"*{self._DATA_SUFFIX}"):
+            if not data_file.stem.startswith("_"):
+                yield data_file.stem
+
+    def __len__(self) -> int:
+        return sum(
+            1 for f in self._data_dir.glob(f"*{self._DATA_SUFFIX}")
+            if not f.stem.startswith("_")
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"DatasetManager("
+            f"data_dir='{self._data_dir}', "
+            f"n_datasets={len(self)}"
+            f")"
+        )
+
+    # ------------------------------------------------------------------
+    # 内部工具方法
+    # ------------------------------------------------------------------
+
+    def _data_path(self, dataset_id: str) -> Path:
+        return self._data_dir / f"{dataset_id}{self._DATA_SUFFIX}"
+
+    def _meta_path(self, dataset_id: str) -> Path:
+        return self._meta_dir / f"{dataset_id}{self._META_SUFFIX}"
+
+    def _load_meta(self, dataset_id: str) -> Optional[Dict[str, Any]]:
+        path = self._meta_path(dataset_id)
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _save_meta(self, dataset_id: str, meta: Dict[str, Any]) -> None:
+        self._meta_path(dataset_id).write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+
+# ---------------------------------------------------------------------------
+# 模块级工具函数
+# ---------------------------------------------------------------------------
+
+def _validate_h5ad_file(path: Path) -> None:
+    """校验文件是否是合法的 .h5ad 文件（格式 + 内容双重校验）。"""
+    if not path.exists():
+        raise FileNotFoundError(f"文件不存在：{path}")
+    if path.suffix.lower() != ".h5ad":
+        raise ValueError(f"文件格式不支持，需要 .h5ad，得到：{path.suffix}")
+    if path.stat().st_size == 0:
+        raise ValueError(f"文件内容为空：{path.name}")
+    # 尝试用 scanpy 读取，确认内容合法
+    try:
+        adata = sc.read_h5ad(str(path))
+    except Exception as exc:
+        raise ValueError(f"文件内容校验失败，不是有效的 .h5ad 文件：{exc}") from exc
+    if adata.n_obs == 0:
+        raise ValueError(f"数据集中细胞数量为 0，文件可能损坏：{path.name}")
+    if adata.n_vars == 0:
+        raise ValueError(f"数据集中基因数量为 0，文件可能损坏：{path.name}")
+
+
+def _make_dataset_id(path: Path) -> str:
+    """根据文件路径（绝对路径 + 修改时间）生成稳定的 dataset_id。"""
+    key = f"{path.resolve()}:{path.stat().st_mtime}"
+    return hashlib.md5(key.encode()).hexdigest()[:16]
+
+
+def _make_dataset_id_from_bytes(data: bytes) -> str:
+    """根据文件内容生成 dataset_id（用于上传场景）。"""
+    return hashlib.md5(data).hexdigest()[:16]
+
+
+def _validate_dataset_id(dataset_id: str) -> None:
+    if not isinstance(dataset_id, str) or not dataset_id.strip():
+        raise ValueError("dataset_id 必须是非空字符串")
