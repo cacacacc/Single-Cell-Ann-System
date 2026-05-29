@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from backend.ann_indexer import ANNIndexer
+from backend.ann_indexer import ANNIndexer, IndexConfig
 from backend.data_reader import DataLoader
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -24,7 +26,9 @@ MAX_TOP_K = 100
 ALLOWED_EXTENSIONS = {".h5ad"}
 
 _DATASET_CACHE: Dict[str, DataLoader] = {}
-_INDEX_CACHE: Dict[Tuple[str, str], ANNIndexer] = {}
+_INDEX_CACHE: Dict[Tuple[str, str], Tuple[ANNIndexer, Tuple[Any, ...]]] = {}
+_BENCHMARK_INDEX_CACHE: Dict[Tuple[str, str, Tuple[Any, ...]], ANNIndexer] = {}
+_BENCHMARK_HISTORY_PATH = DATA_DIR / "benchmark_history.json"
 
 
 def _normalize_dataset_id(dataset_id: Optional[str]) -> Optional[str]:
@@ -63,6 +67,65 @@ def _backup_index_path(index_path: Path) -> Path:
     return Path(f"{index_path}.npz")
 
 
+def _index_config_from_env() -> IndexConfig:
+    return IndexConfig.from_env()
+
+
+def _config_cache_key(config: IndexConfig) -> Tuple[Any, ...]:
+    cfg = config.normalized()
+    return (
+        cfg.backend,
+        cfg.index_type,
+        cfg.metric,
+        cfg.nlist,
+        cfg.nprobe,
+        cfg.m,
+        cfg.ef_construction,
+        cfg.ef_search,
+    )
+
+
+def _index_config_from_payload(payload: Dict[str, Any]) -> IndexConfig:
+    config = _index_config_from_env()
+    overrides: Dict[str, Any] = {}
+
+    backend = payload.get("index_backend")
+    if backend not in (None, ""):
+        overrides["backend"] = backend
+
+    index_type = payload.get("index_type")
+    if index_type not in (None, ""):
+        overrides["index_type"] = index_type
+
+    metric = payload.get("index_metric")
+    if metric not in (None, ""):
+        overrides["metric"] = metric
+
+    nlist = _parse_optional_int(payload, "nlist")
+    if nlist is not None:
+        overrides["nlist"] = nlist
+
+    nprobe = _parse_optional_int(payload, "nprobe")
+    if nprobe is not None:
+        overrides["nprobe"] = nprobe
+
+    m = _parse_optional_int(payload, "m")
+    if m is not None:
+        overrides["m"] = m
+
+    ef_construction = _parse_optional_int(payload, "ef_construction")
+    if ef_construction is not None:
+        overrides["ef_construction"] = ef_construction
+
+    ef_search = _parse_optional_int(payload, "ef_search")
+    if ef_search is not None:
+        overrides["ef_search"] = ef_search
+
+    if not overrides:
+        return config
+    return config.update(**overrides)
+
+
 def _index_path(dataset_id: str, use_rep: str) -> Path:
     return INDEX_DIR / f"{dataset_id}_{use_rep}.index"
 
@@ -77,18 +140,35 @@ def _get_loader(dataset_id: str, dataset_path: Optional[Path] = None) -> DataLoa
     return loader
 
 
-def _get_indexer(dataset_id: str, use_rep: str, build_if_missing: bool = True) -> ANNIndexer:
+def _get_indexer(
+    dataset_id: str,
+    use_rep: str,
+    index_config: IndexConfig,
+    build_if_missing: bool = True,
+) -> ANNIndexer:
     cache_key = (dataset_id, use_rep)
-    if cache_key in _INDEX_CACHE:
-        return _INDEX_CACHE[cache_key]
+    config_key = _config_cache_key(index_config)
+    cached = _INDEX_CACHE.get(cache_key)
+    if cached is not None:
+        cached_indexer, cached_key = cached
+        if cached_key == config_key:
+            return cached_indexer
 
     loader = _get_loader(dataset_id)
-    indexer = ANNIndexer(dim=loader.vector_dim(use_rep))
+    indexer = ANNIndexer(dim=loader.vector_dim(use_rep), config=index_config)
     index_path = _index_path(dataset_id, use_rep)
     backup_path = _backup_index_path(index_path)
 
     if index_path.exists() or backup_path.exists():
-        indexer.load_index(index_path)
+        try:
+            indexer.load_index(index_path)
+        except ValueError as exc:
+            if "config mismatch" in str(exc).lower() and build_if_missing:
+                vectors = loader.get_vectors(use_rep)
+                indexer.build_index(vectors)
+                indexer.save_index(index_path)
+            else:
+                raise
     elif build_if_missing:
         vectors = loader.get_vectors(use_rep)
         indexer.build_index(vectors)
@@ -96,8 +176,50 @@ def _get_indexer(dataset_id: str, use_rep: str, build_if_missing: bool = True) -
     else:
         raise FileNotFoundError("Index not found")
 
-    _INDEX_CACHE[cache_key] = indexer
+    _INDEX_CACHE[cache_key] = (indexer, config_key)
     return indexer
+
+
+def _get_benchmark_indexer(
+    dataset_id: str,
+    use_rep: str,
+    vectors: np.ndarray,
+    config: IndexConfig,
+) -> ANNIndexer:
+    cache_key = (dataset_id, use_rep, _config_cache_key(config))
+    cached = _BENCHMARK_INDEX_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    indexer = ANNIndexer(dim=vectors.shape[1], config=config)
+    indexer.build_index(vectors)
+    _BENCHMARK_INDEX_CACHE[cache_key] = indexer
+    return indexer
+
+
+def _load_benchmark_history() -> List[Dict[str, Any]]:
+    if not _BENCHMARK_HISTORY_PATH.exists():
+        return []
+    try:
+        return json.loads(_BENCHMARK_HISTORY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _save_benchmark_history(history: List[Dict[str, Any]]) -> None:
+    _BENCHMARK_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _BENCHMARK_HISTORY_PATH.write_text(
+        json.dumps(history, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _append_benchmark_history(entry: Dict[str, Any], keep_last: int = 50) -> int:
+    history = _load_benchmark_history()
+    history.append(entry)
+    if keep_last > 0 and len(history) > keep_last:
+        history = history[-keep_last:]
+    _save_benchmark_history(history)
+    return len(history) - 1
 
 
 def _dataset_payload(dataset_id: str, dataset_path: Path) -> Dict[str, Any]:
@@ -127,14 +249,17 @@ def _dataset_payload(dataset_id: str, dataset_path: Path) -> Dict[str, Any]:
     index_ready = index_path.exists() or _backup_index_path(index_path).exists()
     payload["index_status"] = "ready" if index_ready else "missing"
     payload["index_backend"] = None
-    cached_index = _INDEX_CACHE.get((dataset_id, DEFAULT_USE_REP))
-    if cached_index is not None:
-        payload["index_backend"] = cached_index.backend
+    cached_entry = _INDEX_CACHE.get((dataset_id, DEFAULT_USE_REP))
+    if cached_entry is not None:
+        cached_indexer, _ = cached_entry
+        payload["index_backend"] = cached_indexer.backend
 
     return payload
 
 
-def _metadata_payload(dataset_id: str, use_rep: str) -> Dict[str, Any]:
+def _metadata_payload(
+    dataset_id: str, use_rep: str, index_config: IndexConfig
+) -> Dict[str, Any]:
     loader = _get_loader(dataset_id)
     index_path = _index_path(dataset_id, use_rep)
     backup_path = _backup_index_path(index_path)
@@ -150,10 +275,19 @@ def _metadata_payload(dataset_id: str, use_rep: str) -> Dict[str, Any]:
         "vector_dim": loader.vector_dim(use_rep),
         "available_reps": loader.available_reps,
         "obs_columns": loader.obs_columns,
+        "index_config": index_config.to_dict(),
     }
-    cached_index = _INDEX_CACHE.get((dataset_id, use_rep))
-    if cached_index is not None:
-        payload["index_backend"] = cached_index.backend
+    cached_entry = _INDEX_CACHE.get((dataset_id, use_rep))
+    if cached_entry is not None:
+        cached_indexer, _ = cached_entry
+        payload["index_backend"] = cached_indexer.backend
+        payload["index_type"] = cached_indexer.index_type
+        payload["index_metric"] = cached_indexer.metric
+        payload["index_config"] = cached_indexer.config_summary
+    else:
+        payload["index_backend"] = None
+        payload["index_type"] = index_config.index_type
+        payload["index_metric"] = index_config.metric
     return payload
 
 
@@ -222,7 +356,7 @@ def health():
     try:
         dataset_path = _resolve_dataset_path(None)
         dataset_id = _dataset_id_from_path(dataset_path)
-        payload = _metadata_payload(dataset_id, DEFAULT_USE_REP)
+        payload = _metadata_payload(dataset_id, DEFAULT_USE_REP, _index_config_from_env())
         return _json_response(payload, 200)
     except Exception as exc:
         return _json_response({"error": str(exc)}, 503)
@@ -231,11 +365,13 @@ def health():
 @app.get("/api/metadata")
 def metadata():
     try:
-        dataset_id = _normalize_dataset_id(request.args.get("dataset_id"))
+        payload = dict(request.args)
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
         dataset_path = _resolve_dataset_path(dataset_id)
         resolved_id = _dataset_id_from_path(dataset_path)
-        use_rep = request.args.get("use_rep", DEFAULT_USE_REP)
-        return _json_response(_metadata_payload(resolved_id, use_rep))
+        use_rep = payload.get("use_rep", DEFAULT_USE_REP)
+        index_config = _index_config_from_payload(payload)
+        return _json_response(_metadata_payload(resolved_id, use_rep, index_config))
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
 
@@ -298,15 +434,23 @@ def build_index():
         dataset_path = _resolve_dataset_path(dataset_id)
         resolved_id = _dataset_id_from_path(dataset_path)
         use_rep = payload.get("use_rep") or DEFAULT_USE_REP
-        indexer = _get_indexer(resolved_id, use_rep, build_if_missing=True)
+        index_config = _index_config_from_payload(payload)
+        indexer = _get_indexer(
+            resolved_id, use_rep, index_config, build_if_missing=True
+        )
         return _json_response(
             {
                 "status": "built",
                 "dataset_id": resolved_id,
                 "use_rep": use_rep,
                 "backend": indexer.backend,
+                "index_type": indexer.index_type,
+                "index_metric": indexer.metric,
+                "index_config": indexer.config_summary,
             }
         )
+    except ImportError as exc:
+        return _json_response({"error": str(exc)}, 400)
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
 
@@ -319,6 +463,7 @@ def search():
         dataset_path = _resolve_dataset_path(dataset_id)
         resolved_id = _dataset_id_from_path(dataset_path)
         use_rep = payload.get("use_rep") or DEFAULT_USE_REP
+        index_config = _index_config_from_payload(payload)
 
         cell_index_value = payload.get("cell_index")
         cell_id_value = payload.get("cell_id")
@@ -338,7 +483,9 @@ def search():
         if k > MAX_TOP_K:
             return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
 
-        indexer = _get_indexer(resolved_id, use_rep, build_if_missing=True)
+        indexer = _get_indexer(
+            resolved_id, use_rep, index_config, build_if_missing=True
+        )
         query_vector = loader.get_vector(cell_index, use_rep=use_rep)
         search_k = min(k + 1 if not include_self else k, loader.n_cells)
         start_time = time.perf_counter()
@@ -346,6 +493,7 @@ def search():
         elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
         results = []
+        metric = indexer.metric
         for idx, dist in zip(indices.tolist(), distances.tolist()):
             idx = int(idx)
             distance = float(dist)
@@ -360,7 +508,9 @@ def search():
                     "cell_id": cell_info.get("cell_id"),
                     "cell_type": cell_info.get("cell_type", "unknown"),
                     "distance": round(distance, 6),
-                    "similarity_score": round(1.0 / (1.0 + distance), 6),
+                    "similarity_score": round(
+                        _similarity_from_distance(distance, metric), 6
+                    ),
                     "metadata": cell_info,
                 }
             )
@@ -377,14 +527,232 @@ def search():
                 "include_self": include_self,
                 "use_rep": use_rep,
                 "index_backend": indexer.backend,
+                "index_type": indexer.index_type,
+                "index_metric": metric,
+                "index_config": indexer.config_summary,
                 "elapsed_ms": elapsed_ms,
                 "results": results,
             }
         )
+    except ImportError as exc:
+        return _json_response({"error": str(exc)}, 400)
     except (TypeError, ValueError, KeyError, IndexError) as exc:
         return _json_response({"error": str(exc)}, 400)
     except RuntimeError as exc:
         return _json_response({"error": str(exc)}, 503)
+
+
+@app.post("/api/benchmark")
+def benchmark_api():
+    try:
+        payload = _request_payload()
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        use_rep = payload.get("use_rep") or DEFAULT_USE_REP
+
+        query_count = _parse_int(payload, "query_count", default=500)
+        k = _parse_int(payload, "k", default=DEFAULT_TOP_K)
+
+        if query_count <= 0:
+            return _json_response({"error": "query_count must be a positive integer"}, 400)
+        if k <= 0:
+            return _json_response({"error": "k must be a positive integer"}, 400)
+        if k > MAX_TOP_K:
+            return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
+
+        loader = _get_loader(resolved_id, dataset_path)
+        vectors = loader.get_vectors(use_rep)
+        n_cells = loader.n_cells
+
+        query_count = min(query_count, n_cells)
+        if query_count <= 0:
+            return _json_response({"error": "dataset has no cells"}, 400)
+
+        max_k = min(k, n_cells, 100)
+        if max_k <= 0:
+            return _json_response({"error": "k must be <= cell count"}, 400)
+
+        rng = np.random.default_rng()
+        if query_count == n_cells:
+            query_indices = np.arange(n_cells)
+        else:
+            query_indices = rng.choice(n_cells, size=query_count, replace=False)
+        queries = vectors[query_indices]
+
+        standard_ks = [10, 20, 50, 100]
+        ks = [value for value in standard_ks if value <= max_k]
+
+        algorithms = [
+            {
+                "id": "brute",
+                "label": "精确搜索 (暴力)",
+                "config": IndexConfig(backend="numpy", index_type="brute", metric="l2"),
+            },
+            {
+                "id": "faiss_hnsw",
+                "label": "FAISS-HNSW",
+                "config": IndexConfig(
+                    backend="faiss",
+                    index_type="hnsw",
+                    metric="l2",
+                    m=16,
+                    ef_construction=200,
+                    ef_search=50,
+                ),
+            },
+            {
+                "id": "hnswlib",
+                "label": "HNSWLIB",
+                "config": IndexConfig(
+                    backend="hnswlib",
+                    index_type="hnsw",
+                    metric="l2",
+                    m=16,
+                    ef_construction=200,
+                    ef_search=50,
+                ),
+            },
+            {
+                "id": "faiss_ivf",
+                "label": "FAISS-IVF",
+                "config": IndexConfig(
+                    backend="faiss",
+                    index_type="ivf_flat",
+                    metric="l2",
+                    nlist=100,
+                    nprobe=10,
+                ),
+            },
+        ]
+
+        # Baseline: brute-force for ground truth
+        brute_algo = algorithms[0]
+        brute_indexer = _get_benchmark_indexer(
+            resolved_id, use_rep, vectors, brute_algo["config"]
+        )
+
+        truth_indices: List[np.ndarray] = []
+        start_time = time.perf_counter()
+        for query in queries:
+            _, idx = brute_indexer.search(query, max_k)
+            truth_indices.append(idx)
+        brute_elapsed = time.perf_counter() - start_time
+
+        results: List[Dict[str, Any]] = []
+
+        brute_recalls = []
+        for k_value in standard_ks:
+            if k_value <= max_k:
+                brute_recalls.append(100.0)
+            else:
+                brute_recalls.append(None)
+
+        results.append(
+            {
+                "id": brute_algo["id"],
+                "label": brute_algo["label"],
+                "available": True,
+                "avg_ms": round(brute_elapsed / query_count * 1000.0, 3),
+                "recall_curve": brute_recalls,
+            }
+        )
+
+        # Evaluate approximate algorithms
+        for algo in algorithms[1:]:
+            config = algo["config"]
+            try:
+                indexer = _get_benchmark_indexer(
+                    resolved_id, use_rep, vectors, config
+                )
+            except ImportError as exc:
+                results.append(
+                    {
+                        "id": algo["id"],
+                        "label": algo["label"],
+                        "available": False,
+                        "error": str(exc),
+                        "avg_ms": None,
+                        "recall_curve": [None for _ in standard_ks],
+                    }
+                )
+                continue
+
+            recall_sums = {k_value: 0.0 for k_value in ks}
+            start_time = time.perf_counter()
+            for idx, query in enumerate(queries):
+                _, pred_indices = indexer.search(query, max_k)
+                truth = truth_indices[idx]
+                for k_value in ks:
+                    pred_set = set(pred_indices[:k_value].tolist())
+                    truth_set = set(truth[:k_value].tolist())
+                    recall_sums[k_value] += len(pred_set.intersection(truth_set)) / k_value
+            elapsed = time.perf_counter() - start_time
+
+            recall_curve: List[Optional[float]] = []
+            for k_value in standard_ks:
+                if k_value <= max_k:
+                    recall_value = recall_sums[k_value] / query_count * 100.0
+                    recall_curve.append(round(recall_value, 2))
+                else:
+                    recall_curve.append(None)
+
+            results.append(
+                {
+                    "id": algo["id"],
+                    "label": algo["label"],
+                    "available": True,
+                    "avg_ms": round(elapsed / query_count * 1000.0, 3),
+                    "recall_curve": recall_curve,
+                }
+            )
+
+        created_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        entry = {
+            "created_at": created_at,
+            "dataset_id": resolved_id,
+            "use_rep": use_rep,
+            "query_count": query_count,
+            "k": k,
+            "k_values": standard_ks,
+            "algorithms": results,
+        }
+        history_id = _append_benchmark_history(entry)
+
+        return _json_response({
+            "dataset_id": resolved_id,
+            "use_rep": use_rep,
+            "query_count": query_count,
+            "k": k,
+            "k_values": standard_ks,
+            "algorithms": results,
+            "created_at": created_at,
+            "history_id": history_id,
+        })
+    except ImportError as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except (TypeError, ValueError, KeyError, IndexError) as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, 503)
+
+
+@app.get("/api/benchmark/history")
+def benchmark_history():
+    try:
+        payload = dict(request.args)
+        limit = payload.get("limit")
+        history = _load_benchmark_history()
+        if limit:
+            try:
+                limit_value = int(limit)
+                if limit_value > 0:
+                    history = history[-limit_value:]
+            except ValueError:
+                pass
+        return _json_response({"history": history})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
 
 
 def _json_response(payload: Any, status_code: int = 200):
@@ -425,6 +793,16 @@ def _parse_int(
         raise ValueError(f"{key} must be an integer") from exc
 
 
+def _parse_optional_int(payload: Dict[str, Any], key: str) -> Optional[int]:
+    value = payload.get(key)
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be an integer") from exc
+
+
 def _parse_bool(value: Any, default: bool = False) -> bool:
     if value is None or value == "":
         return default
@@ -437,6 +815,14 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
         if normalized in {"0", "false", "no", "n", "off"}:
             return False
     raise ValueError("include_self must be a boolean")
+
+
+def _similarity_from_distance(distance: float, metric: str) -> float:
+    if metric == "cosine":
+        return 1.0 - distance
+    if metric == "ip":
+        return -distance
+    return 1.0 / (1.0 + distance)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))

@@ -40,6 +40,14 @@
         color: white;
         outline: none;
     }
+    .dark-control:disabled,
+    .dark-control[disabled] {
+        background-color: rgba(0, 0, 0, 0.25);
+        border-color: rgba(255, 255, 255, 0.1);
+        color: #FFFFFF;
+        opacity: 1;
+        cursor: not-allowed;
+    }
     .dark-control option { background-color: #141A30; color: white; }
 
     .form-range::-webkit-slider-thumb { background: #923a73; }
@@ -120,6 +128,90 @@
                     <input type="range" class="form-range" min="5" max="100" step="5" value="20" id="topKSlider">
                 </div>
 
+                <div class="mb-4">
+                    <label class="form-label">索引后端</label>
+                    <select class="form-select dark-control" id="indexBackendSelect">
+                        <option value="auto" selected>auto（优先 FAISS）</option>
+                        <option value="faiss">FAISS</option>
+                        <option value="hnswlib">HNSWLIB</option>
+                        <option value="numpy">NumPy（暴力基准）</option>
+                    </select>
+                    <div class="form-text" style="color: #6f7c92;">auto：优先 FAISS，其次 HNSWLIB，最后 NumPy。</div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label">索引类型</label>
+                    <select class="form-select dark-control" id="indexTypeSelect">
+                        <option value="flat" selected>flat（精确）</option>
+                        <option value="ivf_flat">ivf_flat（近似）</option>
+                        <option value="hnsw">hnsw（近似）</option>
+                        <option value="brute">brute（暴力）</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label">距离度量</label>
+                    <select class="form-select dark-control" id="indexMetricSelect">
+                        <option value="l2" selected>L2</option>
+                        <option value="cosine">Cosine</option>
+                        <option value="ip">Inner Product</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label">高级参数</label>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">nlist</label>
+                            <input type="number" min="1" class="form-control dark-control" id="nlistInput" value="100">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">nprobe</label>
+                            <input type="number" min="1" class="form-control dark-control" id="nprobeInput" value="10">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">M</label>
+                            <input type="number" min="2" class="form-control dark-control" id="mInput" value="16">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">ef 构建</label>
+                            <input type="number" min="1" class="form-control dark-control" id="efConstructionInput" value="200">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">ef 查询</label>
+                            <input type="number" min="1" class="form-control dark-control" id="efSearchInput" value="50">
+                        </div>
+                    </div>
+                    <div class="form-text" style="color: #6f7c92;" id="indexParamHint">IVF 使用 nlist/nprobe；HNSW 使用 M/ef_*。</div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label">索引生效配置</label>
+                    <div class="p-3" style="background-color: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">
+                        <div class="d-flex justify-content-between" style="font-size: 0.85rem; color: #8A96A8;">
+                            <span>backend</span>
+                            <span id="effectiveBackend" class="text-white">-</span>
+                        </div>
+                        <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
+                            <span>index_type</span>
+                            <span id="effectiveIndexType" class="text-white">-</span>
+                        </div>
+                        <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
+                            <span>metric</span>
+                            <span id="effectiveMetric" class="text-white">-</span>
+                        </div>
+                        <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
+                            <span>nlist / nprobe</span>
+                            <span id="effectiveIVF" class="text-white">-</span>
+                        </div>
+                        <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
+                            <span>M / ef构建 / ef查询</span>
+                            <span id="effectiveHNSW" class="text-white">-</span>
+                        </div>
+                        <div class="mt-2" style="color: #6f7c92; font-size: 0.78rem;">显示最终实际生效配置（含自动回退）。</div>
+                    </div>
+                </div>
+
                 <div class="mb-5">
                     <label class="form-label">限定细胞类型 (可选过滤)</label>
                     <select class="form-select dark-control">
@@ -196,7 +288,7 @@
                         <th class="ps-4">Rank</th>
                         <th>细胞 ID</th>
                         <th>细胞类型 (Cell Type)</th>
-                        <th>距离得分 (L2 Distance)</th>
+                        <th id="distanceHeader">距离得分 (L2 Distance)</th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -220,7 +312,97 @@
     const slider = document.getElementById('topKSlider');
     const kValue = document.getElementById('k-value');
     const datasetSelect = document.getElementById('datasetSelect');
+    const indexBackendSelect = document.getElementById('indexBackendSelect');
+    const indexTypeSelect = document.getElementById('indexTypeSelect');
+    const indexMetricSelect = document.getElementById('indexMetricSelect');
+    const nlistInput = document.getElementById('nlistInput');
+    const nprobeInput = document.getElementById('nprobeInput');
+    const mInput = document.getElementById('mInput');
+    const efConstructionInput = document.getElementById('efConstructionInput');
+    const efSearchInput = document.getElementById('efSearchInput');
+    const distanceHeader = document.getElementById('distanceHeader');
+    const indexParamHint = document.getElementById('indexParamHint');
+    const effectiveBackend = document.getElementById('effectiveBackend');
+    const effectiveIndexType = document.getElementById('effectiveIndexType');
+    const effectiveMetric = document.getElementById('effectiveMetric');
+    const effectiveIVF = document.getElementById('effectiveIVF');
+    const effectiveHNSW = document.getElementById('effectiveHNSW');
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
+
+    function setDistanceHeader(metric) {
+        if (metric === 'cosine') {
+            distanceHeader.innerText = '距离得分 (1 - Cosine)';
+        } else if (metric === 'ip') {
+            distanceHeader.innerText = '距离得分 (-Inner Product)';
+        } else {
+            distanceHeader.innerText = '距离得分 (L2 Distance)';
+        }
+    }
+
+    function updateIndexParamState() {
+        const backend = indexBackendSelect.value;
+
+        const allOptions = Array.from(indexTypeSelect.options);
+        allOptions.forEach(opt => { opt.disabled = false; });
+
+        if (backend === 'numpy') {
+            allOptions.forEach(opt => {
+                if (!['flat', 'brute'].includes(opt.value)) opt.disabled = true;
+            });
+            if (!['flat', 'brute'].includes(indexTypeSelect.value)) {
+                indexTypeSelect.value = 'brute';
+            }
+        } else if (backend === 'hnswlib') {
+            allOptions.forEach(opt => {
+                if (opt.value !== 'hnsw') opt.disabled = true;
+            });
+            indexTypeSelect.value = 'hnsw';
+        } else if (backend === 'faiss') {
+            allOptions.forEach(opt => { opt.disabled = false; });
+        }
+
+        const indexType = indexTypeSelect.value;
+        const enableIVF = indexType === 'ivf_flat';
+        const enableHNSW = indexType === 'hnsw';
+
+        nlistInput.disabled = !enableIVF;
+        nprobeInput.disabled = !enableIVF;
+        mInput.disabled = !enableHNSW;
+        efConstructionInput.disabled = !enableHNSW;
+        efSearchInput.disabled = !enableHNSW;
+
+        if (indexType === 'ivf_flat') {
+            indexParamHint.innerText = 'IVF 使用 nlist/nprobe（FAISS）。';
+        } else if (indexType === 'hnsw') {
+            indexParamHint.innerText = 'HNSW 使用 M/ef_construction/ef_search。';
+        } else {
+            indexParamHint.innerText = '当前索引类型无需高级参数。';
+        }
+    }
+
+    indexBackendSelect.addEventListener('change', updateIndexParamState);
+    indexTypeSelect.addEventListener('change', updateIndexParamState);
+    indexMetricSelect.addEventListener('change', () => setDistanceHeader(indexMetricSelect.value));
+    updateIndexParamState();
+    setDistanceHeader(indexMetricSelect.value);
+
+    function updateEffectiveConfigDisplay(data, fallback) {
+        const config = (data && data.index_config) ? data.index_config : {};
+        const backend = data?.index_backend || config.backend || fallback.index_backend || '-';
+        const indexType = data?.index_type || config.index_type || fallback.index_type || '-';
+        const metric = data?.index_metric || config.metric || fallback.index_metric || '-';
+        const nlist = config.nlist ?? fallback.nlist ?? '-';
+        const nprobe = config.nprobe ?? fallback.nprobe ?? '-';
+        const m = config.m ?? fallback.m ?? '-';
+        const efConstruction = config.ef_construction ?? fallback.ef_construction ?? '-';
+        const efSearch = config.ef_search ?? fallback.ef_search ?? '-';
+
+        effectiveBackend.innerText = backend;
+        effectiveIndexType.innerText = indexType;
+        effectiveMetric.innerText = metric;
+        effectiveIVF.innerText = `${nlist} / ${nprobe}`;
+        effectiveHNSW.innerText = `${m} / ${efConstruction} / ${efSearch}`;
+    }
 
     const cellCategories = [
         { name: 'T cell', color: '#4A90E2', count: 341, center: [-20, 20] },
@@ -329,6 +511,9 @@
         const topK = parseInt(slider.value);
         const cellId = document.getElementById('queryCellId').value.trim();
         const datasetId = datasetSelect.value;
+        const indexBackend = indexBackendSelect.value;
+        const indexType = indexTypeSelect.value;
+        const indexMetric = indexMetricSelect.value;
 
         if (!datasetId) {
             alert('请先选择数据集');
@@ -346,10 +531,31 @@
         tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">正在进行高维空间近邻计算...</td></tr>';
 
         try {
+            const payload = {
+                dataset_id: datasetId,
+                cell_id: cellId,
+                k: topK,
+                index_backend: indexBackend,
+                index_type: indexType,
+                index_metric: indexMetric
+            };
+
+            const nlist = parseInt(nlistInput.value, 10);
+            const nprobe = parseInt(nprobeInput.value, 10);
+            const m = parseInt(mInput.value, 10);
+            const efConstruction = parseInt(efConstructionInput.value, 10);
+            const efSearch = parseInt(efSearchInput.value, 10);
+
+            if (!Number.isNaN(nlist)) payload.nlist = nlist;
+            if (!Number.isNaN(nprobe)) payload.nprobe = nprobe;
+            if (!Number.isNaN(m)) payload.m = m;
+            if (!Number.isNaN(efConstruction)) payload.ef_construction = efConstruction;
+            if (!Number.isNaN(efSearch)) payload.ef_search = efSearch;
+
             const res = await fetch('/api/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ dataset_id: datasetId, cell_id: cellId, k: topK })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || '检索失败');
@@ -375,7 +581,9 @@
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
             statusBadge.className = 'badge bg-success me-3';
-            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>耗时 ${data.elapsed_ms}ms | ${data.index_backend || 'ANN'}`;
+            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>耗时 ${data.elapsed_ms}ms | ${data.index_backend || 'ANN'} / ${data.index_type || indexType} / ${data.index_metric || indexMetric}`;
+            setDistanceHeader(data.index_metric || indexMetric);
+            updateEffectiveConfigDisplay(data, payload);
         } catch (err) {
             tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #ff6b6b;">检索失败，请检查输入或后端日志</td></tr>';
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';

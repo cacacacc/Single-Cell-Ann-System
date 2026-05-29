@@ -15,7 +15,10 @@ cd Single-Cell-Ann-System
 ```bash
 pip install -r requirements.txt
 ```
-
+注意，windows下FAISS不会安装，建议使用conda进行安装：
+```bash
+conda install -c conda-forge faiss-cpu
+```
 3. 下载数据，重命名为`liver.h5ad`后放入 `data/` 目录，下载链接如下：`https://datasets.cellxgene.cziscience.com/10cc50a0-af80-4fa1-b668-893dd5c0113a.h5ad`。
 4. 启动项目根目录的app.py：
 ```bash
@@ -46,7 +49,9 @@ http://127.0.0.1:5000
 
 ### 3. ANN 索引构建
 
-- 支持使用 FAISS 或 HNSWLIB 构建近似最近邻索引
+- 支持使用 FAISS 或 HNSWLIB 构建近似最近邻索引，NumPy 暴力检索可作为 recall 基准
+- 支持配置索引类型与距离度量（`flat`/`ivf_flat`/`hnsw`、`l2`/`cosine`/`ip`）
+- 支持 HNSW/IVF 关键参数配置（`M`/`ef_*`/`nlist`/`nprobe`）
 - 支持输入查询向量并返回 Top-K 相似细胞
 - 返回相似细胞的内部编号和距离
 - 支持索引文件保存与加载，减少重复构建时间

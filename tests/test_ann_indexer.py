@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from backend.ann_indexer import ANNIndexer
+from backend.ann_indexer import ANNIndexer, IndexConfig
 
 
 class ANNIndexerTests(unittest.TestCase):
@@ -98,6 +98,27 @@ class ANNIndexerTests(unittest.TestCase):
             indexer.save_index(path)
 
             loaded = ANNIndexer(dim=5)
+            with self.assertRaises(ValueError):
+                loaded.load_index(path)
+
+    def test_cosine_metric_numpy_backend(self) -> None:
+        indexer = ANNIndexer(dim=6, config=IndexConfig(backend="numpy", metric="cosine"))
+        indexer.build_index(self.vectors)
+
+        distances, indices = indexer.search(self.vectors[0], k=3)
+
+        self.assertEqual(indices[0], 0)
+        self.assertAlmostEqual(float(distances[0]), 0.0, places=6)
+
+    def test_load_rejects_metric_mismatch(self) -> None:
+        indexer = ANNIndexer(dim=6, config=IndexConfig(metric="l2"))
+        indexer.build_index(self.vectors)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cell_index.index"
+            indexer.save_index(path)
+
+            loaded = ANNIndexer(dim=6, config=IndexConfig(metric="cosine"))
             with self.assertRaises(ValueError):
                 loaded.load_index(path)
 
