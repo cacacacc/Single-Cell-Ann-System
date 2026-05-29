@@ -15,7 +15,10 @@ cd Single-Cell-Ann-System
 ```bash
 pip install -r requirements.txt
 ```
-
+注意，windows下FAISS不会安装，建议使用conda进行安装：
+```bash
+conda install -c conda-forge faiss-cpu
+```
 3. 下载数据，重命名为`liver.h5ad`后放入 `data/` 目录，下载链接如下：`https://datasets.cellxgene.cziscience.com/10cc50a0-af80-4fa1-b668-893dd5c0113a.h5ad`。
 4. 启动项目根目录的app.py：
 ```bash

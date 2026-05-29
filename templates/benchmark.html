@@ -74,9 +74,8 @@
             <form id="benchmarkForm">
                 <div class="mb-4">
                     <label class="form-label">评测数据集</label>
-                    <select class="form-select dark-control">
-                        <option>Adult_Liver_Atlas (10万级)</option>
-                        <option>Pediatric_Liver_CZI (5万级)</option>
+                    <select class="form-select dark-control" id="benchmarkDatasetSelect">
+                        <option value="" disabled selected>正在加载数据集...</option>
                     </select>
                 </div>
 
@@ -115,6 +114,13 @@
                 <button type="button" class="btn btn-glow-purple w-100" id="startBenchmarkBtn">
                     <i class="fa-solid fa-rocket me-2"></i>开始性能跑分
                 </button>
+
+                <div class="mt-4">
+                    <label class="form-label">历史记录</label>
+                    <div class="p-3" style="background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                        <div id="benchmarkHistory" style="color: #8A96A8; font-size: 0.85rem;">暂无记录</div>
+                    </div>
+                </div>
             </form>
         </div>
     </div>
@@ -132,6 +138,8 @@
                 <div class="stat-badge" id="stat-recall" style="color: #2ecc71; border-color: rgba(46,204,113,0.3); background-color: rgba(46,204,113,0.1);">Recall: -- %</div>
             </div>
         </div>
+
+        <div id="benchmarkWarning" class="mb-3" style="color: #F5A623; font-size: 0.85rem; display: none;"></div>
 
         <!-- 1. 速度对比柱状图 -->
         <div class="dark-card mb-4" style="padding: 20px;">
@@ -154,6 +162,9 @@
     // 滑动条联动
     const slider = document.getElementById('topKSlider');
     const kValue = document.getElementById('k-value');
+    const datasetSelect = document.getElementById('benchmarkDatasetSelect');
+    const queryCountInput = document.getElementById('queryCount');
+    const historyContainer = document.getElementById('benchmarkHistory');
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
 
     // ================= 初始化 ECharts 实例 =================
@@ -201,50 +212,199 @@
     };
     recallChart.setOption(recallOption);
 
+    const algoColors = {
+        brute: '#ff4757',
+        faiss_hnsw: '#4A90E2',
+        hnswlib: '#1ABC9C',
+        faiss_ivf: '#E83E8C'
+    };
+
+    function buildRecallSeries(algorithms, kLabels) {
+        return algorithms.map(algo => {
+            const color = algoColors[algo.id] || '#8A96A8';
+            const isExact = algo.id === 'brute';
+            return {
+                name: algo.label,
+                type: 'line',
+                data: algo.recall_curve || kLabels.map(() => null),
+                lineStyle: { type: isExact ? 'dashed' : 'solid', color },
+                itemStyle: { color },
+                smooth: !isExact
+            };
+        });
+    }
+
+    function updateStats(algorithms) {
+        const approx = algorithms.filter(item => item.available && item.id !== 'brute');
+        const statTime = document.getElementById('stat-time');
+        const statRecall = document.getElementById('stat-recall');
+
+        if (approx.length === 0) {
+            statTime.innerText = 'Avg Time: -- ms';
+            statRecall.innerText = 'Recall: -- %';
+            return;
+        }
+
+        const fastest = approx.reduce((best, item) => {
+            if (best === null) return item;
+            if (item.avg_ms === null || item.avg_ms === undefined) return best;
+            return item.avg_ms < best.avg_ms ? item : best;
+        }, null);
+
+        const bestRecall = approx.reduce((best, item) => {
+            const recalls = (item.recall_curve || []).filter(val => val !== null && val !== undefined);
+            const last = recalls.length ? recalls[recalls.length - 1] : null;
+            if (last === null) return best;
+            if (best === null || last > best.value) {
+                return { label: item.label, value: last };
+            }
+            return best;
+        }, null);
+
+        if (fastest) {
+            statTime.innerText = `${fastest.label}: ${fastest.avg_ms.toFixed(2)} ms`;
+        } else {
+            statTime.innerText = 'Avg Time: -- ms';
+        }
+
+        if (bestRecall) {
+            statRecall.innerText = `${bestRecall.label} Recall: ${bestRecall.value.toFixed(2)} %`;
+        } else {
+            statRecall.innerText = 'Recall: -- %';
+        }
+    }
+
+    function renderBenchmarkResult(data) {
+        const algorithms = data.algorithms || [];
+        const kValues = data.k_values || [10, 20, 50, 100];
+        const kLabels = kValues.map(k => `Top-${k}`);
+        const warningBox = document.getElementById('benchmarkWarning');
+
+        const unavailable = algorithms.filter(item => !item.available);
+        if (unavailable.length > 0) {
+            const labels = unavailable.map(item => item.label).join('、');
+            warningBox.innerText = `以下算法不可用（缺少依赖或配置不支持）：${labels}`;
+            warningBox.style.display = 'block';
+        } else {
+            warningBox.style.display = 'none';
+        }
+
+        const categories = algorithms.map(item => item.label);
+        const barData = algorithms.map(item => {
+            if (!item.available || item.avg_ms === null || item.avg_ms === undefined) {
+                return { value: null, itemStyle: { color: '#3A435E' } };
+            }
+            return { value: item.avg_ms, itemStyle: { color: algoColors[item.id] || '#4A90E2' } };
+        });
+
+        timeChart.setOption({
+            xAxis: { type: 'category', data: categories, ...commonTheme.xAxis },
+            series: [{ data: barData }]
+        });
+
+        recallChart.setOption({
+            legend: { data: algorithms.map(item => item.label), ...commonTheme.legend },
+            xAxis: { type: 'category', data: kLabels, name: 'K值', ...commonTheme.xAxis },
+            series: buildRecallSeries(algorithms, kLabels)
+        });
+
+        updateStats(algorithms);
+    }
+
+    async function loadDatasets() {
+        try {
+            const res = await fetch('/api/datasets');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '数据集加载失败');
+            if (!data.datasets || data.datasets.length === 0) {
+                datasetSelect.innerHTML = '<option value="" disabled selected>暂无数据集</option>';
+                datasetSelect.disabled = true;
+                return;
+            }
+            datasetSelect.innerHTML = data.datasets
+                .map(ds => `<option value="${ds.id}">${ds.filename}</option>`)
+                .join('');
+        } catch (err) {
+            datasetSelect.innerHTML = '<option value="" disabled selected>加载失败</option>';
+            datasetSelect.disabled = true;
+        }
+    }
+
+    async function loadBenchmarkHistory() {
+        try {
+            const res = await fetch('/api/benchmark/history?limit=5');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '历史记录加载失败');
+            const history = data.history || [];
+            if (history.length === 0) {
+                historyContainer.innerText = '暂无记录';
+                return;
+            }
+            historyContainer.innerHTML = history
+                .slice(-5)
+                .reverse()
+                .map(item => {
+                    return `
+                        <div class="d-flex justify-content-between" style="font-size: 0.82rem;">
+                            <span>${item.created_at}</span>
+                            <span>Q:${item.query_count} | K:${item.k}</span>
+                        </div>
+                    `;
+                })
+                .join('');
+        } catch (err) {
+            historyContainer.innerText = '历史记录加载失败';
+        }
+    }
+
     // ================= 点击【开始跑分】的交互逻辑 =================
-    document.getElementById('startBenchmarkBtn').addEventListener('click', function() {
+    document.getElementById('startBenchmarkBtn').addEventListener('click', async function() {
         const btn = this;
+        const datasetId = datasetSelect.value;
+        const queryCount = parseInt(queryCountInput.value, 10);
+        const topK = parseInt(slider.value, 10);
+
+        if (!datasetId) {
+            alert('请先选择数据集');
+            return;
+        }
+
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>正在压测计算...';
         btn.disabled = true;
 
-        // 图表进入 Loading 状态
         timeChart.showLoading({ text: '引擎运算中...', color: '#4A90E2', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
         recallChart.showLoading({ text: '召回率评估中...', color: '#E83E8C', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
 
-        // 模拟后端处理时间 (2秒)
-        setTimeout(() => {
-            timeChart.hideLoading();
-            recallChart.hideLoading();
-
-            // 1. 填入模拟的速度对比数据 (极大的反差以体现ANN的价值)
-            timeChart.setOption({
-                series: [{
-                    data: [
-                        { value: 1250.4, itemStyle: { color: '#ff4757' } }, // 精确搜索很慢，标红
-                        { value: 12.5, itemStyle: { color: '#4A90E2' } },  // HNSW 极快
-                        { value: 25.8, itemStyle: { color: '#E83E8C' } }   // IVF 也很快
-                    ]
-                }]
+        try {
+            const res = await fetch('/api/benchmark', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dataset_id: datasetId,
+                    query_count: queryCount,
+                    k: topK
+                })
             });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '跑分失败');
 
-            // 2. 填入模拟的精度数据 (HNSW精度极高，IVF稍弱)
-            recallChart.setOption({
-                series: [
-                    { name: '精确搜索', data: [100, 100, 100, 100] },
-                    { name: 'FAISS-HNSW', data: [96.5, 98.2, 99.1, 99.8] },
-                    { name: 'FAISS-IVF', data: [91.2, 94.5, 96.8, 98.5] }
-                ]
-            });
+            renderBenchmarkResult(data);
+            await loadBenchmarkHistory();
 
-            // 3. 更新顶部数据徽章
-            document.getElementById('stat-time').innerText = "HNSW: 12.5 ms";
-            document.getElementById('stat-recall').innerText = "HNSW Recall: 98.2 %";
-
-            // 恢复按钮状态
             btn.innerHTML = '<i class="fa-solid fa-rocket me-2"></i>重新开始跑分';
             btn.disabled = false;
-        }, 2000);
+        } catch (err) {
+            btn.innerHTML = '<i class="fa-solid fa-rocket me-2"></i>开始性能跑分';
+            btn.disabled = false;
+            alert(err.message || '跑分失败，请检查后端日志');
+        } finally {
+            timeChart.hideLoading();
+            recallChart.hideLoading();
+        }
     });
+
+    loadDatasets();
+    loadBenchmarkHistory();
 
     // 窗口调整适配
     window.addEventListener('resize', () => {

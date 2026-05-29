@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -25,6 +27,8 @@ ALLOWED_EXTENSIONS = {".h5ad"}
 
 _DATASET_CACHE: Dict[str, DataLoader] = {}
 _INDEX_CACHE: Dict[Tuple[str, str], Tuple[ANNIndexer, Tuple[Any, ...]]] = {}
+_BENCHMARK_INDEX_CACHE: Dict[Tuple[str, str, Tuple[Any, ...]], ANNIndexer] = {}
+_BENCHMARK_HISTORY_PATH = DATA_DIR / "benchmark_history.json"
 
 
 def _normalize_dataset_id(dataset_id: Optional[str]) -> Optional[str]:
@@ -174,6 +178,48 @@ def _get_indexer(
 
     _INDEX_CACHE[cache_key] = (indexer, config_key)
     return indexer
+
+
+def _get_benchmark_indexer(
+    dataset_id: str,
+    use_rep: str,
+    vectors: np.ndarray,
+    config: IndexConfig,
+) -> ANNIndexer:
+    cache_key = (dataset_id, use_rep, _config_cache_key(config))
+    cached = _BENCHMARK_INDEX_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    indexer = ANNIndexer(dim=vectors.shape[1], config=config)
+    indexer.build_index(vectors)
+    _BENCHMARK_INDEX_CACHE[cache_key] = indexer
+    return indexer
+
+
+def _load_benchmark_history() -> List[Dict[str, Any]]:
+    if not _BENCHMARK_HISTORY_PATH.exists():
+        return []
+    try:
+        return json.loads(_BENCHMARK_HISTORY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _save_benchmark_history(history: List[Dict[str, Any]]) -> None:
+    _BENCHMARK_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _BENCHMARK_HISTORY_PATH.write_text(
+        json.dumps(history, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _append_benchmark_history(entry: Dict[str, Any], keep_last: int = 50) -> int:
+    history = _load_benchmark_history()
+    history.append(entry)
+    if keep_last > 0 and len(history) > keep_last:
+        history = history[-keep_last:]
+    _save_benchmark_history(history)
+    return len(history) - 1
 
 
 def _dataset_payload(dataset_id: str, dataset_path: Path) -> Dict[str, Any]:
@@ -494,6 +540,219 @@ def search():
         return _json_response({"error": str(exc)}, 400)
     except RuntimeError as exc:
         return _json_response({"error": str(exc)}, 503)
+
+
+@app.post("/api/benchmark")
+def benchmark_api():
+    try:
+        payload = _request_payload()
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        use_rep = payload.get("use_rep") or DEFAULT_USE_REP
+
+        query_count = _parse_int(payload, "query_count", default=500)
+        k = _parse_int(payload, "k", default=DEFAULT_TOP_K)
+
+        if query_count <= 0:
+            return _json_response({"error": "query_count must be a positive integer"}, 400)
+        if k <= 0:
+            return _json_response({"error": "k must be a positive integer"}, 400)
+        if k > MAX_TOP_K:
+            return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
+
+        loader = _get_loader(resolved_id, dataset_path)
+        vectors = loader.get_vectors(use_rep)
+        n_cells = loader.n_cells
+
+        query_count = min(query_count, n_cells)
+        if query_count <= 0:
+            return _json_response({"error": "dataset has no cells"}, 400)
+
+        max_k = min(k, n_cells, 100)
+        if max_k <= 0:
+            return _json_response({"error": "k must be <= cell count"}, 400)
+
+        rng = np.random.default_rng()
+        if query_count == n_cells:
+            query_indices = np.arange(n_cells)
+        else:
+            query_indices = rng.choice(n_cells, size=query_count, replace=False)
+        queries = vectors[query_indices]
+
+        standard_ks = [10, 20, 50, 100]
+        ks = [value for value in standard_ks if value <= max_k]
+
+        algorithms = [
+            {
+                "id": "brute",
+                "label": "精确搜索 (暴力)",
+                "config": IndexConfig(backend="numpy", index_type="brute", metric="l2"),
+            },
+            {
+                "id": "faiss_hnsw",
+                "label": "FAISS-HNSW",
+                "config": IndexConfig(
+                    backend="faiss",
+                    index_type="hnsw",
+                    metric="l2",
+                    m=16,
+                    ef_construction=200,
+                    ef_search=50,
+                ),
+            },
+            {
+                "id": "hnswlib",
+                "label": "HNSWLIB",
+                "config": IndexConfig(
+                    backend="hnswlib",
+                    index_type="hnsw",
+                    metric="l2",
+                    m=16,
+                    ef_construction=200,
+                    ef_search=50,
+                ),
+            },
+            {
+                "id": "faiss_ivf",
+                "label": "FAISS-IVF",
+                "config": IndexConfig(
+                    backend="faiss",
+                    index_type="ivf_flat",
+                    metric="l2",
+                    nlist=100,
+                    nprobe=10,
+                ),
+            },
+        ]
+
+        # Baseline: brute-force for ground truth
+        brute_algo = algorithms[0]
+        brute_indexer = _get_benchmark_indexer(
+            resolved_id, use_rep, vectors, brute_algo["config"]
+        )
+
+        truth_indices: List[np.ndarray] = []
+        start_time = time.perf_counter()
+        for query in queries:
+            _, idx = brute_indexer.search(query, max_k)
+            truth_indices.append(idx)
+        brute_elapsed = time.perf_counter() - start_time
+
+        results: List[Dict[str, Any]] = []
+
+        brute_recalls = []
+        for k_value in standard_ks:
+            if k_value <= max_k:
+                brute_recalls.append(100.0)
+            else:
+                brute_recalls.append(None)
+
+        results.append(
+            {
+                "id": brute_algo["id"],
+                "label": brute_algo["label"],
+                "available": True,
+                "avg_ms": round(brute_elapsed / query_count * 1000.0, 3),
+                "recall_curve": brute_recalls,
+            }
+        )
+
+        # Evaluate approximate algorithms
+        for algo in algorithms[1:]:
+            config = algo["config"]
+            try:
+                indexer = _get_benchmark_indexer(
+                    resolved_id, use_rep, vectors, config
+                )
+            except ImportError as exc:
+                results.append(
+                    {
+                        "id": algo["id"],
+                        "label": algo["label"],
+                        "available": False,
+                        "error": str(exc),
+                        "avg_ms": None,
+                        "recall_curve": [None for _ in standard_ks],
+                    }
+                )
+                continue
+
+            recall_sums = {k_value: 0.0 for k_value in ks}
+            start_time = time.perf_counter()
+            for idx, query in enumerate(queries):
+                _, pred_indices = indexer.search(query, max_k)
+                truth = truth_indices[idx]
+                for k_value in ks:
+                    pred_set = set(pred_indices[:k_value].tolist())
+                    truth_set = set(truth[:k_value].tolist())
+                    recall_sums[k_value] += len(pred_set.intersection(truth_set)) / k_value
+            elapsed = time.perf_counter() - start_time
+
+            recall_curve: List[Optional[float]] = []
+            for k_value in standard_ks:
+                if k_value <= max_k:
+                    recall_value = recall_sums[k_value] / query_count * 100.0
+                    recall_curve.append(round(recall_value, 2))
+                else:
+                    recall_curve.append(None)
+
+            results.append(
+                {
+                    "id": algo["id"],
+                    "label": algo["label"],
+                    "available": True,
+                    "avg_ms": round(elapsed / query_count * 1000.0, 3),
+                    "recall_curve": recall_curve,
+                }
+            )
+
+        created_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        entry = {
+            "created_at": created_at,
+            "dataset_id": resolved_id,
+            "use_rep": use_rep,
+            "query_count": query_count,
+            "k": k,
+            "k_values": standard_ks,
+            "algorithms": results,
+        }
+        history_id = _append_benchmark_history(entry)
+
+        return _json_response({
+            "dataset_id": resolved_id,
+            "use_rep": use_rep,
+            "query_count": query_count,
+            "k": k,
+            "k_values": standard_ks,
+            "algorithms": results,
+            "created_at": created_at,
+            "history_id": history_id,
+        })
+    except ImportError as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except (TypeError, ValueError, KeyError, IndexError) as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, 503)
+
+
+@app.get("/api/benchmark/history")
+def benchmark_history():
+    try:
+        payload = dict(request.args)
+        limit = payload.get("limit")
+        history = _load_benchmark_history()
+        if limit:
+            try:
+                limit_value = int(limit)
+                if limit_value > 0:
+                    history = history[-limit_value:]
+            except ValueError:
+                pass
+        return _json_response({"history": history})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
 
 
 def _json_response(payload: Any, status_code: int = 200):
