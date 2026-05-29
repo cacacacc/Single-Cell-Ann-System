@@ -201,6 +201,8 @@ def create_app(
                 return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
 
             return _json_response(service.search(cell_index, k, include_self=include_self))
+        except ImportError as exc:
+            return _json_response({"error": str(exc)}, 400)
         except (TypeError, ValueError, KeyError, IndexError) as exc:
             return _json_response({"error": str(exc)}, 400)
         except RuntimeError as exc:

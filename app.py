@@ -403,6 +403,8 @@ def build_index():
                 "index_config": indexer.config_summary,
             }
         )
+    except ImportError as exc:
+        return _json_response({"error": str(exc)}, 400)
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
 
@@ -486,6 +488,8 @@ def search():
                 "results": results,
             }
         )
+    except ImportError as exc:
+        return _json_response({"error": str(exc)}, 400)
     except (TypeError, ValueError, KeyError, IndexError) as exc:
         return _json_response({"error": str(exc)}, 400)
     except RuntimeError as exc:
