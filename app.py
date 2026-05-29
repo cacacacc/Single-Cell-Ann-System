@@ -10,7 +10,7 @@ from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from backend.ann_indexer import ANNIndexer
+from backend.ann_indexer import ANNIndexer, IndexConfig
 from backend.data_reader import DataLoader
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -24,7 +24,7 @@ MAX_TOP_K = 100
 ALLOWED_EXTENSIONS = {".h5ad"}
 
 _DATASET_CACHE: Dict[str, DataLoader] = {}
-_INDEX_CACHE: Dict[Tuple[str, str], ANNIndexer] = {}
+_INDEX_CACHE: Dict[Tuple[str, str], Tuple[ANNIndexer, Tuple[Any, ...]]] = {}
 
 
 def _normalize_dataset_id(dataset_id: Optional[str]) -> Optional[str]:
@@ -63,6 +63,65 @@ def _backup_index_path(index_path: Path) -> Path:
     return Path(f"{index_path}.npz")
 
 
+def _index_config_from_env() -> IndexConfig:
+    return IndexConfig.from_env()
+
+
+def _config_cache_key(config: IndexConfig) -> Tuple[Any, ...]:
+    cfg = config.normalized()
+    return (
+        cfg.backend,
+        cfg.index_type,
+        cfg.metric,
+        cfg.nlist,
+        cfg.nprobe,
+        cfg.m,
+        cfg.ef_construction,
+        cfg.ef_search,
+    )
+
+
+def _index_config_from_payload(payload: Dict[str, Any]) -> IndexConfig:
+    config = _index_config_from_env()
+    overrides: Dict[str, Any] = {}
+
+    backend = payload.get("index_backend")
+    if backend not in (None, ""):
+        overrides["backend"] = backend
+
+    index_type = payload.get("index_type")
+    if index_type not in (None, ""):
+        overrides["index_type"] = index_type
+
+    metric = payload.get("index_metric")
+    if metric not in (None, ""):
+        overrides["metric"] = metric
+
+    nlist = _parse_optional_int(payload, "nlist")
+    if nlist is not None:
+        overrides["nlist"] = nlist
+
+    nprobe = _parse_optional_int(payload, "nprobe")
+    if nprobe is not None:
+        overrides["nprobe"] = nprobe
+
+    m = _parse_optional_int(payload, "m")
+    if m is not None:
+        overrides["m"] = m
+
+    ef_construction = _parse_optional_int(payload, "ef_construction")
+    if ef_construction is not None:
+        overrides["ef_construction"] = ef_construction
+
+    ef_search = _parse_optional_int(payload, "ef_search")
+    if ef_search is not None:
+        overrides["ef_search"] = ef_search
+
+    if not overrides:
+        return config
+    return config.update(**overrides)
+
+
 def _index_path(dataset_id: str, use_rep: str) -> Path:
     return INDEX_DIR / f"{dataset_id}_{use_rep}.index"
 
@@ -77,18 +136,35 @@ def _get_loader(dataset_id: str, dataset_path: Optional[Path] = None) -> DataLoa
     return loader
 
 
-def _get_indexer(dataset_id: str, use_rep: str, build_if_missing: bool = True) -> ANNIndexer:
+def _get_indexer(
+    dataset_id: str,
+    use_rep: str,
+    index_config: IndexConfig,
+    build_if_missing: bool = True,
+) -> ANNIndexer:
     cache_key = (dataset_id, use_rep)
-    if cache_key in _INDEX_CACHE:
-        return _INDEX_CACHE[cache_key]
+    config_key = _config_cache_key(index_config)
+    cached = _INDEX_CACHE.get(cache_key)
+    if cached is not None:
+        cached_indexer, cached_key = cached
+        if cached_key == config_key:
+            return cached_indexer
 
     loader = _get_loader(dataset_id)
-    indexer = ANNIndexer(dim=loader.vector_dim(use_rep))
+    indexer = ANNIndexer(dim=loader.vector_dim(use_rep), config=index_config)
     index_path = _index_path(dataset_id, use_rep)
     backup_path = _backup_index_path(index_path)
 
     if index_path.exists() or backup_path.exists():
-        indexer.load_index(index_path)
+        try:
+            indexer.load_index(index_path)
+        except ValueError as exc:
+            if "config mismatch" in str(exc).lower() and build_if_missing:
+                vectors = loader.get_vectors(use_rep)
+                indexer.build_index(vectors)
+                indexer.save_index(index_path)
+            else:
+                raise
     elif build_if_missing:
         vectors = loader.get_vectors(use_rep)
         indexer.build_index(vectors)
@@ -96,7 +172,7 @@ def _get_indexer(dataset_id: str, use_rep: str, build_if_missing: bool = True) -
     else:
         raise FileNotFoundError("Index not found")
 
-    _INDEX_CACHE[cache_key] = indexer
+    _INDEX_CACHE[cache_key] = (indexer, config_key)
     return indexer
 
 
@@ -127,14 +203,17 @@ def _dataset_payload(dataset_id: str, dataset_path: Path) -> Dict[str, Any]:
     index_ready = index_path.exists() or _backup_index_path(index_path).exists()
     payload["index_status"] = "ready" if index_ready else "missing"
     payload["index_backend"] = None
-    cached_index = _INDEX_CACHE.get((dataset_id, DEFAULT_USE_REP))
-    if cached_index is not None:
-        payload["index_backend"] = cached_index.backend
+    cached_entry = _INDEX_CACHE.get((dataset_id, DEFAULT_USE_REP))
+    if cached_entry is not None:
+        cached_indexer, _ = cached_entry
+        payload["index_backend"] = cached_indexer.backend
 
     return payload
 
 
-def _metadata_payload(dataset_id: str, use_rep: str) -> Dict[str, Any]:
+def _metadata_payload(
+    dataset_id: str, use_rep: str, index_config: IndexConfig
+) -> Dict[str, Any]:
     loader = _get_loader(dataset_id)
     index_path = _index_path(dataset_id, use_rep)
     backup_path = _backup_index_path(index_path)
@@ -150,10 +229,19 @@ def _metadata_payload(dataset_id: str, use_rep: str) -> Dict[str, Any]:
         "vector_dim": loader.vector_dim(use_rep),
         "available_reps": loader.available_reps,
         "obs_columns": loader.obs_columns,
+        "index_config": index_config.to_dict(),
     }
-    cached_index = _INDEX_CACHE.get((dataset_id, use_rep))
-    if cached_index is not None:
-        payload["index_backend"] = cached_index.backend
+    cached_entry = _INDEX_CACHE.get((dataset_id, use_rep))
+    if cached_entry is not None:
+        cached_indexer, _ = cached_entry
+        payload["index_backend"] = cached_indexer.backend
+        payload["index_type"] = cached_indexer.index_type
+        payload["index_metric"] = cached_indexer.metric
+        payload["index_config"] = cached_indexer.config_summary
+    else:
+        payload["index_backend"] = None
+        payload["index_type"] = index_config.index_type
+        payload["index_metric"] = index_config.metric
     return payload
 
 
@@ -222,7 +310,7 @@ def health():
     try:
         dataset_path = _resolve_dataset_path(None)
         dataset_id = _dataset_id_from_path(dataset_path)
-        payload = _metadata_payload(dataset_id, DEFAULT_USE_REP)
+        payload = _metadata_payload(dataset_id, DEFAULT_USE_REP, _index_config_from_env())
         return _json_response(payload, 200)
     except Exception as exc:
         return _json_response({"error": str(exc)}, 503)
@@ -231,11 +319,13 @@ def health():
 @app.get("/api/metadata")
 def metadata():
     try:
-        dataset_id = _normalize_dataset_id(request.args.get("dataset_id"))
+        payload = dict(request.args)
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
         dataset_path = _resolve_dataset_path(dataset_id)
         resolved_id = _dataset_id_from_path(dataset_path)
-        use_rep = request.args.get("use_rep", DEFAULT_USE_REP)
-        return _json_response(_metadata_payload(resolved_id, use_rep))
+        use_rep = payload.get("use_rep", DEFAULT_USE_REP)
+        index_config = _index_config_from_payload(payload)
+        return _json_response(_metadata_payload(resolved_id, use_rep, index_config))
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
 
@@ -298,13 +388,19 @@ def build_index():
         dataset_path = _resolve_dataset_path(dataset_id)
         resolved_id = _dataset_id_from_path(dataset_path)
         use_rep = payload.get("use_rep") or DEFAULT_USE_REP
-        indexer = _get_indexer(resolved_id, use_rep, build_if_missing=True)
+        index_config = _index_config_from_payload(payload)
+        indexer = _get_indexer(
+            resolved_id, use_rep, index_config, build_if_missing=True
+        )
         return _json_response(
             {
                 "status": "built",
                 "dataset_id": resolved_id,
                 "use_rep": use_rep,
                 "backend": indexer.backend,
+                "index_type": indexer.index_type,
+                "index_metric": indexer.metric,
+                "index_config": indexer.config_summary,
             }
         )
     except Exception as exc:
@@ -319,6 +415,7 @@ def search():
         dataset_path = _resolve_dataset_path(dataset_id)
         resolved_id = _dataset_id_from_path(dataset_path)
         use_rep = payload.get("use_rep") or DEFAULT_USE_REP
+        index_config = _index_config_from_payload(payload)
 
         cell_index_value = payload.get("cell_index")
         cell_id_value = payload.get("cell_id")
@@ -338,7 +435,9 @@ def search():
         if k > MAX_TOP_K:
             return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
 
-        indexer = _get_indexer(resolved_id, use_rep, build_if_missing=True)
+        indexer = _get_indexer(
+            resolved_id, use_rep, index_config, build_if_missing=True
+        )
         query_vector = loader.get_vector(cell_index, use_rep=use_rep)
         search_k = min(k + 1 if not include_self else k, loader.n_cells)
         start_time = time.perf_counter()
@@ -346,6 +445,7 @@ def search():
         elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
         results = []
+        metric = indexer.metric
         for idx, dist in zip(indices.tolist(), distances.tolist()):
             idx = int(idx)
             distance = float(dist)
@@ -360,7 +460,9 @@ def search():
                     "cell_id": cell_info.get("cell_id"),
                     "cell_type": cell_info.get("cell_type", "unknown"),
                     "distance": round(distance, 6),
-                    "similarity_score": round(1.0 / (1.0 + distance), 6),
+                    "similarity_score": round(
+                        _similarity_from_distance(distance, metric), 6
+                    ),
                     "metadata": cell_info,
                 }
             )
@@ -377,6 +479,9 @@ def search():
                 "include_self": include_self,
                 "use_rep": use_rep,
                 "index_backend": indexer.backend,
+                "index_type": indexer.index_type,
+                "index_metric": metric,
+                "index_config": indexer.config_summary,
                 "elapsed_ms": elapsed_ms,
                 "results": results,
             }
@@ -425,6 +530,16 @@ def _parse_int(
         raise ValueError(f"{key} must be an integer") from exc
 
 
+def _parse_optional_int(payload: Dict[str, Any], key: str) -> Optional[int]:
+    value = payload.get(key)
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be an integer") from exc
+
+
 def _parse_bool(value: Any, default: bool = False) -> bool:
     if value is None or value == "":
         return default
@@ -437,6 +552,14 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
         if normalized in {"0", "false", "no", "n", "off"}:
             return False
     raise ValueError("include_self must be a boolean")
+
+
+def _similarity_from_distance(distance: float, metric: str) -> float:
+    if metric == "cosine":
+        return 1.0 - distance
+    if metric == "ip":
+        return -distance
+    return 1.0 / (1.0 + distance)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))

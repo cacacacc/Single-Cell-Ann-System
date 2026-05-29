@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -10,10 +10,10 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 try:
-    from .ann_indexer import ANNIndexer
+    from .ann_indexer import ANNIndexer, IndexConfig
     from .data_reader import DataLoader
 except ImportError:  # Allows running with: python backend/app.py
-    from ann_indexer import ANNIndexer
+    from ann_indexer import ANNIndexer, IndexConfig
     from data_reader import DataLoader
 
 
@@ -29,6 +29,7 @@ class SearchService:
     data_path: Path
     index_path: Path
     use_rep: str
+    index_config: IndexConfig = field(default_factory=IndexConfig)
     loader: Optional[DataLoader] = None
     indexer: Optional[ANNIndexer] = None
     startup_error: Optional[str] = None
@@ -41,10 +42,18 @@ class SearchService:
         try:
             self.loader = DataLoader(self.data_path)
             dim = self.loader.vector_dim(self.use_rep)
-            self.indexer = ANNIndexer(dim=dim)
+            self.indexer = ANNIndexer(dim=dim, config=self.index_config)
 
             if self.index_path.exists():
-                self.indexer.load_index(self.index_path)
+                try:
+                    self.indexer.load_index(self.index_path)
+                except ValueError as exc:
+                    if "config mismatch" in str(exc).lower():
+                        vectors = self.loader.get_vectors(self.use_rep)
+                        self.indexer.build_index(vectors)
+                        self.indexer.save_index(self.index_path)
+                    else:
+                        raise
             else:
                 vectors = self.loader.get_vectors(self.use_rep)
                 self.indexer.build_index(vectors)
@@ -59,9 +68,10 @@ class SearchService:
     def status_payload(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "ready": self.ready,
-            "data_path": str(self.data_path),
-            "index_path": str(self.index_path),
+            "data_path": self.data_path.as_posix(),
+            "index_path": self.index_path.as_posix(),
             "use_rep": self.use_rep,
+            "index_config": self.index_config.to_dict(),
         }
         if self.startup_error:
             payload["error"] = self.startup_error
@@ -74,6 +84,9 @@ class SearchService:
                     "available_reps": self.loader.available_reps,
                     "obs_columns": self.loader.obs_columns,
                     "index_backend": self.indexer.backend,
+                    "index_type": self.indexer.index_type,
+                    "index_metric": self.indexer.metric,
+                    "index_config": self.indexer.config_summary,
                 }
             )
         return payload
@@ -89,6 +102,7 @@ class SearchService:
         distances, indices = self.indexer.search(query_vector, search_k)
 
         results = []
+        metric = self.indexer.metric
         for idx, dist in zip(indices.tolist(), distances.tolist()):
             idx = int(idx)
             distance = float(dist)
@@ -103,7 +117,9 @@ class SearchService:
                     "cell_id": cell_info.get("cell_id"),
                     "cell_type": cell_info.get("cell_type", "unknown"),
                     "distance": round(distance, 6),
-                    "similarity_score": round(1.0 / (1.0 + distance), 6),
+                    "similarity_score": round(
+                        _similarity_from_distance(distance, metric), 6
+                    ),
                     "metadata": cell_info,
                 }
             )
@@ -116,6 +132,10 @@ class SearchService:
             "k": k,
             "include_self": include_self,
             "use_rep": self.use_rep,
+            "index_backend": self.indexer.backend,
+            "index_type": self.indexer.index_type,
+            "index_metric": metric,
+            "index_config": self.indexer.config_summary,
             "results": results,
         }
 
@@ -141,6 +161,7 @@ def create_app(
         data_path=Path(os.getenv("CELL_DATA_PATH", DEFAULT_DATA_PATH)),
         index_path=Path(os.getenv("CELL_INDEX_PATH", DEFAULT_INDEX_PATH)),
         use_rep=os.getenv("CELL_USE_REP", DEFAULT_USE_REP),
+        index_config=IndexConfig.from_env(),
     )
     service.initialize()
     app.config["search_service"] = service
@@ -238,6 +259,14 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
         if normalized in {"0", "false", "no", "n", "off"}:
             return False
     raise ValueError("include_self must be a boolean")
+
+
+def _similarity_from_distance(distance: float, metric: str) -> float:
+    if metric == "cosine":
+        return 1.0 - distance
+    if metric == "ip":
+        return -distance
+    return 1.0 / (1.0 + distance)
 
 
 app = create_app()

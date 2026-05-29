@@ -61,6 +61,14 @@ http://127.0.0.1:5001
 | `CELL_DATA_PATH` | `data/liver.h5ad` | 单细胞 `.h5ad` 数据文件路径 |
 | `CELL_INDEX_PATH` | `indexes/cell_index.index` | ANN 索引保存路径 |
 | `CELL_USE_REP` | `X_pca` | 使用的向量表示，如 `X`、`X_pca` |
+| `CELL_INDEX_BACKEND` | `auto` | 索引后端：`auto` / `faiss` / `hnswlib` / `numpy` |
+| `CELL_INDEX_TYPE` | `flat` | 索引类型：`flat` / `ivf_flat` / `hnsw` / `brute` |
+| `CELL_INDEX_METRIC` | `l2` | 距离度量：`l2` / `cosine` / `ip` |
+| `CELL_INDEX_NLIST` | `100` | IVF 分桶数量（`ivf_flat`） |
+| `CELL_INDEX_NPROBE` | `10` | IVF 查询探测数量（`ivf_flat`） |
+| `CELL_INDEX_M` | `16` | HNSW 图的 M 参数（`hnsw`） |
+| `CELL_INDEX_EF_CONSTRUCTION` | `200` | HNSW 构建参数（`hnsw`） |
+| `CELL_INDEX_EF_SEARCH` | `50` | HNSW 查询参数（`hnsw`） |
 | `PORT` | `5000` | Flask 服务端口 |
 
 ## 6. API 接口
@@ -132,6 +140,14 @@ Content-Type: application/json
 | `cell_index` | int | 是 | 无 | 查询细胞的编号，从 0 开始 |
 | `k` | int | 否 | `10` | 返回最相似的前 K 个细胞 |
 | `include_self` | bool | 否 | `false` | 是否在结果中包含查询细胞自身 |
+| `index_backend` | str | 否 | `auto` | 索引后端选择 |
+| `index_type` | str | 否 | `flat` | 索引类型选择 |
+| `index_metric` | str | 否 | `l2` | 距离度量选择 |
+| `nlist` | int | 否 | `100` | IVF 分桶数量 |
+| `nprobe` | int | 否 | `10` | IVF 查询探测数量 |
+| `m` | int | 否 | `16` | HNSW M 参数 |
+| `ef_construction` | int | 否 | `200` | HNSW 构建参数 |
+| `ef_search` | int | 否 | `50` | HNSW 查询参数 |
 
 返回示例：
 

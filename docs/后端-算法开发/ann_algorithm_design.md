@@ -45,22 +45,22 @@ vectors.dtype == np.float32
 
 ## 3. 算法选择
 
-本项目计划使用 FAISS / HNSWLIB 实现 ANN 近似最近邻检索。
+当前已实现：
 
-中期阶段优先实现：
+- FAISS：`IndexFlatL2` / `IndexFlatIP`、`IVFFlat`、`HNSWFlat`
+- HNSWLIB：`HNSW`（`l2`/`cosine`/`ip`）
+- NumPy：暴力检索（作为 recall 基准）
 
-- FAISS IndexFlatL2
-    
-- 或 HNSWLIB Index
-    
+支持的距离度量：
 
-后续可扩展：
+- `l2`（默认，返回平方 L2 距离）
+- `cosine`（返回 $1-\cos$ 距离）
+- `ip`（返回 $-\langle q, v \rangle$ 距离）
 
-- FAISS IVF
-    
-- FAISS HNSW
-    
-- FAISS PQ
+可配置参数（通过环境变量或 API 参数传入）：
+
+- `nlist` / `nprobe`（IVF）
+- `M` / `ef_construction` / `ef_search`（HNSW）
     
 
 ## 4. 核心流程
@@ -117,12 +117,8 @@ class ANNIndexer:
 ## 7. 后续优化方向
 
 - 支持索引缓存
-    
 - 支持多种距离度量
-    
 - 支持不同 ANN 算法对比
-    
 - 支持查询耗时统计
-    
 - 支持召回率评估
     
