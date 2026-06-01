@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- 第一排：核心指标区 -->
 <div class="row mb-4">
     <div class="col-md-3">
         <div class="dark-card d-flex justify-content-between align-items-center">
             <div>
                 <div class="mb-1" style="font-size: 0.9rem; color: var(--text-muted);">总细胞样本量</div>
-                <div class="fs-2 fw-bold mb-1">1,520,344</div>
-                <div style="font-size: 0.85rem; color: #2ecc71;"><i class="fa-solid fa-arrow-trend-up"></i> +15% 较昨日</div>
+                <div class="fs-2 fw-bold mb-1" id="totalCells">--</div>
+                <div id="totalCellsMeta" style="font-size: 0.85rem; color: #2ecc71;">
+                    <i class="fa-solid fa-database"></i> 来自已加载数据集
+                </div>
             </div>
             <i class="fa-solid fa-vial-virus fa-2x" style="color: #222B45;"></i>
         </div>
@@ -17,8 +18,10 @@
         <div class="dark-card d-flex justify-content-between align-items-center">
             <div>
                 <div class="mb-1" style="font-size: 0.9rem; color: var(--text-muted);">加载数据集数量</div>
-                <div class="fs-2 fw-bold mb-1">4</div>
-                <div style="font-size: 0.85rem; color: #2ecc71;"><i class="fa-solid fa-plus"></i> 本周新增 1 个</div>
+                <div class="fs-2 fw-bold mb-1" id="datasetCount">--</div>
+                <div id="datasetCountMeta" style="font-size: 0.85rem; color: #2ecc71;">
+                    <i class="fa-solid fa-check"></i> 当前可用数据集
+                </div>
             </div>
             <i class="fa-solid fa-layer-group fa-2x" style="color: #222B45;"></i>
         </div>
@@ -28,7 +31,9 @@
             <div>
                 <div class="mb-1" style="font-size: 0.9rem; color: var(--text-muted);">系统当前内存</div>
                 <div class="fs-2 fw-bold mb-1">1.2 GB</div>
-                <div style="font-size: 0.85rem; color: var(--text-muted);"><i class="fa-solid fa-check-circle text-success"></i> 运行健康</div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);">
+                    <i class="fa-solid fa-circle-info text-success"></i> 展示占位值
+                </div>
             </div>
             <i class="fa-solid fa-memory fa-2x" style="color: #222B45;"></i>
         </div>
@@ -36,62 +41,30 @@
     <div class="col-md-3">
         <div class="dark-card d-flex justify-content-between align-items-center">
             <div>
-                <div class="mb-1" style="font-size: 0.9rem; color: var(--text-muted);">平均检索响应耗时</div>
-                <div class="fs-2 fw-bold mb-1">12 ms</div>
-                <div style="font-size: 0.85rem; color: #2ecc71;"><i class="fa-solid fa-arrow-trend-down"></i> -2% 较昨日</div>
+                <div class="mb-1" style="font-size: 0.9rem; color: var(--text-muted);">最近评测耗时</div>
+                <div class="fs-2 fw-bold mb-1" id="latestBenchmarkTime">-- ms</div>
+                <div id="latestBenchmarkMeta" style="font-size: 0.85rem; color: #2ecc71;">
+                    <i class="fa-solid fa-clock"></i> 最近评测记录
+                </div>
             </div>
             <i class="fa-solid fa-bolt fa-2x" style="color: #222B45;"></i>
         </div>
     </div>
 </div>
 
-<!-- 第二排：图表监控区 -->
 <div class="row">
-    <!-- 左侧 60%：折线图 -->
     <div class="col-md-8">
         <div class="dark-card">
             <h5 class="mb-4 fw-bold">系统查询热度趋势 (过去7天)</h5>
             <div id="queryChart" style="width: 100%; height: 300px;"></div>
         </div>
     </div>
-    
-    <!-- 右侧 40%：索引状态条 -->
+
     <div class="col-md-4">
         <div class="dark-card">
             <h5 class="mb-4 fw-bold">各数据集索引状态</h5>
-            
-            <div class="mb-4">
-                <div class="d-flex justify-content-between mb-2">
-                    <span class="fw-semibold">Adult_Liver.h5ad</span>
-                    <span class="badge" style="background-color: var(--nankai-purple);">HNSW 运行中</span>
-                </div>
-                <!-- 进度条底色改为深色 -->
-                <div class="progress" style="height: 6px; background-color: #222B45;">
-                    <div class="progress-bar" role="progressbar" style="width: 100%; background-color: var(--nankai-purple);"></div>
-                </div>
-                <div class="mt-1" style="font-size: 0.85rem; color: var(--text-muted);">占用内存: 450MB | 状态: 正常</div>
-            </div>
-
-            <div class="mb-4">
-                <div class="d-flex justify-content-between mb-2">
-                    <span class="fw-semibold">Pediatric_Liver.h5ad</span>
-                    <span class="badge bg-success">IVF 运行中</span>
-                </div>
-                <div class="progress" style="height: 6px; background-color: #222B45;">
-                    <div class="progress-bar bg-success" role="progressbar" style="width: 100%;"></div>
-                </div>
-                <div class="mt-1" style="font-size: 0.85rem; color: var(--text-muted);">占用内存: 120MB | 状态: 正常</div>
-            </div>
-
-            <div class="mb-4">
-                <div class="d-flex justify-content-between mb-2">
-                    <span class="fw-semibold">Kidney_Cells.h5ad</span>
-                    <span class="badge bg-secondary">未建索引</span>
-                </div>
-                <div class="progress" style="height: 6px; background-color: #222B45;">
-                    <div class="progress-bar bg-secondary" role="progressbar" style="width: 0%;"></div>
-                </div>
-                <div class="mt-1" style="font-size: 0.85rem; color: var(--text-muted);">仅支持精确暴力检索</div>
+            <div id="indexStatusList">
+                <div class="py-4 text-center" style="color: var(--text-muted);">正在加载索引状态...</div>
             </div>
         </div>
     </div>
@@ -100,14 +73,135 @@
 
 {% block scripts %}
 <script>
-    // 恢复 ECharts 的 dark 模式，但让背景透明以透出深蓝卡片色
-    var myChart = echarts.init(document.getElementById('queryChart'));
+    const totalCellsEl = document.getElementById('totalCells');
+    const totalCellsMetaEl = document.getElementById('totalCellsMeta');
+    const datasetCountEl = document.getElementById('datasetCount');
+    const datasetCountMetaEl = document.getElementById('datasetCountMeta');
+    const latestBenchmarkTimeEl = document.getElementById('latestBenchmarkTime');
+    const latestBenchmarkMetaEl = document.getElementById('latestBenchmarkMeta');
+    const indexStatusListEl = document.getElementById('indexStatusList');
 
-    var option = {
+    function formatNumber(value) {
+        const numberValue = Number(value);
+        if (!Number.isFinite(numberValue)) return '--';
+        return numberValue.toLocaleString('zh-CN');
+    }
+
+    function formatSizeMb(value) {
+        const numberValue = Number(value);
+        if (!Number.isFinite(numberValue)) return '--';
+        if (numberValue >= 1024) return `${(numberValue / 1024).toFixed(2)} GB`;
+        return `${numberValue.toFixed(2)} MB`;
+    }
+
+    function getReadyDatasets(datasets) {
+        return datasets.filter(ds => ds.index_status === 'ready');
+    }
+
+    function renderDatasetStats(datasets) {
+        const validDatasets = datasets.filter(ds => !ds.error);
+        const totalCells = validDatasets.reduce((sum, ds) => sum + (Number(ds.n_cells) || 0), 0);
+        const readyCount = getReadyDatasets(validDatasets).length;
+
+        totalCellsEl.innerText = formatNumber(totalCells);
+        totalCellsMetaEl.innerHTML = `<i class="fa-solid fa-database"></i> 汇总 ${validDatasets.length} 个可读取数据集`;
+        datasetCountEl.innerText = formatNumber(datasets.length);
+        datasetCountMetaEl.innerHTML = `<i class="fa-solid fa-microchip"></i> ${readyCount} 个索引就绪`;
+    }
+
+    function renderIndexStatus(datasets) {
+        if (!datasets.length) {
+            indexStatusListEl.innerHTML = '<div class="py-4 text-center" style="color: var(--text-muted);">暂无数据集</div>';
+            return;
+        }
+
+        indexStatusListEl.innerHTML = datasets.map(ds => {
+            const isReady = ds.index_status === 'ready';
+            const badgeClass = isReady ? '' : 'bg-secondary';
+            const badgeStyle = isReady ? 'background-color: var(--nankai-purple);' : '';
+            const badgeText = isReady ? (ds.index_backend || '索引就绪') : '未建索引';
+            const barClass = isReady ? '' : 'bg-secondary';
+            const barStyle = isReady ? 'width: 100%; background-color: var(--nankai-purple);' : 'width: 0%;';
+            const detail = ds.error
+                ? `读取失败: ${ds.error}`
+                : `${formatNumber(ds.n_cells)} cells | ${formatNumber(ds.n_genes)} genes | ${formatSizeMb(ds.size_mb)}`;
+
+            return `
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between gap-3 mb-2">
+                        <span class="fw-semibold text-truncate" title="${ds.filename || ds.id}">${ds.filename || ds.id}</span>
+                        <span class="badge ${badgeClass}" style="${badgeStyle} white-space: nowrap;">${badgeText}</span>
+                    </div>
+                    <div class="progress" style="height: 6px; background-color: #222B45;">
+                        <div class="progress-bar ${barClass}" role="progressbar" style="${barStyle}"></div>
+                    </div>
+                    <div class="mt-1" style="font-size: 0.85rem; color: var(--text-muted);">${detail}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function getFastestAlgorithm(entry) {
+        const algorithms = entry?.algorithms || [];
+        const available = algorithms.filter(item => item.available && item.avg_ms !== null && item.avg_ms !== undefined);
+        const preferred = available.filter(item => item.id !== 'brute');
+        const candidates = preferred.length ? preferred : available;
+        if (!candidates.length) return null;
+        return candidates.reduce((best, item) => item.avg_ms < best.avg_ms ? item : best);
+    }
+
+    function renderLatestBenchmark(history) {
+        if (!history.length) {
+            latestBenchmarkTimeEl.innerText = '-- ms';
+            latestBenchmarkMetaEl.innerHTML = '<i class="fa-solid fa-clock"></i> 暂无评测记录';
+            return;
+        }
+
+        const latest = history[history.length - 1];
+        const fastest = getFastestAlgorithm(latest);
+        if (!fastest) {
+            latestBenchmarkTimeEl.innerText = '-- ms';
+            latestBenchmarkMetaEl.innerHTML = `<i class="fa-solid fa-clock"></i> ${latest.dataset_id || '最近评测'} 无可用耗时`;
+            return;
+        }
+
+        latestBenchmarkTimeEl.innerText = `${Number(fastest.avg_ms).toFixed(2)} ms`;
+        latestBenchmarkMetaEl.innerHTML = `<i class="fa-solid fa-bolt"></i> ${fastest.label} | ${latest.dataset_id || '-'}`;
+    }
+
+    async function loadDashboardData() {
+        try {
+            const res = await fetch('/api/datasets');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '数据集加载失败');
+            const datasets = data.datasets || [];
+            renderDatasetStats(datasets);
+            renderIndexStatus(datasets);
+        } catch (err) {
+            totalCellsEl.innerText = '--';
+            datasetCountEl.innerText = '--';
+            totalCellsMetaEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> 数据加载失败';
+            datasetCountMetaEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> 数据加载失败';
+            indexStatusListEl.innerHTML = '<div class="py-4 text-center" style="color: #ff6b6b;">索引状态加载失败</div>';
+        }
+
+        try {
+            const res = await fetch('/api/benchmark/history?limit=1');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '评测历史加载失败');
+            renderLatestBenchmark(data.history || []);
+        } catch (err) {
+            latestBenchmarkTimeEl.innerText = '-- ms';
+            latestBenchmarkMetaEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> 评测历史加载失败';
+        }
+    }
+
+    const myChart = echarts.init(document.getElementById('queryChart'));
+    const option = {
         backgroundColor: 'transparent',
-        tooltip: { 
+        tooltip: {
             trigger: 'axis',
-            backgroundColor: '#222B45', // 深色提示框
+            backgroundColor: '#222B45',
             textStyle: { color: '#fff' }
         },
         grid: {
@@ -121,7 +215,7 @@
         },
         yAxis: {
             type: 'value',
-            splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.05)' } }, // 极暗的网格线
+            splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.05)' } },
             axisLabel: { color: '#8A96A8' }
         },
         series: [{
@@ -131,7 +225,7 @@
             symbol: 'circle',
             symbolSize: 8,
             lineStyle: {
-                color: '#6F2656', 
+                color: '#6F2656',
                 width: 3
             },
             areaStyle: {
@@ -140,15 +234,16 @@
                     { offset: 1, color: 'rgba(111, 38, 86, 0.0)' }
                 ])
             },
-            itemStyle: { 
+            itemStyle: {
                 color: '#6F2656',
-                borderColor: '#141A30', // 边框颜色和背景色一致，制造镂空感
+                borderColor: '#141A30',
                 borderWidth: 2
             }
         }]
     };
 
     myChart.setOption(option);
+    loadDashboardData();
 
     window.addEventListener('resize', function() {
         myChart.resize();

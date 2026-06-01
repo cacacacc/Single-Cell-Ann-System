@@ -94,6 +94,62 @@
     .table-dark-custom tbody tr:hover td {
         background-color: rgba(111, 38, 86, 0.15); 
     }
+    .cell-browser {
+        background: rgba(0,0,0,0.2);
+        border: 1px solid rgba(255,255,255,0.05);
+        border-radius: 6px;
+        margin-top: 10px;
+        overflow: hidden;
+    }
+    .cell-browser-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+        color: #8A96A8;
+        font-size: 0.78rem;
+    }
+    .cell-browser-list {
+        max-height: 180px;
+        overflow-y: auto;
+    }
+    .cell-browser-row {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: #FFFFFF;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 10px;
+        text-align: left;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .cell-browser-row:hover {
+        background: rgba(74, 144, 226, 0.14);
+    }
+    .cell-browser-id {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .cell-browser-meta {
+        color: #8A96A8;
+        flex-shrink: 0;
+        font-size: 0.78rem;
+    }
+    .cell-browser-actions button {
+        border: 1px solid rgba(255,255,255,0.12);
+        background: transparent;
+        color: #8A96A8;
+        border-radius: 4px;
+        padding: 2px 7px;
+    }
+    .cell-browser-actions button:disabled {
+        opacity: 0.35;
+    }
 </style>
 
 <!-- 采用全新的 Flex 容器 -->
@@ -118,6 +174,18 @@
                 <div class="mb-4">
                     <label class="form-label">查询细胞编号 (Cell ID)</label>
                     <input type="text" class="form-control dark-control" id="queryCellId" placeholder="例如: AAACCTGAG..." value="AAACCTGAGCAGGTCA-1_2">
+                    <div class="cell-browser">
+                        <div class="cell-browser-header">
+                            <span id="cellBrowserStatus">细胞 ID 浏览</span>
+                            <div class="cell-browser-actions">
+                                <button type="button" id="prevCellsBtn">上一页</button>
+                                <button type="button" id="nextCellsBtn">下一页</button>
+                            </div>
+                        </div>
+                        <div class="cell-browser-list" id="cellBrowserList">
+                            <div class="p-3" style="color: #8A96A8; font-size: 0.85rem;">选择数据集后加载细胞 ID</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="mb-4">
@@ -145,6 +213,7 @@
                         <option value="flat" selected>flat（精确）</option>
                         <option value="ivf_flat">ivf_flat（近似）</option>
                         <option value="hnsw">hnsw（近似）</option>
+                        <option value="pq">pq（FAISS-PQ）</option>
                         <option value="brute">brute（暴力）</option>
                     </select>
                 </div>
@@ -170,6 +239,14 @@
                             <input type="number" min="1" class="form-control dark-control" id="nprobeInput" value="10">
                         </div>
                         <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">PQ M</label>
+                            <input type="number" min="1" class="form-control dark-control" id="pqMInput" value="8">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">PQ nbits</label>
+                            <input type="number" min="1" max="16" class="form-control dark-control" id="pqNbitsInput" value="8">
+                        </div>
+                        <div class="col-6">
                             <label class="form-label mb-1" style="font-size: 0.8rem;">M</label>
                             <input type="number" min="2" class="form-control dark-control" id="mInput" value="16">
                         </div>
@@ -182,7 +259,7 @@
                             <input type="number" min="1" class="form-control dark-control" id="efSearchInput" value="50">
                         </div>
                     </div>
-                    <div class="form-text" style="color: #6f7c92;" id="indexParamHint">IVF 使用 nlist/nprobe；HNSW 使用 M/ef_*。</div>
+                    <div class="form-text" style="color: #6f7c92;" id="indexParamHint">IVF 使用 nlist/nprobe；HNSW 使用 M/ef_*；PQ 使用 pq_m/pq_nbits。</div>
                 </div>
 
                 <div class="mb-4">
@@ -207,6 +284,10 @@
                         <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
                             <span>M / ef构建 / ef查询</span>
                             <span id="effectiveHNSW" class="text-white">-</span>
+                        </div>
+                        <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
+                            <span>PQ M / nbits</span>
+                            <span id="effectivePQ" class="text-white">-</span>
                         </div>
                         <div class="mt-2" style="color: #6f7c92; font-size: 0.78rem;">显示最终实际生效配置（含自动回退）。</div>
                     </div>
@@ -317,6 +398,8 @@
     const indexMetricSelect = document.getElementById('indexMetricSelect');
     const nlistInput = document.getElementById('nlistInput');
     const nprobeInput = document.getElementById('nprobeInput');
+    const pqMInput = document.getElementById('pqMInput');
+    const pqNbitsInput = document.getElementById('pqNbitsInput');
     const mInput = document.getElementById('mInput');
     const efConstructionInput = document.getElementById('efConstructionInput');
     const efSearchInput = document.getElementById('efSearchInput');
@@ -327,7 +410,150 @@
     const effectiveMetric = document.getElementById('effectiveMetric');
     const effectiveIVF = document.getElementById('effectiveIVF');
     const effectiveHNSW = document.getElementById('effectiveHNSW');
+    const effectivePQ = document.getElementById('effectivePQ');
+    const queryCellIdInput = document.getElementById('queryCellId');
+    const cellBrowserStatus = document.getElementById('cellBrowserStatus');
+    const cellBrowserList = document.getElementById('cellBrowserList');
+    const prevCellsBtn = document.getElementById('prevCellsBtn');
+    const nextCellsBtn = document.getElementById('nextCellsBtn');
+    let currentMetadata = null;
+    let currentCellOffset = 0;
+    let nextCellOffset = null;
+    let prevCellOffset = null;
+    const cellPageSize = 50;
+    const indexTypeOptions = {
+        auto: [
+            { value: 'flat', label: 'flat（精确 / 暴力KNN）' },
+            { value: 'ivf_flat', label: 'ivf_flat（近似）' },
+            { value: 'hnsw', label: 'hnsw（近似）' },
+            { value: 'pq', label: 'pq（FAISS-PQ）' }
+        ],
+        faiss: [
+            { value: 'flat', label: 'flat（精确 / 暴力KNN）' },
+            { value: 'ivf_flat', label: 'ivf_flat（近似）' },
+            { value: 'hnsw', label: 'hnsw（近似）' },
+            { value: 'pq', label: 'pq（FAISS-PQ）' }
+        ],
+        hnswlib: [
+            { value: 'hnsw', label: 'hnsw（HNSWLIB）' }
+        ],
+        numpy: [
+            { value: 'brute', label: 'brute（精确暴力）' }
+        ]
+    };
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
+
+    function suggestedPqM(dim, preferred) {
+        if (!Number.isFinite(dim) || dim <= 0) return 1;
+        const start = Math.max(1, Math.min(preferred || 16, dim));
+        for (let candidate = start; candidate >= 1; candidate--) {
+            if (dim % candidate === 0) return candidate;
+        }
+        return 1;
+    }
+
+    function normalizePqMInput() {
+        const dim = currentMetadata?.vector_dim;
+        if (!Number.isFinite(dim) || dim <= 0) return null;
+        const current = parseInt(pqMInput.value, 10);
+        if (Number.isNaN(current) || current <= 0 || dim % current !== 0) {
+            const fallback = currentMetadata?.suggested_pq_m || suggestedPqM(dim, current || 16);
+            pqMInput.value = fallback;
+            return fallback;
+        }
+        return current;
+    }
+
+    async function refreshMetadata() {
+        const datasetId = datasetSelect.value;
+        if (!datasetId) return;
+        try {
+            const params = new URLSearchParams({
+                dataset_id: datasetId,
+                index_backend: indexBackendSelect.value,
+                index_type: indexTypeSelect.value,
+                index_metric: indexMetricSelect.value,
+                pq_m: pqMInput.value,
+                pq_nbits: pqNbitsInput.value
+            });
+            const res = await fetch(`/api/metadata?${params.toString()}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'metadata failed');
+            currentMetadata = data;
+            if (indexTypeSelect.value === 'pq') {
+                normalizePqMInput();
+            }
+            updateEffectiveConfigDisplay(data, {
+                index_backend: indexBackendSelect.value,
+                index_type: indexTypeSelect.value,
+                index_metric: indexMetricSelect.value,
+                pq_m: pqMInput.value,
+                pq_nbits: pqNbitsInput.value
+            });
+        } catch (err) {
+            currentMetadata = null;
+        }
+    }
+
+    function setCellBrowserLoading(message) {
+        cellBrowserStatus.innerText = message;
+        cellBrowserList.innerHTML = '<div class="p-3" style="color: #8A96A8; font-size: 0.85rem;">正在加载细胞 ID...</div>';
+        prevCellsBtn.disabled = true;
+        nextCellsBtn.disabled = true;
+    }
+
+    function renderCellBrowser(data) {
+        const cells = data.cells || [];
+        currentCellOffset = data.offset || 0;
+        nextCellOffset = data.next_offset;
+        prevCellOffset = data.prev_offset;
+        const start = cells.length ? currentCellOffset + 1 : 0;
+        const end = currentCellOffset + cells.length;
+        cellBrowserStatus.innerText = `细胞 ID ${start}-${end} / ${data.total || 0}`;
+        prevCellsBtn.disabled = prevCellOffset === null || prevCellOffset === undefined;
+        nextCellsBtn.disabled = nextCellOffset === null || nextCellOffset === undefined;
+
+        if (!cells.length) {
+            cellBrowserList.innerHTML = '<div class="p-3" style="color: #8A96A8; font-size: 0.85rem;">暂无细胞 ID</div>';
+            return;
+        }
+
+        cellBrowserList.innerHTML = cells.map(cell => `
+            <button type="button" class="cell-browser-row" data-cell-id="${cell.cell_id}">
+                <span class="cell-browser-id">${cell.cell_id}</span>
+                <span class="cell-browser-meta">#${cell.cell_index}${cell.cell_type ? ` · ${cell.cell_type}` : ''}</span>
+            </button>
+        `).join('');
+    }
+
+    async function loadCells(offset = 0) {
+        const datasetId = datasetSelect.value;
+        if (!datasetId) {
+            cellBrowserStatus.innerText = '细胞 ID 浏览';
+            cellBrowserList.innerHTML = '<div class="p-3" style="color: #8A96A8; font-size: 0.85rem;">选择数据集后加载细胞 ID</div>';
+            prevCellsBtn.disabled = true;
+            nextCellsBtn.disabled = true;
+            return;
+        }
+
+        setCellBrowserLoading('细胞 ID 浏览');
+        try {
+            const params = new URLSearchParams({
+                dataset_id: datasetId,
+                offset: String(offset),
+                limit: String(cellPageSize)
+            });
+            const res = await fetch(`/api/cells?${params.toString()}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '细胞 ID 加载失败');
+            renderCellBrowser(data);
+        } catch (err) {
+            cellBrowserStatus.innerText = '细胞 ID 加载失败';
+            cellBrowserList.innerHTML = `<div class="p-3" style="color: #ff6b6b; font-size: 0.85rem;">${err.message || '细胞 ID 加载失败'}</div>`;
+            prevCellsBtn.disabled = true;
+            nextCellsBtn.disabled = true;
+        }
+    }
 
     function setDistanceHeader(metric) {
         if (metric === 'cosine') {
@@ -341,32 +567,26 @@
 
     function updateIndexParamState() {
         const backend = indexBackendSelect.value;
-
-        const allOptions = Array.from(indexTypeSelect.options);
-        allOptions.forEach(opt => { opt.disabled = false; });
-
-        if (backend === 'numpy') {
-            allOptions.forEach(opt => {
-                if (!['flat', 'brute'].includes(opt.value)) opt.disabled = true;
-            });
-            if (!['flat', 'brute'].includes(indexTypeSelect.value)) {
-                indexTypeSelect.value = 'brute';
-            }
-        } else if (backend === 'hnswlib') {
-            allOptions.forEach(opt => {
-                if (opt.value !== 'hnsw') opt.disabled = true;
-            });
-            indexTypeSelect.value = 'hnsw';
-        } else if (backend === 'faiss') {
-            allOptions.forEach(opt => { opt.disabled = false; });
+        const selectedType = indexTypeSelect.value;
+        const options = indexTypeOptions[backend] || indexTypeOptions.auto;
+        indexTypeSelect.innerHTML = options
+            .map(opt => `<option value="${opt.value}">${opt.label}</option>`)
+            .join('');
+        if (options.some(opt => opt.value === selectedType)) {
+            indexTypeSelect.value = selectedType;
+        } else {
+            indexTypeSelect.value = options[0].value;
         }
 
         const indexType = indexTypeSelect.value;
         const enableIVF = indexType === 'ivf_flat';
         const enableHNSW = indexType === 'hnsw';
+        const enablePQ = indexType === 'pq';
 
         nlistInput.disabled = !enableIVF;
         nprobeInput.disabled = !enableIVF;
+        pqMInput.disabled = !enablePQ;
+        pqNbitsInput.disabled = !enablePQ;
         mInput.disabled = !enableHNSW;
         efConstructionInput.disabled = !enableHNSW;
         efSearchInput.disabled = !enableHNSW;
@@ -375,14 +595,29 @@
             indexParamHint.innerText = 'IVF 使用 nlist/nprobe（FAISS）。';
         } else if (indexType === 'hnsw') {
             indexParamHint.innerText = 'HNSW 使用 M/ef_construction/ef_search。';
+        } else if (indexType === 'pq') {
+            indexParamHint.innerText = 'PQ 使用 pq_m/pq_nbits，pq_m 需整除向量维度（FAISS）。';
         } else {
             indexParamHint.innerText = '当前索引类型无需高级参数。';
         }
     }
 
-    indexBackendSelect.addEventListener('change', updateIndexParamState);
-    indexTypeSelect.addEventListener('change', updateIndexParamState);
-    indexMetricSelect.addEventListener('change', () => setDistanceHeader(indexMetricSelect.value));
+    indexBackendSelect.addEventListener('change', () => {
+        updateIndexParamState();
+        refreshMetadata();
+    });
+    indexTypeSelect.addEventListener('change', () => {
+        updateIndexParamState();
+        refreshMetadata();
+    });
+    indexMetricSelect.addEventListener('change', () => {
+        setDistanceHeader(indexMetricSelect.value);
+        refreshMetadata();
+    });
+    pqMInput.addEventListener('change', () => {
+        normalizePqMInput();
+        updateIndexParamState();
+    });
     updateIndexParamState();
     setDistanceHeader(indexMetricSelect.value);
 
@@ -396,12 +631,15 @@
         const m = config.m ?? fallback.m ?? '-';
         const efConstruction = config.ef_construction ?? fallback.ef_construction ?? '-';
         const efSearch = config.ef_search ?? fallback.ef_search ?? '-';
+        const pqM = config.pq_m ?? fallback.pq_m ?? '-';
+        const pqNbits = config.pq_nbits ?? fallback.pq_nbits ?? '-';
 
         effectiveBackend.innerText = backend;
         effectiveIndexType.innerText = indexType;
         effectiveMetric.innerText = metric;
         effectiveIVF.innerText = `${nlist} / ${nprobe}`;
         effectiveHNSW.innerText = `${m} / ${efConstruction} / ${efSearch}`;
+        effectivePQ.innerText = `${pqM} / ${pqNbits}`;
     }
 
     const cellCategories = [
@@ -498,18 +736,44 @@
             datasetSelect.innerHTML = data.datasets
                 .map(ds => `<option value="${ds.id}">${ds.filename}</option>`)
                 .join('');
+            await refreshMetadata();
+            await loadCells(0);
         } catch (err) {
             datasetSelect.innerHTML = '<option value="" disabled selected>加载失败</option>';
             datasetSelect.disabled = true;
         }
     }
 
+    datasetSelect.addEventListener('change', async () => {
+        await refreshMetadata();
+        updateIndexParamState();
+        await loadCells(0);
+    });
+
+    prevCellsBtn.addEventListener('click', () => {
+        if (prevCellOffset !== null && prevCellOffset !== undefined) {
+            loadCells(prevCellOffset);
+        }
+    });
+
+    nextCellsBtn.addEventListener('click', () => {
+        if (nextCellOffset !== null && nextCellOffset !== undefined) {
+            loadCells(nextCellOffset);
+        }
+    });
+
+    cellBrowserList.addEventListener('click', (event) => {
+        const row = event.target.closest('.cell-browser-row');
+        if (!row) return;
+        queryCellIdInput.value = row.dataset.cellId || '';
+    });
+
     document.getElementById('startSearchBtn').addEventListener('click', async function() {
         const btn = this;
         const tbody = document.getElementById('result-tbody');
         const statusBadge = document.getElementById('search-status');
         const topK = parseInt(slider.value);
-        const cellId = document.getElementById('queryCellId').value.trim();
+        const cellId = queryCellIdInput.value.trim();
         const datasetId = datasetSelect.value;
         const indexBackend = indexBackendSelect.value;
         const indexType = indexTypeSelect.value;
@@ -542,12 +806,20 @@
 
             const nlist = parseInt(nlistInput.value, 10);
             const nprobe = parseInt(nprobeInput.value, 10);
+            const pqM = parseInt(pqMInput.value, 10);
+            const pqNbits = parseInt(pqNbitsInput.value, 10);
             const m = parseInt(mInput.value, 10);
             const efConstruction = parseInt(efConstructionInput.value, 10);
             const efSearch = parseInt(efSearchInput.value, 10);
 
             if (!Number.isNaN(nlist)) payload.nlist = nlist;
             if (!Number.isNaN(nprobe)) payload.nprobe = nprobe;
+            if (indexType === 'pq') {
+                payload.pq_m = normalizePqMInput() || pqM;
+            } else if (!Number.isNaN(pqM)) {
+                payload.pq_m = pqM;
+            }
+            if (!Number.isNaN(pqNbits)) payload.pq_nbits = pqNbits;
             if (!Number.isNaN(m)) payload.m = m;
             if (!Number.isNaN(efConstruction)) payload.ef_construction = efConstruction;
             if (!Number.isNaN(efSearch)) payload.ef_search = efSearch;
@@ -581,7 +853,10 @@
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
             statusBadge.className = 'badge bg-success me-3';
-            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>耗时 ${data.elapsed_ms}ms | ${data.index_backend || 'ANN'} / ${data.index_type || indexType} / ${data.index_metric || indexMetric}`;
+            const totalMs = data.total_elapsed_ms ?? data.elapsed_ms;
+            const searchMs = data.search_elapsed_ms ?? data.elapsed_ms;
+            const prepareMs = data.index_prepare_ms ?? 0;
+            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>总耗时 ${totalMs}ms | 查询 ${searchMs}ms | 索引准备 ${prepareMs}ms | ${data.index_backend || 'ANN'} / ${data.index_type || indexType} / ${data.index_metric || indexMetric}`;
             setDistanceHeader(data.index_metric || indexMetric);
             updateEffectiveConfigDisplay(data, payload);
         } catch (err) {

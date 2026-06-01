@@ -22,11 +22,13 @@ vectors = np.random.random((1000, 50)).astype("float32")
 # 通过配置选择后端、索引类型与度量
 config = IndexConfig(
 	backend="auto",        # auto / faiss / hnswlib / numpy
-	index_type="hnsw",      # flat / ivf_flat / hnsw / brute
+	index_type="hnsw",      # flat / ivf_flat / hnsw / pq / brute
 	metric="cosine",        # l2 / cosine / ip
 	m=32,
 	ef_construction=200,
 	ef_search=50,
+	pq_m=8,
+	pq_nbits=8,
 )
 
 indexer = ANNIndexer(dim=50, config=config)
@@ -38,6 +40,11 @@ distances, indices = indexer.search(query_vector, k=10)
 print(indices)
 print(distances)
 ```
+
+PQ 参数说明：
+
+- `pq_m`：子空间数量（需整除向量维度）
+- `pq_nbits`：每个子空间编码位数（常用 8）
 
 
 ## 4. 输入要求

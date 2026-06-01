@@ -2,12 +2,9 @@
 
 {% block content %}
 <style>
-    /* ================= 坚如磐石的 Flex 布局 (复用) ================= */
     .search-layout { display: flex; gap: 24px; align-items: flex-start; }
     .search-sidebar { width: 320px; flex-shrink: 0; position: sticky; top: 24px; z-index: 10; }
     .search-main { flex: 1; min-width: 0; }
-
-    /* ================= 表单与组件样式 ================= */
     .form-label { color: #8A96A8; font-size: 0.9rem; margin-bottom: 8px; }
     .dark-control {
         background-color: rgba(0, 0, 0, 0.25);
@@ -25,7 +22,6 @@
     }
     .dark-control option { background-color: #141A30; color: white; }
     .form-range::-webkit-slider-thumb { background: #923a73; }
-    
     .btn-glow-purple {
         background-color: #923a73;
         border: none;
@@ -40,16 +36,12 @@
         box-shadow: 0 0 15px rgba(168, 70, 133, 0.5);
         color: white;
     }
-
-    /* 图表容器 */
     .chart-box {
-        background-color: #050814; 
+        background-color: #050814;
         border-radius: 8px;
         border: 1px solid rgba(255,255,255,0.05);
         padding: 15px;
     }
-    
-    /* 顶部小数据卡片 */
     .stat-badge {
         background-color: rgba(74, 144, 226, 0.1);
         border: 1px solid rgba(74, 144, 226, 0.3);
@@ -63,14 +55,12 @@
 </style>
 
 <div class="search-layout">
-    
-    <!-- ================= 左侧：参数控制台 ================= -->
     <div class="search-sidebar">
         <div class="dark-card m-0">
             <h5 class="fw-bold mb-4" style="letter-spacing: 1px;">
                 <i class="fa-solid fa-stopwatch me-2" style="color: #4A90E2;"></i>跑分实验设置
             </h5>
-            
+
             <form id="benchmarkForm">
                 <div class="mb-4">
                     <label class="form-label">评测数据集</label>
@@ -90,9 +80,17 @@
                             <input class="form-check-input" type="checkbox" checked disabled>
                             <label class="form-check-label text-white">近似检索 (FAISS-HNSW)</label>
                         </div>
-                        <div class="form-check">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" checked disabled>
+                            <label class="form-check-label text-white">近似检索 (HNSWLIB)</label>
+                        </div>
+                        <div class="form-check mb-2">
                             <input class="form-check-input" type="checkbox" checked disabled>
                             <label class="form-check-label text-white">近似检索 (FAISS-IVF)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" checked disabled>
+                            <label class="form-check-label text-white">近似检索 (FAISS-PQ)</label>
                         </div>
                     </div>
                 </div>
@@ -100,7 +98,7 @@
                 <div class="mb-4">
                     <label class="form-label">随机抽样查询次数</label>
                     <input type="number" class="form-control dark-control" id="queryCount" value="500" min="10" max="5000">
-                    <small class="text-muted mt-1 d-block">系统将随机抽取这些数量的细胞进行并发查询跑分。</small>
+                    <small class="text-muted mt-1 d-block">系统将随机抽取这些数量的细胞进行查询跑分。</small>
                 </div>
 
                 <div class="mb-5">
@@ -125,10 +123,7 @@
         </div>
     </div>
 
-    <!-- ================= 右侧：评测报告面板 ================= -->
     <div class="search-main">
-        
-        <!-- 头部跑分摘要 -->
         <div class="dark-card mb-4 d-flex justify-content-between align-items-center" style="padding: 15px 25px;">
             <div class="fw-bold fs-5 text-white">
                 <i class="fa-solid fa-chart-line me-2" style="color: #4A90E2;"></i>实验结果评估报告
@@ -141,25 +136,21 @@
 
         <div id="benchmarkWarning" class="mb-3" style="color: #F5A623; font-size: 0.85rem; display: none;"></div>
 
-        <!-- 1. 速度对比柱状图 -->
         <div class="dark-card mb-4" style="padding: 20px;">
             <h6 class="text-white mb-3 fw-bold">查询响应时间对比 (Latency)</h6>
             <div id="timeChart" class="chart-box" style="width: 100%; height: 300px;"></div>
         </div>
 
-        <!-- 2. 精度对比折线图 -->
         <div class="dark-card" style="padding: 20px; margin-bottom: 0;">
             <h6 class="text-white mb-3 fw-bold">算法召回率/准确率曲线 (Recall @ K)</h6>
             <div id="recallChart" class="chart-box" style="width: 100%; height: 300px;"></div>
         </div>
-
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // 滑动条联动
     const slider = document.getElementById('topKSlider');
     const kValue = document.getElementById('k-value');
     const datasetSelect = document.getElementById('benchmarkDatasetSelect');
@@ -167,11 +158,9 @@
     const historyContainer = document.getElementById('benchmarkHistory');
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
 
-    // ================= 初始化 ECharts 实例 =================
     const timeChart = echarts.init(document.getElementById('timeChart'));
     const recallChart = echarts.init(document.getElementById('recallChart'));
 
-    // 公共暗黑风格配置
     const commonTheme = {
         backgroundColor: 'transparent',
         tooltip: { backgroundColor: 'rgba(20, 26, 48, 0.9)', borderColor: '#4A90E2', textStyle: { color: '#fff' } },
@@ -179,52 +168,74 @@
         yAxis: { splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }, axisLabel: { color: '#8A96A8' } },
         legend: { textStyle: { color: '#fff' } }
     };
+    const categoryAxisLabel = {
+        color: '#8A96A8',
+        interval: 0,
+        hideOverlap: false,
+        lineHeight: 18,
+        formatter: value => String(value).replace(' (', '\n(')
+    };
 
-    // 1. 初始化空的速度对比图
+    const initialAlgorithms = [
+        { id: 'brute', label: '精确搜索 (Exact KNN)', shortLabel: '精确搜索' },
+        { id: 'faiss_hnsw', label: '近似搜索 (FAISS-HNSW)', shortLabel: 'FAISS-HNSW' },
+        { id: 'hnswlib', label: '近似搜索 (HNSWLIB)', shortLabel: 'HNSWLIB' },
+        { id: 'faiss_ivf', label: '近似搜索 (FAISS-IVF)', shortLabel: 'FAISS-IVF' },
+        { id: 'faiss_pq', label: '近似搜索 (FAISS-PQ)', shortLabel: 'FAISS-PQ' }
+    ];
+
+    const algoColors = {
+        brute: '#8A96A8',
+        faiss_hnsw: '#4A90E2',
+        hnswlib: '#1ABC9C',
+        faiss_ivf: '#E83E8C',
+        faiss_pq: '#F5A623'
+    };
+
     const timeOption = {
         ...commonTheme,
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-        grid: { left: '3%', right: '4%', bottom: '3%', top: '15%', containLabel: true },
-        xAxis: { type: 'category', data: ['精确搜索 (Exact KNN)', '近似搜索 (FAISS-HNSW)', '近似搜索 (FAISS-IVF)'], ...commonTheme.xAxis },
+        grid: { left: '3%', right: '4%', bottom: 44, top: '15%', containLabel: true },
+        xAxis: { type: 'category', data: initialAlgorithms.map(item => item.label), ...commonTheme.xAxis, axisLabel: categoryAxisLabel },
         yAxis: { type: 'value', name: '平均耗时 (ms)', nameTextStyle: { color: '#8A96A8' }, ...commonTheme.yAxis },
         series: [{
             type: 'bar',
             barWidth: '40%',
             itemStyle: { borderRadius: [4, 4, 0, 0] },
-            data: [0, 0, 0] // 初始数据为0
+            data: initialAlgorithms.map(() => 0)
         }]
     };
     timeChart.setOption(timeOption);
 
-    // 2. 初始化空的精度曲线图
     const recallOption = {
         ...commonTheme,
         tooltip: { trigger: 'axis' },
-        legend: { data: ['精确搜索', 'FAISS-HNSW', 'FAISS-IVF'], ...commonTheme.legend },
+        legend: { data: initialAlgorithms.map(item => item.shortLabel), ...commonTheme.legend },
         grid: { left: '3%', right: '4%', bottom: '3%', top: '20%', containLabel: true },
         xAxis: { type: 'category', data: ['Top-10', 'Top-20', 'Top-50', 'Top-100'], name: 'K值', ...commonTheme.xAxis },
         yAxis: { type: 'value', name: '召回率 (%)', min: 80, max: 100, ...commonTheme.yAxis },
-        series: [
-            { name: '精确搜索', type: 'line', data: [100, 100, 100, 100], lineStyle: { type: 'dashed', color: '#8A96A8' }, itemStyle: { color: '#8A96A8' } },
-            { name: 'FAISS-HNSW', type: 'line', data: [null, null, null, null], itemStyle: { color: '#4A90E2' }, smooth: true },
-            { name: 'FAISS-IVF', type: 'line', data: [null, null, null, null], itemStyle: { color: '#E83E8C' }, smooth: true }
-        ]
+        series: initialAlgorithms.map(item => ({
+            name: item.shortLabel,
+            type: 'line',
+            data: item.id === 'brute' ? [100, 100, 100, 100] : [null, null, null, null],
+            lineStyle: { type: item.id === 'brute' ? 'dashed' : 'solid', color: algoColors[item.id] },
+            itemStyle: { color: algoColors[item.id] },
+            smooth: item.id !== 'brute'
+        }))
     };
     recallChart.setOption(recallOption);
 
-    const algoColors = {
-        brute: '#ff4757',
-        faiss_hnsw: '#4A90E2',
-        hnswlib: '#1ABC9C',
-        faiss_ivf: '#E83E8C'
-    };
+    function displayLabel(algo) {
+        if (algo.id === 'brute') return '精确搜索';
+        return algo.label || algo.id;
+    }
 
     function buildRecallSeries(algorithms, kLabels) {
         return algorithms.map(algo => {
             const color = algoColors[algo.id] || '#8A96A8';
             const isExact = algo.id === 'brute';
             return {
-                name: algo.label,
+                name: displayLabel(algo),
                 type: 'line',
                 data: algo.recall_curve || kLabels.map(() => null),
                 lineStyle: { type: isExact ? 'dashed' : 'solid', color },
@@ -261,17 +272,8 @@
             return best;
         }, null);
 
-        if (fastest) {
-            statTime.innerText = `${fastest.label}: ${fastest.avg_ms.toFixed(2)} ms`;
-        } else {
-            statTime.innerText = 'Avg Time: -- ms';
-        }
-
-        if (bestRecall) {
-            statRecall.innerText = `${bestRecall.label} Recall: ${bestRecall.value.toFixed(2)} %`;
-        } else {
-            statRecall.innerText = 'Recall: -- %';
-        }
+        statTime.innerText = fastest ? `${fastest.label}: ${fastest.avg_ms.toFixed(2)} ms` : 'Avg Time: -- ms';
+        statRecall.innerText = bestRecall ? `${bestRecall.label} Recall: ${bestRecall.value.toFixed(2)} %` : 'Recall: -- %';
     }
 
     function renderBenchmarkResult(data) {
@@ -298,12 +300,13 @@
         });
 
         timeChart.setOption({
-            xAxis: { type: 'category', data: categories, ...commonTheme.xAxis },
+            grid: { left: '3%', right: '4%', bottom: 44, top: '15%', containLabel: true },
+            xAxis: { type: 'category', data: categories, ...commonTheme.xAxis, axisLabel: categoryAxisLabel },
             series: [{ data: barData }]
         });
 
         recallChart.setOption({
-            legend: { data: algorithms.map(item => item.label), ...commonTheme.legend },
+            legend: { data: algorithms.map(displayLabel), ...commonTheme.legend },
             xAxis: { type: 'category', data: kLabels, name: 'K值', ...commonTheme.xAxis },
             series: buildRecallSeries(algorithms, kLabels)
         });
@@ -343,21 +346,18 @@
             historyContainer.innerHTML = history
                 .slice(-5)
                 .reverse()
-                .map(item => {
-                    return `
-                        <div class="d-flex justify-content-between" style="font-size: 0.82rem;">
-                            <span>${item.created_at}</span>
-                            <span>Q:${item.query_count} | K:${item.k}</span>
-                        </div>
-                    `;
-                })
+                .map(item => `
+                    <div class="d-flex justify-content-between" style="font-size: 0.82rem;">
+                        <span>${item.created_at}</span>
+                        <span>Q:${item.query_count} | K:${item.k}</span>
+                    </div>
+                `)
                 .join('');
         } catch (err) {
             historyContainer.innerText = '历史记录加载失败';
         }
     }
 
-    // ================= 点击【开始跑分】的交互逻辑 =================
     document.getElementById('startBenchmarkBtn').addEventListener('click', async function() {
         const btn = this;
         const datasetId = datasetSelect.value;
@@ -371,8 +371,7 @@
 
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>正在压测计算...';
         btn.disabled = true;
-
-        timeChart.showLoading({ text: '引擎运算中...', color: '#4A90E2', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
+        timeChart.showLoading({ text: '索引运算中...', color: '#4A90E2', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
         recallChart.showLoading({ text: '召回率评估中...', color: '#E83E8C', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
 
         try {
@@ -406,7 +405,6 @@
     loadDatasets();
     loadBenchmarkHistory();
 
-    // 窗口调整适配
     window.addEventListener('resize', () => {
         timeChart.resize();
         recallChart.resize();

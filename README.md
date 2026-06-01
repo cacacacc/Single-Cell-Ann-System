@@ -50,8 +50,8 @@ http://127.0.0.1:5000
 ### 3. ANN 索引构建
 
 - 支持使用 FAISS 或 HNSWLIB 构建近似最近邻索引，NumPy 暴力检索可作为 recall 基准
-- 支持配置索引类型与距离度量（`flat`/`ivf_flat`/`hnsw`、`l2`/`cosine`/`ip`）
-- 支持 HNSW/IVF 关键参数配置（`M`/`ef_*`/`nlist`/`nprobe`）
+- 支持配置索引类型与距离度量（`flat`/`ivf_flat`/`hnsw`/`pq`、`l2`/`cosine`/`ip`）
+- 支持 HNSW/IVF/PQ 关键参数配置（`M`/`ef_*`/`nlist`/`nprobe`/`pq_m`/`pq_nbits`）
 - 支持输入查询向量并返回 Top-K 相似细胞
 - 返回相似细胞的内部编号和距离
 - 支持索引文件保存与加载，减少重复构建时间

@@ -47,7 +47,7 @@ vectors.dtype == np.float32
 
 当前已实现：
 
-- FAISS：`IndexFlatL2` / `IndexFlatIP`、`IVFFlat`、`HNSWFlat`
+- FAISS：`IndexFlatL2` / `IndexFlatIP`、`IVFFlat`、`HNSWFlat`、`PQ`
 - HNSWLIB：`HNSW`（`l2`/`cosine`/`ip`）
 - NumPy：暴力检索（作为 recall 基准）
 
@@ -61,6 +61,7 @@ vectors.dtype == np.float32
 
 - `nlist` / `nprobe`（IVF）
 - `M` / `ef_construction` / `ef_search`（HNSW）
+- `pq_m` / `pq_nbits`（PQ，要求 `pq_m` 能整除向量维度）
     
 
 ## 4. 核心流程

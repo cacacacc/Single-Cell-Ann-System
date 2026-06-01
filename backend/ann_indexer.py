@@ -21,7 +21,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 _SUPPORTED_BACKENDS = {"auto", "faiss", "hnswlib", "numpy"}
 _SUPPORTED_METRICS = {"l2", "ip", "cosine"}
-_SUPPORTED_INDEX_TYPES = {"flat", "ivf_flat", "hnsw", "brute"}
+_SUPPORTED_INDEX_TYPES = {"flat", "ivf_flat", "hnsw", "pq", "brute"}
 
 
 def _normalize_text(value: Any) -> str:
@@ -52,6 +52,8 @@ class IndexConfig:
     m: int = 16
     ef_construction: int = 200
     ef_search: int = 50
+    pq_m: int = 8
+    pq_nbits: int = 8
 
     def normalized(self) -> "IndexConfig":
         backend = _normalize_text(self.backend or "auto")
@@ -70,6 +72,8 @@ class IndexConfig:
         m = _ensure_int(self.m, "m", minimum=2)
         ef_construction = _ensure_int(self.ef_construction, "ef_construction", minimum=1)
         ef_search = _ensure_int(self.ef_search, "ef_search", minimum=1)
+        pq_m = _ensure_int(self.pq_m, "pq_m", minimum=1)
+        pq_nbits = _ensure_int(self.pq_nbits, "pq_nbits", minimum=1)
 
         return IndexConfig(
             backend=backend,
@@ -80,6 +84,8 @@ class IndexConfig:
             m=m,
             ef_construction=ef_construction,
             ef_search=ef_search,
+            pq_m=pq_m,
+            pq_nbits=pq_nbits,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -92,6 +98,8 @@ class IndexConfig:
             "m": self.m,
             "ef_construction": self.ef_construction,
             "ef_search": self.ef_search,
+            "pq_m": self.pq_m,
+            "pq_nbits": self.pq_nbits,
         }
 
     def update(self, **kwargs: Any) -> "IndexConfig":
@@ -123,6 +131,8 @@ class IndexConfig:
             m=_value("m", cls.m),
             ef_construction=_value("ef_construction", cls.ef_construction),
             ef_search=_value("ef_search", cls.ef_search),
+            pq_m=_value("pq_m", cls.pq_m),
+            pq_nbits=_value("pq_nbits", cls.pq_nbits),
         ).normalized()
 
     @classmethod
@@ -140,6 +150,8 @@ class IndexConfig:
                 "m": _env("M", cls.m),
                 "ef_construction": _env("EF_CONSTRUCTION", cls.ef_construction),
                 "ef_search": _env("EF_SEARCH", cls.ef_search),
+                "pq_m": _env("PQ_M", cls.pq_m),
+                "pq_nbits": _env("PQ_NBITS", cls.pq_nbits),
             }
         )
 
@@ -184,6 +196,8 @@ class ANNIndexer:
             "m": self._config.m,
             "ef_construction": self._config.ef_construction,
             "ef_search": self._config.ef_search,
+            "pq_m": self._config.pq_m,
+            "pq_nbits": self._config.pq_nbits,
         }
 
     @property
@@ -475,6 +489,9 @@ class ANNIndexer:
         if saved_index_type == "hnsw":
             if current.m != saved.m or current.ef_construction != saved.ef_construction:
                 return False
+        if saved_index_type == "pq":
+            if current.pq_m != saved.pq_m or current.pq_nbits != saved.pq_nbits:
+                return False
         return True
 
     def _prepare_vectors(self, vectors: np.ndarray) -> np.ndarray:
@@ -516,6 +533,11 @@ class ANNIndexer:
                 raise ImportError("faiss is required for ivf_flat index_type")
             return "faiss"
 
+        if index_type == "pq":
+            if faiss is None:
+                raise ImportError("faiss is required for pq index_type")
+            return "faiss"
+
         if index_type == "hnsw":
             if faiss is not None:
                 return "faiss"
@@ -541,7 +563,7 @@ class ANNIndexer:
         if backend == "faiss":
             if index_type == "brute":
                 return "flat"
-            if index_type not in {"flat", "ivf_flat", "hnsw"}:
+            if index_type not in {"flat", "ivf_flat", "hnsw", "pq"}:
                 raise ValueError(f"Unsupported index_type for faiss: {index_type}")
             return index_type
 
@@ -598,6 +620,24 @@ class ANNIndexer:
             else:
                 quantizer = faiss.IndexFlatIP(self.dim)
             index = faiss.IndexIVFFlat(quantizer, self.dim, int(nlist), metric)
+            index.train(vectors)
+        elif index_type == "pq":
+            pq_m = int(self._config.pq_m)
+            pq_nbits = int(self._config.pq_nbits)
+            if self.dim % pq_m != 0:
+                raise ValueError(
+                    f"pq_m ({pq_m}) must divide vector dimension {self.dim}"
+                )
+            if not 1 <= pq_nbits <= 16:
+                raise ValueError("pq_nbits must be between 1 and 16")
+            try:
+                index = faiss.IndexPQ(self.dim, pq_m, pq_nbits, metric)
+            except TypeError:
+                if metric != faiss.METRIC_L2:
+                    raise ValueError(
+                        "FAISS IndexPQ in this build only supports L2 metric"
+                    )
+                index = faiss.IndexPQ(self.dim, pq_m, pq_nbits)
             index.train(vectors)
         elif index_type == "hnsw":
             index = faiss.IndexHNSWFlat(self.dim, int(self._config.m), metric)

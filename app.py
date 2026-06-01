@@ -82,6 +82,8 @@ def _config_cache_key(config: IndexConfig) -> Tuple[Any, ...]:
         cfg.m,
         cfg.ef_construction,
         cfg.ef_search,
+        cfg.pq_m,
+        cfg.pq_nbits,
     )
 
 
@@ -120,6 +122,14 @@ def _index_config_from_payload(payload: Dict[str, Any]) -> IndexConfig:
     ef_search = _parse_optional_int(payload, "ef_search")
     if ef_search is not None:
         overrides["ef_search"] = ef_search
+
+    pq_m = _parse_optional_int(payload, "pq_m")
+    if pq_m is not None:
+        overrides["pq_m"] = pq_m
+
+    pq_nbits = _parse_optional_int(payload, "pq_nbits")
+    if pq_nbits is not None:
+        overrides["pq_nbits"] = pq_nbits
 
     if not overrides:
         return config
@@ -222,6 +232,31 @@ def _append_benchmark_history(entry: Dict[str, Any], keep_last: int = 50) -> int
     return len(history) - 1
 
 
+def _suggest_pq_m(dim: int, preferred: int = 16) -> int:
+    if dim <= 0:
+        return 1
+    preferred = min(preferred, dim)
+    for candidate in range(preferred, 0, -1):
+        if dim % candidate == 0:
+            return candidate
+    return 1
+
+
+def _pq_m_options(dim: int) -> List[int]:
+    if dim <= 0:
+        return [1]
+    return [candidate for candidate in range(dim, 0, -1) if dim % candidate == 0]
+
+
+def _normalize_pq_config_for_dim(config: IndexConfig, dim: int) -> IndexConfig:
+    normalized = config.normalized()
+    if normalized.index_type != "pq":
+        return normalized
+    if dim > 0 and dim % int(normalized.pq_m) != 0:
+        return normalized.update(pq_m=_suggest_pq_m(dim, int(normalized.pq_m)))
+    return normalized
+
+
 def _dataset_payload(dataset_id: str, dataset_path: Path) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "id": dataset_id,
@@ -261,6 +296,8 @@ def _metadata_payload(
     dataset_id: str, use_rep: str, index_config: IndexConfig
 ) -> Dict[str, Any]:
     loader = _get_loader(dataset_id)
+    vector_dim = loader.vector_dim(use_rep)
+    index_config = _normalize_pq_config_for_dim(index_config, vector_dim)
     index_path = _index_path(dataset_id, use_rep)
     backup_path = _backup_index_path(index_path)
     index_ready = index_path.exists() or backup_path.exists()
@@ -272,7 +309,9 @@ def _metadata_payload(
         "ready": index_ready,
         "n_cells": loader.n_cells,
         "n_genes": loader.n_genes,
-        "vector_dim": loader.vector_dim(use_rep),
+        "vector_dim": vector_dim,
+        "pq_m_options": _pq_m_options(vector_dim),
+        "suggested_pq_m": _suggest_pq_m(vector_dim),
         "available_reps": loader.available_reps,
         "obs_columns": loader.obs_columns,
         "index_config": index_config.to_dict(),
@@ -385,6 +424,59 @@ def list_datasets():
     return _json_response({"datasets": datasets})
 
 
+@app.get("/api/cells")
+def list_cells():
+    try:
+        payload = dict(request.args)
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        offset = _parse_int(payload, "offset", default=0)
+        limit = _parse_int(payload, "limit", default=50)
+
+        if offset < 0:
+            return _json_response({"error": "offset must be >= 0"}, 400)
+        if limit <= 0:
+            return _json_response({"error": "limit must be a positive integer"}, 400)
+        limit = min(limit, 200)
+
+        loader = _get_loader(resolved_id, dataset_path)
+        total = loader.n_cells
+        start = min(offset, total)
+        end = min(start + limit, total)
+
+        cells = []
+        obs_names = loader.adata.obs_names
+        for idx in range(start, end):
+            cell_id = str(obs_names[idx])
+            cell_type = None
+            if "cell_type" in loader.adata.obs.columns:
+                cell_type = loader.adata.obs.iloc[idx]["cell_type"]
+                if not isinstance(cell_type, (str, int, float, bool, type(None))):
+                    cell_type = str(cell_type)
+            cells.append(
+                {
+                    "cell_index": idx,
+                    "cell_id": cell_id,
+                    "cell_type": cell_type,
+                }
+            )
+
+        return _json_response(
+            {
+                "dataset_id": resolved_id,
+                "offset": start,
+                "limit": limit,
+                "total": total,
+                "next_offset": end if end < total else None,
+                "prev_offset": max(start - limit, 0) if start > 0 else None,
+                "cells": cells,
+            }
+        )
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
 @app.post("/api/datasets/upload")
 def upload_dataset():
     if "file" not in request.files:
@@ -435,6 +527,10 @@ def build_index():
         resolved_id = _dataset_id_from_path(dataset_path)
         use_rep = payload.get("use_rep") or DEFAULT_USE_REP
         index_config = _index_config_from_payload(payload)
+        loader = _get_loader(resolved_id, dataset_path)
+        index_config = _normalize_pq_config_for_dim(
+            index_config, loader.vector_dim(use_rep)
+        )
         indexer = _get_indexer(
             resolved_id, use_rep, index_config, build_if_missing=True
         )
@@ -458,6 +554,7 @@ def build_index():
 @app.route("/api/search", methods=["GET", "POST"])
 def search():
     try:
+        total_start_time = time.perf_counter()
         payload = _request_payload()
         dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
         dataset_path = _resolve_dataset_path(dataset_id)
@@ -471,6 +568,9 @@ def search():
         include_self = _parse_bool(payload.get("include_self"), default=False)
 
         loader = _get_loader(resolved_id, dataset_path)
+        index_config = _normalize_pq_config_for_dim(
+            index_config, loader.vector_dim(use_rep)
+        )
         if cell_index_value is None or cell_index_value == "":
             if cell_id_value is None or str(cell_id_value).strip() == "":
                 raise ValueError("cell_index or cell_id is required")
@@ -483,8 +583,12 @@ def search():
         if k > MAX_TOP_K:
             return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
 
+        index_prepare_start_time = time.perf_counter()
         indexer = _get_indexer(
             resolved_id, use_rep, index_config, build_if_missing=True
+        )
+        index_prepare_ms = round(
+            (time.perf_counter() - index_prepare_start_time) * 1000.0, 2
         )
         query_vector = loader.get_vector(cell_index, use_rep=use_rep)
         search_k = min(k + 1 if not include_self else k, loader.n_cells)
@@ -531,6 +635,11 @@ def search():
                 "index_metric": metric,
                 "index_config": indexer.config_summary,
                 "elapsed_ms": elapsed_ms,
+                "search_elapsed_ms": elapsed_ms,
+                "index_prepare_ms": index_prepare_ms,
+                "total_elapsed_ms": round(
+                    (time.perf_counter() - total_start_time) * 1000.0, 2
+                ),
                 "results": results,
             }
         )
@@ -564,6 +673,7 @@ def benchmark_api():
         loader = _get_loader(resolved_id, dataset_path)
         vectors = loader.get_vectors(use_rep)
         n_cells = loader.n_cells
+        pq_m = _suggest_pq_m(vectors.shape[1])
 
         query_count = min(query_count, n_cells)
         if query_count <= 0:
@@ -622,6 +732,17 @@ def benchmark_api():
                     metric="l2",
                     nlist=100,
                     nprobe=10,
+                ),
+            },
+            {
+                "id": "faiss_pq",
+                "label": "FAISS-PQ",
+                "config": IndexConfig(
+                    backend="faiss",
+                    index_type="pq",
+                    metric="l2",
+                    pq_m=pq_m,
+                    pq_nbits=8,
                 ),
             },
         ]
