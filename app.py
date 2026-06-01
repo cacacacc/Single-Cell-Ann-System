@@ -424,6 +424,59 @@ def list_datasets():
     return _json_response({"datasets": datasets})
 
 
+@app.get("/api/cells")
+def list_cells():
+    try:
+        payload = dict(request.args)
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        offset = _parse_int(payload, "offset", default=0)
+        limit = _parse_int(payload, "limit", default=50)
+
+        if offset < 0:
+            return _json_response({"error": "offset must be >= 0"}, 400)
+        if limit <= 0:
+            return _json_response({"error": "limit must be a positive integer"}, 400)
+        limit = min(limit, 200)
+
+        loader = _get_loader(resolved_id, dataset_path)
+        total = loader.n_cells
+        start = min(offset, total)
+        end = min(start + limit, total)
+
+        cells = []
+        obs_names = loader.adata.obs_names
+        for idx in range(start, end):
+            cell_id = str(obs_names[idx])
+            cell_type = None
+            if "cell_type" in loader.adata.obs.columns:
+                cell_type = loader.adata.obs.iloc[idx]["cell_type"]
+                if not isinstance(cell_type, (str, int, float, bool, type(None))):
+                    cell_type = str(cell_type)
+            cells.append(
+                {
+                    "cell_index": idx,
+                    "cell_id": cell_id,
+                    "cell_type": cell_type,
+                }
+            )
+
+        return _json_response(
+            {
+                "dataset_id": resolved_id,
+                "offset": start,
+                "limit": limit,
+                "total": total,
+                "next_offset": end if end < total else None,
+                "prev_offset": max(start - limit, 0) if start > 0 else None,
+                "cells": cells,
+            }
+        )
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
 @app.post("/api/datasets/upload")
 def upload_dataset():
     if "file" not in request.files:
