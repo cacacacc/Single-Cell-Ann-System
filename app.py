@@ -501,6 +501,7 @@ def build_index():
 @app.route("/api/search", methods=["GET", "POST"])
 def search():
     try:
+        total_start_time = time.perf_counter()
         payload = _request_payload()
         dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
         dataset_path = _resolve_dataset_path(dataset_id)
@@ -529,8 +530,12 @@ def search():
         if k > MAX_TOP_K:
             return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
 
+        index_prepare_start_time = time.perf_counter()
         indexer = _get_indexer(
             resolved_id, use_rep, index_config, build_if_missing=True
+        )
+        index_prepare_ms = round(
+            (time.perf_counter() - index_prepare_start_time) * 1000.0, 2
         )
         query_vector = loader.get_vector(cell_index, use_rep=use_rep)
         search_k = min(k + 1 if not include_self else k, loader.n_cells)
@@ -577,6 +582,11 @@ def search():
                 "index_metric": metric,
                 "index_config": indexer.config_summary,
                 "elapsed_ms": elapsed_ms,
+                "search_elapsed_ms": elapsed_ms,
+                "index_prepare_ms": index_prepare_ms,
+                "total_elapsed_ms": round(
+                    (time.perf_counter() - total_start_time) * 1000.0, 2
+                ),
                 "results": results,
             }
         )

@@ -685,7 +685,10 @@
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
             statusBadge.className = 'badge bg-success me-3';
-            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>耗时 ${data.elapsed_ms}ms | ${data.index_backend || 'ANN'} / ${data.index_type || indexType} / ${data.index_metric || indexMetric}`;
+            const totalMs = data.total_elapsed_ms ?? data.elapsed_ms;
+            const searchMs = data.search_elapsed_ms ?? data.elapsed_ms;
+            const prepareMs = data.index_prepare_ms ?? 0;
+            statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>总耗时 ${totalMs}ms | 查询 ${searchMs}ms | 索引准备 ${prepareMs}ms | ${data.index_backend || 'ANN'} / ${data.index_type || indexType} / ${data.index_metric || indexMetric}`;
             setDistanceHeader(data.index_metric || indexMetric);
             updateEffectiveConfigDisplay(data, payload);
         } catch (err) {
