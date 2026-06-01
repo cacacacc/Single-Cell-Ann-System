@@ -421,6 +421,26 @@
     let nextCellOffset = null;
     let prevCellOffset = null;
     const cellPageSize = 50;
+    const indexTypeOptions = {
+        auto: [
+            { value: 'flat', label: 'flat（精确 / 暴力KNN）' },
+            { value: 'ivf_flat', label: 'ivf_flat（近似）' },
+            { value: 'hnsw', label: 'hnsw（近似）' },
+            { value: 'pq', label: 'pq（FAISS-PQ）' }
+        ],
+        faiss: [
+            { value: 'flat', label: 'flat（精确 / 暴力KNN）' },
+            { value: 'ivf_flat', label: 'ivf_flat（近似）' },
+            { value: 'hnsw', label: 'hnsw（近似）' },
+            { value: 'pq', label: 'pq（FAISS-PQ）' }
+        ],
+        hnswlib: [
+            { value: 'hnsw', label: 'hnsw（HNSWLIB）' }
+        ],
+        numpy: [
+            { value: 'brute', label: 'brute（精确暴力）' }
+        ]
+    };
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
 
     function suggestedPqM(dim, preferred) {
@@ -547,24 +567,15 @@
 
     function updateIndexParamState() {
         const backend = indexBackendSelect.value;
-
-        const allOptions = Array.from(indexTypeSelect.options);
-        allOptions.forEach(opt => { opt.disabled = false; });
-
-        if (backend === 'numpy') {
-            allOptions.forEach(opt => {
-                if (!['flat', 'brute'].includes(opt.value)) opt.disabled = true;
-            });
-            if (!['flat', 'brute'].includes(indexTypeSelect.value)) {
-                indexTypeSelect.value = 'brute';
-            }
-        } else if (backend === 'hnswlib') {
-            allOptions.forEach(opt => {
-                if (opt.value !== 'hnsw') opt.disabled = true;
-            });
-            indexTypeSelect.value = 'hnsw';
-        } else if (backend === 'faiss') {
-            allOptions.forEach(opt => { opt.disabled = false; });
+        const selectedType = indexTypeSelect.value;
+        const options = indexTypeOptions[backend] || indexTypeOptions.auto;
+        indexTypeSelect.innerHTML = options
+            .map(opt => `<option value="${opt.value}">${opt.label}</option>`)
+            .join('');
+        if (options.some(opt => opt.value === selectedType)) {
+            indexTypeSelect.value = selectedType;
+        } else {
+            indexTypeSelect.value = options[0].value;
         }
 
         const indexType = indexTypeSelect.value;
