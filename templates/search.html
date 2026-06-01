@@ -642,26 +642,14 @@
         effectivePQ.innerText = `${pqM} / ${pqNbits}`;
     }
 
-    const cellCategories = [
-        { name: 'T cell', color: '#4A90E2', count: 341, center: [-20, 20] },
-        { name: 'Hepatocyte', color: '#E83E8C', count: 603, center: [10, -15] },
-        { name: 'Macrophage', color: '#2ECC71', count: 255, center: [25, 30] },
-        { name: 'Endothelial cell', color: '#F5A623', count: 138, center: [35, -25] },
-        { name: 'Monocyte', color: '#9B59B6', count: 104, center: [-30, -10] },
-        { name: 'NK cell', color: '#1ABC9C', count: 80, center: [0, 40] }
-    ];
-
     const legendContainer = document.getElementById('legend-container');
-    let legendHTML = '';
-    cellCategories.forEach(cat => {
-        legendHTML += `
-            <div class="d-flex align-items-center" style="font-size: 0.85rem; color: #FFFFFF;">
-                <div style="width: 12px; height: 12px; background-color: ${cat.color}; border-radius: 2px; margin-right: 6px;"></div>
-                ${cat.name} <span style="color: #A0AABF; margin-left: 4px;">(${cat.count})</span>
-            </div>
-        `;
-    });
-    legendContainer.innerHTML = legendHTML;
+    const umapColors = ['#4A90E2', '#E83E8C', '#2ECC71', '#F5A623', '#9B59B6', '#1ABC9C', '#E74C3C', '#00B8D9', '#A3E635', '#F97316'];
+    let currentUmapPoints = [];
+    let currentUmapCategories = [];
+    let currentUmapColorMap = {};
+    let forcedUmapPointMap = new Map();
+    let baseOption = null;
+    const cellCategories = [];
 
     document.getElementById('showLegend').addEventListener('change', function(e) {
         document.getElementById('custom-legend-box').style.display = e.target.checked ? 'block' : 'none';
@@ -685,7 +673,7 @@
     const chartDom = document.getElementById('umapChart');
     const myChart = echarts.init(chartDom);
     
-    let baseOption = {
+    baseOption = {
         backgroundColor: 'transparent',
         tooltip: {
             backgroundColor: 'rgba(20, 26, 48, 0.9)',
@@ -712,10 +700,142 @@
     };
     myChart.setOption(baseOption);
 
+    function getUmapColor(category) {
+        return currentUmapColorMap[category] || '#8A96A8';
+    }
+
+    function renderUmapLegend() {
+        if (!currentUmapCategories.length) {
+            legendContainer.innerHTML = '<div style="color: #8A96A8; font-size: 0.85rem;">暂无 UMAP 数据</div>';
+            return;
+        }
+        legendContainer.innerHTML = currentUmapCategories.slice(0, 10).map(cat => `
+            <div class="d-flex align-items-center" style="font-size: 0.85rem; color: #FFFFFF;">
+                <div style="width: 12px; height: 12px; background-color: ${getUmapColor(cat.name)}; border-radius: 2px; margin-right: 6px;"></div>
+                ${cat.name} <span style="color: #A0AABF; margin-left: 4px;">(${cat.count})</span>
+            </div>
+        `).join('');
+    }
+
+    function renderUmapChart(resultRows = [], queryId = null) {
+        const showBackground = document.getElementById('bgSample').checked;
+        const resultIds = new Set(resultRows.map(row => row.cell_id));
+        const highlightIds = new Set(resultRows.map(row => row.cell_id));
+        if (queryId) highlightIds.add(queryId);
+        const pointById = new Map(currentUmapPoints.map(point => [point.cell_id, point]));
+        forcedUmapPointMap.forEach((point, cellId) => {
+            pointById.set(cellId, point);
+        });
+
+        const backgroundData = showBackground ? currentUmapPoints
+            .filter(point => !highlightIds.has(point.cell_id))
+            .map(point => ({
+                value: [point.x, point.y],
+                name: point.cell_id,
+                type: point.category,
+                itemStyle: { color: getUmapColor(point.category) }
+            })) : [];
+
+        const resultData = Array.from(resultIds)
+            .map(cellId => pointById.get(cellId))
+            .filter(Boolean)
+            .map(point => {
+                const row = resultRows.find(item => item.cell_id === point.cell_id) || {};
+                return {
+                    value: [point.x, point.y],
+                    name: point.cell_id,
+                    type: point.category,
+                    dist: row.distance,
+                    itemStyle: { color: '#F5A623' }
+                };
+            });
+
+        const queryData = [pointById.get(queryId)]
+            .filter(Boolean)
+            .map(point => ({
+                value: [point.x, point.y],
+                name: point.cell_id,
+                type: point.category,
+                itemStyle: { color: '#FFFFFF' }
+            }));
+
+        baseOption = {
+            backgroundColor: 'transparent',
+            tooltip: {
+                backgroundColor: 'rgba(20, 26, 48, 0.9)',
+                borderColor: '#4A90E2',
+                textStyle: { color: '#fff' },
+                formatter: function (params) {
+                    const dist = params.data.dist !== undefined ? `<br>Dist: ${params.data.dist}` : '';
+                    return `ID: ${params.data.name}<br>Type: <span style="color:${params.color}">${params.data.type}</span>${dist}`;
+                }
+            },
+            dataZoom: [{ type: 'inside' }, { type: 'slider', show: false }],
+            xAxis: { show: true, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,0.03)' } }, axisLabel: {show: false}, axisLine: {show: false}, axisTick: {show: false} },
+            yAxis: { show: true, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,0.03)' } }, axisLabel: {show: false}, axisLine: {show: false}, axisTick: {show: false} },
+            series: [
+                { name: '背景细胞', type: 'scatter', symbolSize: 3, itemStyle: { opacity: 0.72 }, data: backgroundData, large: true },
+                { name: 'Top-K 结果', type: 'scatter', symbolSize: 8, data: resultData, z: 5 },
+                { name: '查询目标', type: 'scatter', symbolSize: 12, data: queryData, z: 6 }
+            ]
+        };
+        myChart.setOption(baseOption, true);
+        renderUmapLegend();
+    }
+
+    async function loadUmap() {
+        const datasetId = datasetSelect.value;
+        if (!datasetId) return;
+        myChart.showLoading({ text: '加载 UMAP...', color: '#4A90E2', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
+        try {
+            const params = new URLSearchParams({ dataset_id: datasetId, limit: '3000', color_by: 'cell_type' });
+            const res = await fetch(`/api/umap?${params.toString()}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'UMAP 加载失败');
+            currentUmapPoints = data.points || [];
+            currentUmapCategories = data.categories || [];
+            forcedUmapPointMap = new Map();
+            currentUmapColorMap = {};
+            currentUmapCategories.forEach((cat, idx) => {
+                currentUmapColorMap[cat.name] = umapColors[idx % umapColors.length];
+            });
+            renderUmapChart();
+        } catch (err) {
+            currentUmapPoints = [];
+            currentUmapCategories = [];
+            legendContainer.innerHTML = `<div style="color: #ff6b6b; font-size: 0.85rem;">${err.message || 'UMAP 加载失败'}</div>`;
+            myChart.clear();
+        } finally {
+            myChart.hideLoading();
+        }
+    }
+
+    async function loadUmapCells(cellIds) {
+        const datasetId = datasetSelect.value;
+        const uniqueIds = Array.from(new Set((cellIds || []).filter(Boolean)));
+        if (!datasetId || uniqueIds.length === 0) {
+            forcedUmapPointMap = new Map();
+            return;
+        }
+
+        const res = await fetch('/api/umap/cells', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dataset_id: datasetId,
+                cell_ids: uniqueIds,
+                color_by: 'cell_type'
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'UMAP 高亮坐标加载失败');
+        forcedUmapPointMap = new Map((data.points || []).map(point => [point.cell_id, point]));
+    }
+
     document.getElementById('redrawBtn').addEventListener('click', function() {
         this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         setTimeout(() => {
-            myChart.setOption(baseOption, true);
+            renderUmapChart();
             document.getElementById('result-tbody').innerHTML = '<tr><td colspan="5" class="text-center py-5"><i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i><div style="color: #8A96A8;">已重绘图谱，请重新执行检索</div></td></tr>';
             document.getElementById('search-status').className = 'badge bg-secondary me-3';
             document.getElementById('search-status').innerText = '等待查询...';
@@ -738,6 +858,7 @@
                 .join('');
             await refreshMetadata();
             await loadCells(0);
+            await loadUmap();
         } catch (err) {
             datasetSelect.innerHTML = '<option value="" disabled selected>加载失败</option>';
             datasetSelect.disabled = true;
@@ -748,6 +869,7 @@
         await refreshMetadata();
         updateIndexParamState();
         await loadCells(0);
+        await loadUmap();
     });
 
     prevCellsBtn.addEventListener('click', () => {
@@ -859,6 +981,12 @@
             statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>总耗时 ${totalMs}ms | 查询 ${searchMs}ms | 索引准备 ${prepareMs}ms | ${data.index_backend || 'ANN'} / ${data.index_type || indexType} / ${data.index_metric || indexMetric}`;
             setDistanceHeader(data.index_metric || indexMetric);
             updateEffectiveConfigDisplay(data, payload);
+            try {
+                await loadUmapCells([data.cell_id].concat((data.results || []).map(row => row.cell_id)));
+            } catch (umapErr) {
+                forcedUmapPointMap = new Map();
+            }
+            renderUmapChart(data.results || [], data.cell_id);
         } catch (err) {
             tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #ff6b6b;">检索失败，请检查输入或后端日志</td></tr>';
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';

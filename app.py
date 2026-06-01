@@ -477,6 +477,144 @@ def list_cells():
         return _json_response({"error": str(exc)}, 400)
 
 
+@app.get("/api/umap")
+def umap_points():
+    try:
+        payload = dict(request.args)
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        limit = _parse_int(payload, "limit", default=3000)
+        seed = _parse_int(payload, "seed", default=42)
+        color_by = payload.get("color_by") or "cell_type"
+
+        if limit <= 0:
+            return _json_response({"error": "limit must be a positive integer"}, 400)
+        limit = min(limit, 10000)
+
+        loader = _get_loader(resolved_id, dataset_path)
+        if "X_umap" not in loader.adata.obsm:
+            return _json_response({"error": "X_umap is not available for this dataset"}, 400)
+
+        coords = np.asarray(loader.adata.obsm["X_umap"])
+        if coords.ndim != 2 or coords.shape[1] < 2:
+            return _json_response({"error": "X_umap must have at least two dimensions"}, 400)
+
+        total = loader.n_cells
+        if limit >= total:
+            indices = np.arange(total, dtype=np.int64)
+        else:
+            rng = np.random.default_rng(seed)
+            indices = np.sort(rng.choice(total, size=limit, replace=False))
+
+        obs = loader.adata.obs
+        if color_by not in obs.columns:
+            color_by = "cell_type" if "cell_type" in obs.columns else None
+
+        points = []
+        category_counts: Dict[str, int] = {}
+        obs_names = loader.adata.obs_names
+        for idx_value in indices.tolist():
+            idx = int(idx_value)
+            category = "unknown"
+            if color_by is not None:
+                value = obs.iloc[idx][color_by]
+                category = str(value) if value is not None else "unknown"
+            category_counts[category] = category_counts.get(category, 0) + 1
+            points.append(
+                {
+                    "cell_index": idx,
+                    "cell_id": str(obs_names[idx]),
+                    "x": float(coords[idx, 0]),
+                    "y": float(coords[idx, 1]),
+                    "category": category,
+                }
+            )
+
+        return _json_response(
+            {
+                "dataset_id": resolved_id,
+                "use_rep": "X_umap",
+                "color_by": color_by,
+                "total": total,
+                "sampled": len(points),
+                "points": points,
+                "categories": [
+                    {"name": name, "count": count}
+                    for name, count in sorted(
+                        category_counts.items(), key=lambda item: item[1], reverse=True
+                    )
+                ],
+            }
+        )
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
+@app.post("/api/umap/cells")
+def umap_cells():
+    try:
+        payload = _request_payload()
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        cell_ids = payload.get("cell_ids") or []
+        color_by = payload.get("color_by") or "cell_type"
+
+        if not isinstance(cell_ids, list):
+            return _json_response({"error": "cell_ids must be a list"}, 400)
+        if len(cell_ids) > 500:
+            return _json_response({"error": "cell_ids must not exceed 500"}, 400)
+
+        loader = _get_loader(resolved_id, dataset_path)
+        if "X_umap" not in loader.adata.obsm:
+            return _json_response({"error": "X_umap is not available for this dataset"}, 400)
+
+        coords = np.asarray(loader.adata.obsm["X_umap"])
+        if coords.ndim != 2 or coords.shape[1] < 2:
+            return _json_response({"error": "X_umap must have at least two dimensions"}, 400)
+
+        obs = loader.adata.obs
+        if color_by not in obs.columns:
+            color_by = "cell_type" if "cell_type" in obs.columns else None
+
+        points = []
+        missing = []
+        for raw_cell_id in cell_ids:
+            cell_id = str(raw_cell_id)
+            try:
+                idx = loader.cell_index_from_id(cell_id)
+            except KeyError:
+                missing.append(cell_id)
+                continue
+
+            category = "unknown"
+            if color_by is not None:
+                value = obs.iloc[idx][color_by]
+                category = str(value) if value is not None else "unknown"
+            points.append(
+                {
+                    "cell_index": idx,
+                    "cell_id": cell_id,
+                    "x": float(coords[idx, 0]),
+                    "y": float(coords[idx, 1]),
+                    "category": category,
+                }
+            )
+
+        return _json_response(
+            {
+                "dataset_id": resolved_id,
+                "use_rep": "X_umap",
+                "color_by": color_by,
+                "points": points,
+                "missing": missing,
+            }
+        )
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
 @app.post("/api/datasets/upload")
 def upload_dataset():
     if "file" not in request.files:
