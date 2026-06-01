@@ -145,6 +145,7 @@
                         <option value="flat" selected>flat（精确）</option>
                         <option value="ivf_flat">ivf_flat（近似）</option>
                         <option value="hnsw">hnsw（近似）</option>
+                        <option value="pq">pq（FAISS-PQ）</option>
                         <option value="brute">brute（暴力）</option>
                     </select>
                 </div>
@@ -170,6 +171,14 @@
                             <input type="number" min="1" class="form-control dark-control" id="nprobeInput" value="10">
                         </div>
                         <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">PQ M</label>
+                            <input type="number" min="1" class="form-control dark-control" id="pqMInput" value="8">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">PQ nbits</label>
+                            <input type="number" min="1" max="16" class="form-control dark-control" id="pqNbitsInput" value="8">
+                        </div>
+                        <div class="col-6">
                             <label class="form-label mb-1" style="font-size: 0.8rem;">M</label>
                             <input type="number" min="2" class="form-control dark-control" id="mInput" value="16">
                         </div>
@@ -182,7 +191,7 @@
                             <input type="number" min="1" class="form-control dark-control" id="efSearchInput" value="50">
                         </div>
                     </div>
-                    <div class="form-text" style="color: #6f7c92;" id="indexParamHint">IVF 使用 nlist/nprobe；HNSW 使用 M/ef_*。</div>
+                    <div class="form-text" style="color: #6f7c92;" id="indexParamHint">IVF 使用 nlist/nprobe；HNSW 使用 M/ef_*；PQ 使用 pq_m/pq_nbits。</div>
                 </div>
 
                 <div class="mb-4">
@@ -207,6 +216,10 @@
                         <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
                             <span>M / ef构建 / ef查询</span>
                             <span id="effectiveHNSW" class="text-white">-</span>
+                        </div>
+                        <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
+                            <span>PQ M / nbits</span>
+                            <span id="effectivePQ" class="text-white">-</span>
                         </div>
                         <div class="mt-2" style="color: #6f7c92; font-size: 0.78rem;">显示最终实际生效配置（含自动回退）。</div>
                     </div>
@@ -317,6 +330,8 @@
     const indexMetricSelect = document.getElementById('indexMetricSelect');
     const nlistInput = document.getElementById('nlistInput');
     const nprobeInput = document.getElementById('nprobeInput');
+    const pqMInput = document.getElementById('pqMInput');
+    const pqNbitsInput = document.getElementById('pqNbitsInput');
     const mInput = document.getElementById('mInput');
     const efConstructionInput = document.getElementById('efConstructionInput');
     const efSearchInput = document.getElementById('efSearchInput');
@@ -327,7 +342,61 @@
     const effectiveMetric = document.getElementById('effectiveMetric');
     const effectiveIVF = document.getElementById('effectiveIVF');
     const effectiveHNSW = document.getElementById('effectiveHNSW');
+    const effectivePQ = document.getElementById('effectivePQ');
+    let currentMetadata = null;
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
+
+    function suggestedPqM(dim, preferred) {
+        if (!Number.isFinite(dim) || dim <= 0) return 1;
+        const start = Math.max(1, Math.min(preferred || 16, dim));
+        for (let candidate = start; candidate >= 1; candidate--) {
+            if (dim % candidate === 0) return candidate;
+        }
+        return 1;
+    }
+
+    function normalizePqMInput() {
+        const dim = currentMetadata?.vector_dim;
+        if (!Number.isFinite(dim) || dim <= 0) return null;
+        const current = parseInt(pqMInput.value, 10);
+        if (Number.isNaN(current) || current <= 0 || dim % current !== 0) {
+            const fallback = currentMetadata?.suggested_pq_m || suggestedPqM(dim, current || 16);
+            pqMInput.value = fallback;
+            return fallback;
+        }
+        return current;
+    }
+
+    async function refreshMetadata() {
+        const datasetId = datasetSelect.value;
+        if (!datasetId) return;
+        try {
+            const params = new URLSearchParams({
+                dataset_id: datasetId,
+                index_backend: indexBackendSelect.value,
+                index_type: indexTypeSelect.value,
+                index_metric: indexMetricSelect.value,
+                pq_m: pqMInput.value,
+                pq_nbits: pqNbitsInput.value
+            });
+            const res = await fetch(`/api/metadata?${params.toString()}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'metadata failed');
+            currentMetadata = data;
+            if (indexTypeSelect.value === 'pq') {
+                normalizePqMInput();
+            }
+            updateEffectiveConfigDisplay(data, {
+                index_backend: indexBackendSelect.value,
+                index_type: indexTypeSelect.value,
+                index_metric: indexMetricSelect.value,
+                pq_m: pqMInput.value,
+                pq_nbits: pqNbitsInput.value
+            });
+        } catch (err) {
+            currentMetadata = null;
+        }
+    }
 
     function setDistanceHeader(metric) {
         if (metric === 'cosine') {
@@ -364,9 +433,12 @@
         const indexType = indexTypeSelect.value;
         const enableIVF = indexType === 'ivf_flat';
         const enableHNSW = indexType === 'hnsw';
+        const enablePQ = indexType === 'pq';
 
         nlistInput.disabled = !enableIVF;
         nprobeInput.disabled = !enableIVF;
+        pqMInput.disabled = !enablePQ;
+        pqNbitsInput.disabled = !enablePQ;
         mInput.disabled = !enableHNSW;
         efConstructionInput.disabled = !enableHNSW;
         efSearchInput.disabled = !enableHNSW;
@@ -375,14 +447,29 @@
             indexParamHint.innerText = 'IVF 使用 nlist/nprobe（FAISS）。';
         } else if (indexType === 'hnsw') {
             indexParamHint.innerText = 'HNSW 使用 M/ef_construction/ef_search。';
+        } else if (indexType === 'pq') {
+            indexParamHint.innerText = 'PQ 使用 pq_m/pq_nbits，pq_m 需整除向量维度（FAISS）。';
         } else {
             indexParamHint.innerText = '当前索引类型无需高级参数。';
         }
     }
 
-    indexBackendSelect.addEventListener('change', updateIndexParamState);
-    indexTypeSelect.addEventListener('change', updateIndexParamState);
-    indexMetricSelect.addEventListener('change', () => setDistanceHeader(indexMetricSelect.value));
+    indexBackendSelect.addEventListener('change', () => {
+        updateIndexParamState();
+        refreshMetadata();
+    });
+    indexTypeSelect.addEventListener('change', () => {
+        updateIndexParamState();
+        refreshMetadata();
+    });
+    indexMetricSelect.addEventListener('change', () => {
+        setDistanceHeader(indexMetricSelect.value);
+        refreshMetadata();
+    });
+    pqMInput.addEventListener('change', () => {
+        normalizePqMInput();
+        updateIndexParamState();
+    });
     updateIndexParamState();
     setDistanceHeader(indexMetricSelect.value);
 
@@ -396,12 +483,15 @@
         const m = config.m ?? fallback.m ?? '-';
         const efConstruction = config.ef_construction ?? fallback.ef_construction ?? '-';
         const efSearch = config.ef_search ?? fallback.ef_search ?? '-';
+        const pqM = config.pq_m ?? fallback.pq_m ?? '-';
+        const pqNbits = config.pq_nbits ?? fallback.pq_nbits ?? '-';
 
         effectiveBackend.innerText = backend;
         effectiveIndexType.innerText = indexType;
         effectiveMetric.innerText = metric;
         effectiveIVF.innerText = `${nlist} / ${nprobe}`;
         effectiveHNSW.innerText = `${m} / ${efConstruction} / ${efSearch}`;
+        effectivePQ.innerText = `${pqM} / ${pqNbits}`;
     }
 
     const cellCategories = [
@@ -498,11 +588,17 @@
             datasetSelect.innerHTML = data.datasets
                 .map(ds => `<option value="${ds.id}">${ds.filename}</option>`)
                 .join('');
+            await refreshMetadata();
         } catch (err) {
             datasetSelect.innerHTML = '<option value="" disabled selected>加载失败</option>';
             datasetSelect.disabled = true;
         }
     }
+
+    datasetSelect.addEventListener('change', async () => {
+        await refreshMetadata();
+        updateIndexParamState();
+    });
 
     document.getElementById('startSearchBtn').addEventListener('click', async function() {
         const btn = this;
@@ -542,12 +638,20 @@
 
             const nlist = parseInt(nlistInput.value, 10);
             const nprobe = parseInt(nprobeInput.value, 10);
+            const pqM = parseInt(pqMInput.value, 10);
+            const pqNbits = parseInt(pqNbitsInput.value, 10);
             const m = parseInt(mInput.value, 10);
             const efConstruction = parseInt(efConstructionInput.value, 10);
             const efSearch = parseInt(efSearchInput.value, 10);
 
             if (!Number.isNaN(nlist)) payload.nlist = nlist;
             if (!Number.isNaN(nprobe)) payload.nprobe = nprobe;
+            if (indexType === 'pq') {
+                payload.pq_m = normalizePqMInput() || pqM;
+            } else if (!Number.isNaN(pqM)) {
+                payload.pq_m = pqM;
+            }
+            if (!Number.isNaN(pqNbits)) payload.pq_nbits = pqNbits;
             if (!Number.isNaN(m)) payload.m = m;
             if (!Number.isNaN(efConstruction)) payload.ef_construction = efConstruction;
             if (!Number.isNaN(efSearch)) payload.ef_search = efSearch;
