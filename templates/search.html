@@ -650,6 +650,9 @@
     let forcedUmapPointMap = new Map();
     let baseOption = null;
     const cellCategories = [];
+    let lastSearchResults = [];
+    let lastSearchQueryId = null;
+    let focusedCellId = null;
 
     document.getElementById('showLegend').addEventListener('change', function(e) {
         document.getElementById('custom-legend-box').style.display = e.target.checked ? 'block' : 'none';
@@ -686,7 +689,11 @@
                 return `ID: ${params.data.name}<br>Type: <span style="color:${params.color}">${params.data.type}</span>`;
             }
         },
-        dataZoom: [{ type: 'inside' }, { type: 'slider', show: false }],
+        dataZoom: [
+            { type: 'inside', xAxisIndex: 0 },
+            { type: 'inside', yAxisIndex: 0 },
+            { type: 'slider', show: false }
+        ],
         xAxis: { show: true, min: -60, max: 60, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,0.03)' } }, axisLabel: {show: false}, axisLine: {show: false}, axisTick: {show: false} },
         yAxis: { show: true, min: -60, max: 60, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,0.03)' } }, axisLabel: {show: false}, axisLine: {show: false}, axisTick: {show: false} },
         series: [{
@@ -759,6 +766,13 @@
                 itemStyle: { color: '#FFFFFF' }
             }));
 
+        const focusPoint = focusedCellId ? pointById.get(focusedCellId) : null;
+        const focusData = focusPoint ? [{
+            value: [focusPoint.x, focusPoint.y],
+            name: focusPoint.cell_id,
+            type: focusPoint.category
+        }] : [];
+
         baseOption = {
             backgroundColor: 'transparent',
             tooltip: {
@@ -770,17 +784,86 @@
                     return `ID: ${params.data.name}<br>Type: <span style="color:${params.color}">${params.data.type}</span>${dist}`;
                 }
             },
-            dataZoom: [{ type: 'inside' }, { type: 'slider', show: false }],
+            dataZoom: [
+                { type: 'inside', xAxisIndex: 0 },
+                { type: 'inside', yAxisIndex: 0 },
+                { type: 'slider', show: false }
+            ],
             xAxis: { show: true, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,0.03)' } }, axisLabel: {show: false}, axisLine: {show: false}, axisTick: {show: false} },
             yAxis: { show: true, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,0.03)' } }, axisLabel: {show: false}, axisLine: {show: false}, axisTick: {show: false} },
             series: [
                 { name: '背景细胞', type: 'scatter', symbolSize: 3, itemStyle: { opacity: 0.72 }, data: backgroundData, large: true },
                 { name: 'Top-K 结果', type: 'scatter', symbolSize: 8, data: resultData, z: 5 },
-                { name: '查询目标', type: 'scatter', symbolSize: 12, data: queryData, z: 6 }
+                { name: '查询目标', type: 'scatter', symbolSize: 12, data: queryData, z: 6 },
+                {
+                    name: '定位目标',
+                    type: 'effectScatter',
+                    symbolSize: 16,
+                    rippleEffect: { scale: 2.5, brushType: 'stroke' },
+                    itemStyle: { color: '#FFD166' },
+                    data: focusData,
+                    z: 7
+                }
             ]
         };
         myChart.setOption(baseOption, true);
         renderUmapLegend();
+    }
+
+    function getUmapExtent(points) {
+        const data = (points && points.length) ? points : [];
+        if (!data.length) {
+            return { minX: -60, maxX: 60, minY: -60, maxY: 60 };
+        }
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minY = Infinity;
+        let maxY = -Infinity;
+        data.forEach(point => {
+            if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            minX = Math.min(minX, point.x);
+            maxX = Math.max(maxX, point.x);
+            minY = Math.min(minY, point.y);
+            maxY = Math.max(maxY, point.y);
+        });
+        if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+            return { minX: -60, maxX: 60, minY: -60, maxY: 60 };
+        }
+        return { minX, maxX, minY, maxY };
+    }
+
+    function applyUmapFocus(point) {
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+        const extent = getUmapExtent(currentUmapPoints);
+        const spanX = extent.maxX - extent.minX;
+        const spanY = extent.maxY - extent.minY;
+        const radius = Math.max(Math.min(spanX, spanY) * 0.08, 5);
+        myChart.setOption({
+            xAxis: { min: point.x - radius, max: point.x + radius },
+            yAxis: { min: point.y - radius, max: point.y + radius }
+        });
+    }
+
+    function getUmapPointById(cellId) {
+        if (!cellId) return null;
+        if (forcedUmapPointMap.has(cellId)) return forcedUmapPointMap.get(cellId);
+        return currentUmapPoints.find(point => point.cell_id === cellId) || null;
+    }
+
+    async function focusUmapOnCell(cellId) {
+        let point = getUmapPointById(cellId);
+        if (!point) {
+            await loadUmapCells([cellId]);
+            point = getUmapPointById(cellId);
+        }
+        if (!point) {
+            throw new Error('UMAP 中未找到该细胞坐标');
+        }
+        focusedCellId = cellId;
+        if (lastSearchResults.length) {
+            renderUmapChart(lastSearchResults, lastSearchQueryId);
+        }
+        applyUmapFocus(point);
     }
 
     async function loadUmap() {
@@ -965,13 +1048,25 @@
                             <td class="text-white">${row.cell_id || '-'}</td>
                             <td><span class="badge" style="background-color: #E83E8C; padding: 6px 10px;">${row.cell_type || 'unknown'}</span></td>
                             <td style="color: #2ecc71; font-family: monospace; font-size: 1.1rem;">${row.distance}</td>
-                            <td><button class="btn btn-sm" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);"><i class="fa-solid fa-crosshairs"></i></button></td>
+                            <td><button class="btn btn-sm locate-btn" data-cell-id="${row.cell_id || ''}" title="定位至 UMAP" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);"><i class="fa-solid fa-crosshairs"></i></button></td>
                         </tr>
                     `;
                 });
             }
 
             tbody.innerHTML = tableHTML;
+            document.querySelectorAll('#result-tbody .locate-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const targetId = btn.dataset.cellId;
+                    if (!targetId) return;
+                    try {
+                        await focusUmapOnCell(targetId);
+                    } catch (err) {
+                        console.error('定位失败', err);
+                        alert('定位失败：' + (err.message || '未知错误'));
+                    }
+                });
+            });
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
             statusBadge.className = 'badge bg-success me-3';
@@ -981,6 +1076,9 @@
             statusBadge.innerHTML = `<i class="fa-solid fa-check me-1"></i>总耗时 ${totalMs}ms | 查询 ${searchMs}ms | 索引准备 ${prepareMs}ms | ${data.index_backend || 'ANN'} / ${data.index_type || indexType} / ${data.index_metric || indexMetric}`;
             setDistanceHeader(data.index_metric || indexMetric);
             updateEffectiveConfigDisplay(data, payload);
+            lastSearchResults = data.results || [];
+            lastSearchQueryId = data.cell_id || null;
+            focusedCellId = null;
             try {
                 await loadUmapCells([data.cell_id].concat((data.results || []).map(row => row.cell_id)));
             } catch (umapErr) {
