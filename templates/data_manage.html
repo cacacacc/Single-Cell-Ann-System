@@ -216,23 +216,51 @@
                 <label class="form-label mb-3" style="color: #A0AABF;">选择底层算法结构</label>
                 
                 <div class="form-check mb-3">
-                    <input class="form-check-input" type="radio" name="annAlgo" id="algoHNSW" checked>
-                    <label class="form-check-label text-white" for="algoHNSW">
+                    <input class="form-check-input" type="radio" name="annAlgo" id="algoFaissHnsw" checked data-backend="faiss" data-index-type="hnsw" data-index-metric="l2" data-m="16" data-ef-construction="200" data-ef-search="50">
+                    <label class="form-check-label text-white" for="algoFaissHnsw">
                         <strong>FAISS - HNSW</strong> <span style="color: #2ecc71; font-size: 0.9rem;">(推荐)</span><br>
-                        <!-- 优化 3：大幅提亮小字说明，并增加行高 -->
                         <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
                             查询速度极快，召回率高，但内存占用较大。
                         </div>
                     </label>
                 </div>
-                
-                <div class="form-check mb-4">
-                    <input class="form-check-input" type="radio" name="annAlgo" id="algoIVF">
-                    <label class="form-check-label text-white" for="algoIVF">
-                        <strong>FAISS - IVF + PQ</strong><br>
-                        <!-- 优化 4：大幅提亮小字说明 -->
+
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="annAlgo" id="algoHnswlib" data-backend="hnswlib" data-index-type="hnsw" data-index-metric="l2" data-m="16" data-ef-construction="200" data-ef-search="50">
+                    <label class="form-check-label text-white" for="algoHnswlib">
+                        <strong>HNSWLIB - HNSW</strong><br>
+                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
+                            HNSW 近似检索实现，速度快，依赖 hnswlib 运行时。
+                        </div>
+                    </label>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="annAlgo" id="algoFaissIvf" data-backend="faiss" data-index-type="ivf_flat" data-index-metric="l2" data-nlist="100" data-nprobe="10">
+                    <label class="form-check-label text-white" for="algoFaissIvf">
+                        <strong>FAISS - IVF</strong><br>
+                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
+                            适合中大规模数据；通过 nlist/nprobe 平衡召回率与速度。
+                        </div>
+                    </label>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="annAlgo" id="algoFaissPq" data-backend="faiss" data-index-type="pq" data-index-metric="l2" data-pq-m="8" data-pq-nbits="8">
+                    <label class="form-check-label text-white" for="algoFaissPq">
+                        <strong>FAISS - PQ</strong><br>
                         <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
                             经过向量压缩，极低内存占用，适合超大规模数据。
+                        </div>
+                    </label>
+                </div>
+
+                <div class="form-check mb-4">
+                    <input class="form-check-input" type="radio" name="annAlgo" id="algoBrute" data-backend="numpy" data-index-type="brute" data-index-metric="l2">
+                    <label class="form-check-label text-white" for="algoBrute">
+                        <strong>NumPy - Brute</strong><br>
+                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
+                            精确暴力搜索，适合小数据或基线验证。
                         </div>
                     </label>
                 </div>
@@ -336,10 +364,33 @@
         document.getElementById('build-progress-area').style.display = 'block';
 
         try {
+            const algoInput = document.querySelector('input[name="annAlgo"]:checked');
+            const payload = { dataset_id: targetDatasetId };
+            if (algoInput) {
+                payload.index_backend = algoInput.dataset.backend;
+                payload.index_type = algoInput.dataset.indexType;
+                payload.index_metric = algoInput.dataset.indexMetric;
+
+                const nlist = parseInt(algoInput.dataset.nlist || '', 10);
+                const nprobe = parseInt(algoInput.dataset.nprobe || '', 10);
+                const m = parseInt(algoInput.dataset.m || '', 10);
+                const efConstruction = parseInt(algoInput.dataset.efConstruction || '', 10);
+                const efSearch = parseInt(algoInput.dataset.efSearch || '', 10);
+                const pqM = parseInt(algoInput.dataset.pqM || '', 10);
+                const pqNbits = parseInt(algoInput.dataset.pqNbits || '', 10);
+
+                if (!Number.isNaN(nlist)) payload.nlist = nlist;
+                if (!Number.isNaN(nprobe)) payload.nprobe = nprobe;
+                if (!Number.isNaN(m)) payload.m = m;
+                if (!Number.isNaN(efConstruction)) payload.ef_construction = efConstruction;
+                if (!Number.isNaN(efSearch)) payload.ef_search = efSearch;
+                if (!Number.isNaN(pqM)) payload.pq_m = pqM;
+                if (!Number.isNaN(pqNbits)) payload.pq_nbits = pqNbits;
+            }
             const res = await fetch('/api/index/build', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ dataset_id: targetDatasetId })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || '构建失败');
