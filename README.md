@@ -76,11 +76,10 @@ http://127.0.0.1:5000
 
 ```text
 .
-├── app.py                    # 外层入口
+├── app.py                    # Flask Web 服务主入口
 ├── backend/
 │   ├── data_reader.py        # 数据读取与向量提取模块
-│   ├── ann_indexer.py        # ANN 索引构建与检索模块
-│   └── app.py                # Web API 服务入口
+│   └── ann_indexer.py        # ANN 索引构建与检索模块
 ├── data/
 │   └── liver.h5ad            # 示例单细胞数据文件
 ├── docs/

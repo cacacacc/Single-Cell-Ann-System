@@ -3,19 +3,20 @@
 ## 1. 模块文件
 
 ```text
-backend/app.py
+app.py
 ```
 
-该模块负责把数据读取模块 `DataLoader` 和 ANN 检索模块 `ANNIndexer` 封装成 Flask Web 服务，供前端通过 HTTP 接口调用。
+当前项目以根目录 `app.py` 作为 Flask Web 服务主入口，负责连接前端页面、数据读取模块 `DataLoader` 和 ANN 检索模块 `ANNIndexer`。
 
 ## 2. 主要功能
 
-- 启动 Flask 服务
+- 启动 Flask 服务并挂载前端模板页面
 - 开启 CORS，允许前端跨域访问
-- 服务启动时加载 `.h5ad` 数据文件
-- 使用指定向量表示构建或加载 ANN 索引
-- 提供健康检查、元数据查询和相似细胞检索接口
-- 将检索结果整理成 JSON 返回给前端
+- 支持上传、列出、删除 `.h5ad` 数据集
+- 查询数据集元信息、细胞列表和 UMAP 坐标
+- 按参数构建或加载 ANN 索引
+- 执行 Top-K 相似细胞检索并返回 JSON 结果
+- 执行 ANN 算法性能评测并保存历史记录
 
 ## 3. 运行环境
 
@@ -33,45 +34,37 @@ pip install -r requirements.txt
 data/liver.h5ad
 ```
 
-如果数据文件不在默认位置，可以通过环境变量指定：
-
-```bash
-CELL_DATA_PATH=/path/to/liver.h5ad PORT=5001 python3 -m backend.app
-```
-
 ## 4. 启动服务
+
+从项目根目录启动：
 
 ```bash
 source .venv/bin/activate
-PORT=5001 python3 -m backend.app
+PORT=5001 python app.py
 ```
 
-启动后默认访问地址为：
+启动后访问：
 
 ```text
 http://127.0.0.1:5001
 ```
 
-如果 `5000` 端口被占用，可以使用 `PORT=5001` 或其他端口。
+## 5. 索引参数配置
 
-## 5. 环境变量配置
+索引参数既可以通过环境变量设置，也可以在 `/api/metadata`、`/api/index/build`、`/api/search` 请求参数中传入。
 
-| 变量名 | 默认值 | 说明 |
-|---|---|---|
-| `CELL_DATA_PATH` | `data/liver.h5ad` | 单细胞 `.h5ad` 数据文件路径 |
-| `CELL_INDEX_PATH` | `indexes/cell_index.index` | ANN 索引保存路径 |
-| `CELL_USE_REP` | `X_pca` | 使用的向量表示，如 `X`、`X_pca` |
-| `CELL_INDEX_BACKEND` | `auto` | 索引后端：`auto` / `faiss` / `hnswlib` / `numpy` |
-| `CELL_INDEX_TYPE` | `flat` | 索引类型：`flat` / `ivf_flat` / `hnsw` / `pq` / `brute` |
-| `CELL_INDEX_METRIC` | `l2` | 距离度量：`l2` / `cosine` / `ip` |
-| `CELL_INDEX_NLIST` | `100` | IVF 分桶数量（`ivf_flat`） |
-| `CELL_INDEX_NPROBE` | `10` | IVF 查询探测数量（`ivf_flat`） |
-| `CELL_INDEX_M` | `16` | HNSW 图的 M 参数（`hnsw`） |
-| `CELL_INDEX_EF_CONSTRUCTION` | `200` | HNSW 构建参数（`hnsw`） |
-| `CELL_INDEX_EF_SEARCH` | `50` | HNSW 查询参数（`hnsw`） |
-| `CELL_INDEX_PQ_M` | `8` | PQ 子空间数量（`pq`） |
-| `CELL_INDEX_PQ_NBITS` | `8` | PQ 编码位数（`pq`） |
-| `PORT` | `5000` | Flask 服务端口 |
+| 参数 | 默认值 | 说明 |
+|---|---:|---|
+| `index_backend` / `CELL_INDEX_BACKEND` | `auto` | 索引后端：`auto` / `faiss` / `hnswlib` / `numpy` |
+| `index_type` / `CELL_INDEX_TYPE` | `flat` | 索引类型：`flat` / `ivf_flat` / `hnsw` / `pq` / `brute` |
+| `index_metric` / `CELL_INDEX_METRIC` | `l2` | 距离度量：`l2` / `cosine` / `ip` |
+| `nlist` / `CELL_INDEX_NLIST` | `100` | IVF 分桶数量 |
+| `nprobe` / `CELL_INDEX_NPROBE` | `10` | IVF 查询探测数量 |
+| `m` / `CELL_INDEX_M` | `16` | HNSW 图的 M 参数 |
+| `ef_construction` / `CELL_INDEX_EF_CONSTRUCTION` | `200` | HNSW 构建参数 |
+| `ef_search` / `CELL_INDEX_EF_SEARCH` | `50` | HNSW 查询参数 |
+| `pq_m` / `CELL_INDEX_PQ_M` | `8` | PQ 子空间数量 |
+| `pq_nbits` / `CELL_INDEX_PQ_NBITS` | `8` | PQ 编码位数 |
 
 ## 6. API 接口
 
@@ -81,134 +74,149 @@ http://127.0.0.1:5001
 GET /api/health
 ```
 
-服务正常并且数据、索引加载成功时返回 `200`：
-
-```json
-{
-  "ready": true,
-  "data_path": "data/liver.h5ad",
-  "index_path": "indexes/cell_index.index",
-  "use_rep": "X_pca",
-  "n_cells": 69032,
-  "n_genes": 33694,
-  "vector_dim": 30,
-  "index_backend": "faiss"
-}
-```
-
-如果数据文件不存在或初始化失败，返回 `503`：
-
-```json
-{
-  "ready": false,
-  "data_path": "data/liver.h5ad",
-  "index_path": "indexes/cell_index.index",
-  "use_rep": "X_pca",
-  "error": "数据文件不存在：data/liver.h5ad"
-}
-```
+返回默认数据集、默认向量表示和默认索引状态。`ready=false` 表示默认索引尚未构建，但服务仍可继续使用上传、构建索引等接口。
 
 ### 6.2 数据集元信息
 
 ```http
-GET /api/metadata
+GET /api/metadata?dataset_id=liver&use_rep=X_pca
 ```
 
-返回数据集规模、可用向量表示、obs 元数据列名和索引后端等信息。
+返回数据集规模、可用向量表示、obs 元数据列名、PQ 参数建议和当前索引配置。
 
-### 6.3 相似细胞检索
+### 6.3 数据集管理
 
 ```http
-GET /api/search?cell_index=500&k=10
+GET /api/datasets
+POST /api/datasets/upload
+DELETE /api/datasets/<dataset_id>
 ```
 
-也支持 POST JSON：
+`POST /api/datasets/upload` 使用 multipart form 上传 `.h5ad` 文件，字段名为 `file`。
+
+### 6.4 细胞分页列表
+
+```http
+GET /api/cells?dataset_id=liver&offset=0&limit=50
+```
+
+返回细胞 ID、内部编号、细胞类型和分页信息。`limit` 最大为 `200`。
+
+### 6.5 UMAP 坐标
+
+```http
+GET /api/umap?dataset_id=liver&limit=3000&seed=42&color_by=cell_type
+POST /api/umap/cells
+```
+
+`GET /api/umap` 用于前端散点图抽样展示。`POST /api/umap/cells` 根据一组 `cell_ids` 返回指定细胞的 UMAP 坐标，最多 `500` 个。
+
+### 6.6 构建索引
+
+```http
+POST /api/index/build
+Content-Type: application/json
+
+{
+  "dataset_id": "liver",
+  "use_rep": "X_pca",
+  "index_backend": "faiss",
+  "index_type": "hnsw",
+  "index_metric": "l2",
+  "m": 16,
+  "ef_construction": 200,
+  "ef_search": 50
+}
+```
+
+返回构建后的后端、索引类型、距离度量和完整索引配置。若使用 `pq`，服务会根据向量维度自动修正不合法的 `pq_m`。
+
+### 6.7 相似细胞检索
 
 ```http
 POST /api/search
 Content-Type: application/json
 
 {
-  "cell_index": 500,
+  "dataset_id": "liver",
+  "cell_id": "AAACCTGAGCAGGTCA-1_2",
   "k": 10,
-  "include_self": false
+  "include_self": false,
+  "use_rep": "X_pca",
+  "index_backend": "auto",
+  "index_type": "flat",
+  "index_metric": "l2"
 }
 ```
 
-参数说明：
+也可以使用 `cell_index` 查询：
 
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `cell_index` | int | 是 | 无 | 查询细胞的编号，从 0 开始 |
-| `k` | int | 否 | `10` | 返回最相似的前 K 个细胞 |
-| `include_self` | bool | 否 | `false` | 是否在结果中包含查询细胞自身 |
-| `index_backend` | str | 否 | `auto` | 索引后端选择 |
-| `index_type` | str | 否 | `flat` | 索引类型选择（`flat` / `ivf_flat` / `hnsw` / `pq` / `brute`） |
-| `index_metric` | str | 否 | `l2` | 距离度量选择 |
-| `nlist` | int | 否 | `100` | IVF 分桶数量 |
-| `nprobe` | int | 否 | `10` | IVF 查询探测数量 |
-| `m` | int | 否 | `16` | HNSW M 参数 |
-| `ef_construction` | int | 否 | `200` | HNSW 构建参数 |
-| `ef_search` | int | 否 | `50` | HNSW 查询参数 |
-| `pq_m` | int | 否 | `8` | PQ 子空间数量（需整除向量维度） |
-| `pq_nbits` | int | 否 | `8` | PQ 编码位数（1~16） |
+```http
+GET /api/search?dataset_id=liver&cell_index=500&k=10
+```
+
+当前版本的 `/api/search` 会在索引缺失时按请求参数自动构建索引，因此第一次检索可能耗时较长。前端若希望提前展示进度，可先调用 `/api/index/build`。
 
 返回示例：
 
 ```json
 {
+  "dataset_id": "liver",
   "query_cell": 500,
+  "cell_id": "AAACCTGAGCAGGTCA-1_2",
   "k": 10,
   "include_self": false,
   "use_rep": "X_pca",
+  "index_backend": "faiss",
+  "index_type": "flat",
+  "index_metric": "l2",
+  "elapsed_ms": 1.27,
+  "index_prepare_ms": 0.18,
+  "total_elapsed_ms": 2.01,
   "results": [
     {
       "rank": 1,
       "cell_index": 1024,
-      "cell_id": "AAACCTGAGCAGGTCA-1_2",
+      "cell_id": "AAACCTGAGCAGGTCA-1_3",
       "cell_type": "hepatocyte",
       "distance": 0.235419,
       "similarity_score": 0.809442,
       "metadata": {
-        "cell_id": "AAACCTGAGCAGGTCA-1_2",
-        "cell_type": "hepatocyte",
-        "donor_id": "D1"
+        "cell_id": "AAACCTGAGCAGGTCA-1_3",
+        "cell_type": "hepatocyte"
       }
     }
   ]
 }
 ```
 
-## 7. 异常情况
+### 6.8 性能评测
+
+```http
+POST /api/benchmark
+GET /api/benchmark/history
+```
+
+`POST /api/benchmark` 会比较暴力精确检索、FAISS-HNSW、HNSWLIB、FAISS-IVF、FAISS-PQ 的平均耗时和 recall 曲线，并将结果写入 `data/benchmark_history.json`。
+
+## 7. 常见异常
 
 | 状态码 | 场景 |
 |---|---|
-| `400` | 参数缺失、参数类型错误、`k <= 0`、`k > 100`、细胞编号越界 |
-| `503` | 服务未准备好，例如数据文件不存在、索引未成功构建 |
+| `400` | 参数缺失、参数类型错误、`k <= 0`、`k > 100`、细胞编号越界、索引参数不合法 |
+| `404` | 搜索时指定的数据集不存在 |
+| `409` | 上传数据集时文件已存在 |
+| `503` | 默认数据集不存在、索引运行时不可用或服务暂不可用 |
 
-## 8. 前端调用示例
-
-```javascript
-async function searchSimilarCells(cellIndex, k) {
-  const response = await fetch(
-    `http://127.0.0.1:5001/api/search?cell_index=${cellIndex}&k=${k}`
-  );
-  const data = await response.json();
-  return data.results;
-}
-```
-
-## 9. 与其他后端模块的关系
+## 8. 与其他后端模块的关系
 
 ```text
 前端页面
    |
    v
-backend/app.py
+app.py
    |
    +-- backend/data_reader.py   读取 .h5ad 数据和细胞元数据
    |
    +-- backend/ann_indexer.py   构建 ANN 索引并执行 Top-K 检索
 ```
-
-`app.py` 不直接处理底层数据格式和 ANN 算法细节，只负责接收请求、调用底层模块、整理 JSON 响应，是前端和算法模块之间的接口层。

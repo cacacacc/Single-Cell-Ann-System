@@ -339,6 +339,11 @@ CORS(app)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def create_app() -> Flask:
+    return app
+
+
 # 路由 1：系统大屏首页 (登录后看到的)
 @app.route('/')
 def index():
@@ -398,7 +403,15 @@ def health():
         payload = _metadata_payload(dataset_id, DEFAULT_USE_REP, _index_config_from_env())
         return _json_response(payload, 200)
     except Exception as exc:
-        return _json_response({"error": str(exc)}, 503)
+        return _json_response(
+            {
+                "ready": False,
+                "data_path": DEFAULT_DATA_PATH,
+                "use_rep": DEFAULT_USE_REP,
+                "error": str(exc),
+            },
+            503,
+        )
 
 
 @app.get("/api/metadata")
@@ -781,6 +794,15 @@ def search():
                 "results": results,
             }
         )
+    except FileNotFoundError as exc:
+        return _json_response(
+            {
+                "error": str(exc),
+                "action": "select_dataset",
+                "message": "数据集不存在，请先上传或选择已有数据集",
+            },
+            404,
+        )
     except ImportError as exc:
         return _json_response({"error": str(exc)}, 400)
     except (TypeError, ValueError, KeyError, IndexError) as exc:
@@ -1083,6 +1105,11 @@ def _similarity_from_distance(distance: float, metric: str) -> float:
         return -distance
     return 1.0 / (1.0 + distance)
 
-if __name__ == "__main__":
+
+def main() -> None:
     port = int(os.getenv("PORT", "5000"))
     app.run(debug=True, port=port)
+
+
+if __name__ == "__main__":
+    main()
