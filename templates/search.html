@@ -368,7 +368,7 @@
                 <span class="fw-bold fs-5 text-white"><i class="fa-solid fa-table-list me-2" style="color: #4A90E2;"></i>Top-K 详细结果</span>
                 <div>
                     <span id="search-status" class="badge bg-secondary me-3">等待查询...</span>
-                    <button class="btn btn-sm" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);">
+                    <button class="btn btn-sm" id="exportCsvBtn" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);" disabled title="请先执行检索">
                         <i class="fa-solid fa-download me-1"></i>导出 CSV
                     </button>
                 </div>
@@ -422,6 +422,7 @@
     const effectiveIVF = document.getElementById('effectiveIVF');
     const effectiveHNSW = document.getElementById('effectiveHNSW');
     const effectivePQ = document.getElementById('effectivePQ');
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
     const queryCellIdInput = document.getElementById('queryCellId');
     const cellBrowserStatus = document.getElementById('cellBrowserStatus');
     const cellBrowserList = document.getElementById('cellBrowserList');
@@ -666,6 +667,7 @@
     const cellCategories = [];
     let lastSearchResults = [];
     let lastSearchQueryId = null;
+    let lastSearchPayload = null;
     let focusedCellId = null;
 
     document.getElementById('showLegend').addEventListener('change', function(e) {
@@ -1092,6 +1094,9 @@
             updateEffectiveConfigDisplay(data, payload);
             lastSearchResults = data.results || [];
             lastSearchQueryId = data.cell_id || null;
+            lastSearchPayload = payload;
+            exportCsvBtn.disabled = !lastSearchResults.length;
+            exportCsvBtn.title = lastSearchResults.length ? '导出当前检索结果' : '无结果可导出';
             focusedCellId = null;
             try {
                 await loadUmapCells([data.cell_id].concat((data.results || []).map(row => row.cell_id)));
@@ -1105,8 +1110,72 @@
             btn.disabled = false;
             statusBadge.className = 'badge bg-danger me-3';
             statusBadge.innerText = err.message || '检索失败';
+            lastSearchResults = [];
+            exportCsvBtn.disabled = true;
+            exportCsvBtn.title = '请先执行检索';
         }
     });
+
+    // ================= CSV 导出 =================
+    function exportCSV() {
+        if (!lastSearchResults || lastSearchResults.length === 0) {
+            alert('暂无检索结果可导出');
+            return;
+        }
+
+        const rows = [];
+        // 元信息头
+        rows.push(['# 单细胞 ANN 检索结果导出'].join(','));
+        rows.push(['']);
+        if (lastSearchPayload) {
+            rows.push(['# 查询参数', ''].join(','));
+            rows.push(['数据集ID', lastSearchPayload.dataset_id || '-'].join(','));
+            rows.push(['查询细胞ID', lastSearchPayload.cell_id || '-'].join(','));
+            rows.push(['Top-K', lastSearchPayload.k || '-'].join(','));
+            rows.push(['索引后端', lastSearchPayload.index_backend || '-'].join(','));
+            rows.push(['索引类型', lastSearchPayload.index_type || '-'].join(','));
+            rows.push(['距离度量', lastSearchPayload.index_metric || '-'].join(','));
+            rows.push(['']);
+        }
+        if (lastSearchQueryId) {
+            rows.push(['# 查询细胞', lastSearchQueryId].join(','));
+            rows.push(['']);
+        }
+
+        // 表头
+        const headers = ['Rank', 'Cell ID', 'Cell Type', 'Distance', 'Similarity Score'];
+        rows.push(headers.join(','));
+
+        // 数据行
+        lastSearchResults.forEach(r => {
+            const rank = r.rank ?? '';
+            const cellId = (r.cell_id ?? '').toString().includes(',') ? '"' + (r.cell_id ?? '') + '"' : (r.cell_id ?? '');
+            const cellType = (r.cell_type ?? '').toString().includes(',') ? '"' + (r.cell_type ?? '') + '"' : (r.cell_type ?? '');
+            const distance = r.distance ?? '';
+            const similarity = r.similarity_score ?? '';
+            rows.push([rank, cellId, cellType, distance, similarity].join(','));
+        });
+
+        // 添加 BOM 以支持 Excel 正确识别 UTF-8 中文
+        const bom = '﻿';
+        const csvContent = bom + rows.join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const datasetId = lastSearchPayload?.dataset_id || 'unknown';
+        const filename = `ann_search_${datasetId}_${timestamp}.csv`;
+
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+
+    exportCsvBtn.addEventListener('click', exportCSV);
 
     loadDatasets();
 
