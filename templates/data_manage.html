@@ -212,58 +212,80 @@
                     目标数据集：<strong id="target-dataset-name" class="text-white ms-1"></strong>
                 </p>
                 
-                <!-- 优化 2：提亮说明性标题 -->
-                <label class="form-label mb-3" style="color: #A0AABF;">选择底层算法结构</label>
-                
-                <div class="form-check mb-3">
-                    <input class="form-check-input" type="radio" name="annAlgo" id="algoFaissHnsw" checked data-backend="faiss" data-index-type="hnsw" data-index-metric="l2" data-m="16" data-ef-construction="200" data-ef-search="50">
-                    <label class="form-check-label text-white" for="algoFaissHnsw">
-                        <strong>FAISS - HNSW</strong> <span style="color: #2ecc71; font-size: 0.9rem;">(推荐)</span><br>
-                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
-                            查询速度极快，召回率高，但内存占用较大。
-                        </div>
-                    </label>
+                <!-- 索引类型 -->
+                <label class="form-label mb-1" style="color: #A0AABF; font-size: 0.85rem;">索引类型</label>
+                <select class="form-select dark-control mb-3" id="buildIndexType" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    <option value="hnsw" selected>HNSW（近似，推荐）</option>
+                    <option value="ivf_flat">IVF Flat（近似）</option>
+                    <option value="pq">PQ（压缩）</option>
+                    <option value="brute">Brute（精确暴力）</option>
+                </select>
+
+                <!-- 索引后端 -->
+                <label class="form-label mb-1" style="color: #A0AABF; font-size: 0.85rem;">索引后端</label>
+                <select class="form-select dark-control mb-3" id="buildBackend" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    <option value="auto" selected>auto（自动选择）</option>
+                    <option value="faiss">FAISS</option>
+                    <option value="hnswlib">HNSWLIB</option>
+                    <option value="numpy">NumPy</option>
+                </select>
+
+                <!-- 距离度量 -->
+                <label class="form-label mb-1" style="color: #A0AABF; font-size: 0.85rem;">距离度量</label>
+                <select class="form-select dark-control mb-3" id="buildMetric" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    <option value="l2" selected>L2（欧氏距离）</option>
+                    <option value="cosine">Cosine（余弦距离）</option>
+                    <option value="ip">Inner Product（内积）</option>
+                </select>
+
+                <!-- 索引名称（可选） -->
+                <label class="form-label mb-1" style="color: #A0AABF; font-size: 0.85rem;">索引名称 <span style="color: #6f7c92;">(留空自动生成)</span></label>
+                <input type="text" class="form-control dark-control mb-3" id="buildIndexName" placeholder="例如: my_hnsw_v1" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+
+                <!-- 算法参数（动态显示） -->
+                <label class="form-label mb-2" style="color: #A0AABF; font-size: 0.85rem;">算法参数</label>
+
+                <!-- IVF 参数组 -->
+                <div id="buildIvfParams" class="row g-2">
+                    <div class="col-6">
+                        <label class="form-label mb-1" style="font-size: 0.78rem; color: #8A96A8;">nlist</label>
+                        <input type="number" min="1" class="form-control dark-control" id="buildNlist" value="100" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label mb-1" style="font-size: 0.78rem; color: #8A96A8;">nprobe</label>
+                        <input type="number" min="1" class="form-control dark-control" id="buildNprobe" value="10" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
                 </div>
 
-                <div class="form-check mb-3">
-                    <input class="form-check-input" type="radio" name="annAlgo" id="algoHnswlib" data-backend="hnswlib" data-index-type="hnsw" data-index-metric="l2" data-m="16" data-ef-construction="200" data-ef-search="50">
-                    <label class="form-check-label text-white" for="algoHnswlib">
-                        <strong>HNSWLIB - HNSW</strong><br>
-                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
-                            HNSW 近似检索实现，速度快，依赖 hnswlib 运行时。
-                        </div>
-                    </label>
+                <!-- HNSW 参数组 -->
+                <div id="buildHnswParams" class="row g-2">
+                    <div class="col-6">
+                        <label class="form-label mb-1" style="font-size: 0.78rem; color: #8A96A8;">M</label>
+                        <input type="number" min="2" class="form-control dark-control" id="buildM" value="16" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label mb-1" style="font-size: 0.78rem; color: #8A96A8;">ef 构建</label>
+                        <input type="number" min="1" class="form-control dark-control" id="buildEfConstruction" value="200" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
+                    <div class="col-12 mt-2">
+                        <label class="form-label mb-1" style="font-size: 0.78rem; color: #8A96A8;">ef 查询</label>
+                        <input type="number" min="1" class="form-control dark-control" id="buildEfSearch" value="50" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
                 </div>
 
-                <div class="form-check mb-3">
-                    <input class="form-check-input" type="radio" name="annAlgo" id="algoFaissIvf" data-backend="faiss" data-index-type="ivf_flat" data-index-metric="l2" data-nlist="100" data-nprobe="10">
-                    <label class="form-check-label text-white" for="algoFaissIvf">
-                        <strong>FAISS - IVF</strong><br>
-                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
-                            适合中大规模数据；通过 nlist/nprobe 平衡召回率与速度。
-                        </div>
-                    </label>
+                <!-- PQ 参数组 -->
+                <div id="buildPqParams" class="row g-2 d-none">
+                    <div class="col-6">
+                        <label class="form-label mb-1" style="font-size: 0.78rem; color: #8A96A8;">PQ M</label>
+                        <input type="number" min="1" class="form-control dark-control" id="buildPqM" value="8" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label mb-1" style="font-size: 0.78rem; color: #8A96A8;">PQ nbits</label>
+                        <input type="number" min="1" max="16" class="form-control dark-control" id="buildPqNbits" value="8" style="background-color: #141A30; color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
                 </div>
 
-                <div class="form-check mb-3">
-                    <input class="form-check-input" type="radio" name="annAlgo" id="algoFaissPq" data-backend="faiss" data-index-type="pq" data-index-metric="l2" data-pq-m="8" data-pq-nbits="8">
-                    <label class="form-check-label text-white" for="algoFaissPq">
-                        <strong>FAISS - PQ</strong><br>
-                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
-                            经过向量压缩，极低内存占用，适合超大规模数据。
-                        </div>
-                    </label>
-                </div>
-
-                <div class="form-check mb-4">
-                    <input class="form-check-input" type="radio" name="annAlgo" id="algoBrute" data-backend="numpy" data-index-type="brute" data-index-metric="l2">
-                    <label class="form-check-label text-white" for="algoBrute">
-                        <strong>NumPy - Brute</strong><br>
-                        <div style="color: #8A96A8; font-size: 0.9rem; margin-top: 5px; line-height: 1.5;">
-                            精确暴力搜索，适合小数据或基线验证。
-                        </div>
-                    </label>
-                </div>
+                <div id="buildParamHint" class="form-text mt-1" style="color: #6f7c92; font-size: 0.78rem;">选择索引类型后可调整对应高级参数。</div>
 
                 <!-- 建库进度 (默认隐藏) -->
                 <div id="build-progress-area" style="display: none; text-align: center; margin-top: 20px;">
@@ -274,6 +296,47 @@
             <div class="modal-footer border-top border-secondary">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
                 <button type="button" class="btn cmd-btn-primary" id="start-build-btn" onclick="startBuilding()">开始构建</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 3. 居中模态弹窗：管理索引 ================= -->
+<div class="modal fade" id="manageIndicesModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content" style="background-color: var(--bg-card); color: white; border: 1px solid rgba(255,255,255,0.1);">
+            <div class="modal-header border-bottom border-secondary">
+                <h5 class="modal-title fw-bold"><i class="fa-solid fa-list-check me-2" style="color: #4A90E2;"></i>索引管理 - <span id="manage-dataset-name" class="text-white">-</span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" style="padding: 24px;">
+                <div id="indices-loading" class="text-center py-4">
+                    <div class="spinner-border text-primary mb-3" role="status"></div>
+                    <div style="color: #A0AABF;">加载索引列表...</div>
+                </div>
+                <div id="indices-empty" class="text-center py-4" style="display:none;">
+                    <i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i>
+                    <div style="color: #8A96A8;">该数据集尚无已保存索引</div>
+                    <div style="color: #6f7c92; font-size: 0.85rem; margin-top: 4px;">点击"构建索引"创建第一个索引</div>
+                </div>
+                <div id="indices-table-wrap" style="display:none;">
+                    <table class="table table-dark-fluent mb-0 w-100">
+                        <thead>
+                            <tr>
+                                <th>索引名称</th>
+                                <th>后端</th>
+                                <th>类型</th>
+                                <th>度量</th>
+                                <th>参数</th>
+                                <th class="text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="indices-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer border-top border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
             </div>
         </div>
     </div>
@@ -327,6 +390,7 @@
                     <td class="text-center">
                         <i class="fa-solid fa-circle-info action-icon" title="详情" data-action="info"></i>
                         <i class="fa-solid fa-microchip action-icon build" title="构建索引" data-action="build" data-bs-toggle="modal" data-bs-target="#buildIndexModal"></i>
+                        <i class="fa-solid fa-list-check action-icon manage" title="管理索引" data-action="manage" style="color: #F5A623;"></i>
                         <i class="fa-solid fa-trash action-icon delete" title="删除" data-action="delete"></i>
                     </td>
                 </tr>
@@ -347,11 +411,43 @@
         }
     }
 
+    function updateBuildParamsVisibility() {
+        const indexType = document.getElementById('buildIndexType').value;
+        const showIvf = indexType === 'ivf_flat';
+        const showHnsw = indexType === 'hnsw';
+        const showPq = indexType === 'pq';
+
+        document.getElementById('buildIvfParams').classList.toggle('d-none', !showIvf);
+        document.getElementById('buildHnswParams').classList.toggle('d-none', !showHnsw);
+        document.getElementById('buildPqParams').classList.toggle('d-none', !showPq);
+
+        const hint = document.getElementById('buildParamHint');
+        if (showIvf) hint.innerText = 'IVF 通过 nlist（聚类数）和 nprobe（查询探测数）平衡速度与召回率。';
+        else if (showHnsw) hint.innerText = 'HNSW 通过 M（连接数）、ef_construction（构建扩展）和 ef_search（查询扩展）控制图密度。';
+        else if (showPq) hint.innerText = 'PQ 通过子向量数 (M) 和编码位数 (nbits) 压缩向量，大幅降低内存占用。';
+        else hint.innerText = '暴力搜索无需额外参数。';
+    }
+
+    document.getElementById('buildIndexType').addEventListener('change', updateBuildParamsVisibility);
+
     function setTargetData(datasetId) {
         targetDatasetId = datasetId;
         document.getElementById('target-dataset-name').innerText = datasetId || '-';
         document.getElementById('build-progress-area').style.display = 'none';
         document.getElementById('start-build-btn').style.display = 'block';
+        // Reset form to defaults
+        document.getElementById('buildIndexType').value = 'hnsw';
+        document.getElementById('buildBackend').value = 'auto';
+        document.getElementById('buildMetric').value = 'l2';
+        document.getElementById('buildIndexName').value = '';
+        document.getElementById('buildNlist').value = '100';
+        document.getElementById('buildNprobe').value = '10';
+        document.getElementById('buildM').value = '16';
+        document.getElementById('buildEfConstruction').value = '200';
+        document.getElementById('buildEfSearch').value = '50';
+        document.getElementById('buildPqM').value = '8';
+        document.getElementById('buildPqNbits').value = '8';
+        updateBuildParamsVisibility();
     }
 
     async function startBuilding() {
@@ -364,29 +460,30 @@
         document.getElementById('build-progress-area').style.display = 'block';
 
         try {
-            const algoInput = document.querySelector('input[name="annAlgo"]:checked');
-            const payload = { dataset_id: targetDatasetId };
-            if (algoInput) {
-                payload.index_backend = algoInput.dataset.backend;
-                payload.index_type = algoInput.dataset.indexType;
-                payload.index_metric = algoInput.dataset.indexMetric;
+            const indexType = document.getElementById('buildIndexType').value;
+            const payload = {
+                dataset_id: targetDatasetId,
+                index_backend: document.getElementById('buildBackend').value,
+                index_type: indexType,
+                index_metric: document.getElementById('buildMetric').value,
+            };
 
-                const nlist = parseInt(algoInput.dataset.nlist || '', 10);
-                const nprobe = parseInt(algoInput.dataset.nprobe || '', 10);
-                const m = parseInt(algoInput.dataset.m || '', 10);
-                const efConstruction = parseInt(algoInput.dataset.efConstruction || '', 10);
-                const efSearch = parseInt(algoInput.dataset.efSearch || '', 10);
-                const pqM = parseInt(algoInput.dataset.pqM || '', 10);
-                const pqNbits = parseInt(algoInput.dataset.pqNbits || '', 10);
+            const indexName = document.getElementById('buildIndexName').value.trim();
+            if (indexName) payload.index_name = indexName;
 
-                if (!Number.isNaN(nlist)) payload.nlist = nlist;
-                if (!Number.isNaN(nprobe)) payload.nprobe = nprobe;
-                if (!Number.isNaN(m)) payload.m = m;
-                if (!Number.isNaN(efConstruction)) payload.ef_construction = efConstruction;
-                if (!Number.isNaN(efSearch)) payload.ef_search = efSearch;
-                if (!Number.isNaN(pqM)) payload.pq_m = pqM;
-                if (!Number.isNaN(pqNbits)) payload.pq_nbits = pqNbits;
+            // Add algorithm-specific parameters
+            if (indexType === 'ivf_flat') {
+                payload.nlist = parseInt(document.getElementById('buildNlist').value, 10) || 100;
+                payload.nprobe = parseInt(document.getElementById('buildNprobe').value, 10) || 10;
+            } else if (indexType === 'hnsw') {
+                payload.m = parseInt(document.getElementById('buildM').value, 10) || 16;
+                payload.ef_construction = parseInt(document.getElementById('buildEfConstruction').value, 10) || 200;
+                payload.ef_search = parseInt(document.getElementById('buildEfSearch').value, 10) || 50;
+            } else if (indexType === 'pq') {
+                payload.pq_m = parseInt(document.getElementById('buildPqM').value, 10) || 8;
+                payload.pq_nbits = parseInt(document.getElementById('buildPqNbits').value, 10) || 8;
             }
+
             const res = await fetch('/api/index/build', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -399,7 +496,7 @@
             const modal = bootstrap.Modal.getInstance(modalEl);
             modal.hide();
             await loadDatasets();
-            alert('索引构建成功！');
+            alert(`索引构建成功！\n名称: ${data.index_name || '(自动)'}\n类型: ${data.index_type}\n后端: ${data.backend}`);
         } catch (err) {
             alert(err.message || '构建失败');
         } finally {
@@ -514,6 +611,12 @@
                 deleteDataset(datasetId);
                 return;
             }
+            if (action === 'manage') {
+                loadIndices(datasetId);
+                const modal = new bootstrap.Modal(document.getElementById('manageIndicesModal'));
+                modal.show();
+                return;
+            }
             if (action === 'info') {
                 alert(`数据集: ${datasetId}`);
                 return;
@@ -531,6 +634,75 @@
             syncSelectAllState();
         }
     });
+
+    async function loadIndices(datasetId) {
+        document.getElementById('manage-dataset-name').innerText = datasetId || '-';
+        document.getElementById('indices-loading').style.display = 'block';
+        document.getElementById('indices-empty').style.display = 'none';
+        document.getElementById('indices-table-wrap').style.display = 'none';
+
+        try {
+            const res = await fetch(`/api/datasets/${encodeURIComponent(datasetId)}/indices`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '加载失败');
+
+            const indices = data.indices || [];
+            document.getElementById('indices-loading').style.display = 'none';
+
+            if (indices.length === 0) {
+                document.getElementById('indices-empty').style.display = 'block';
+                return;
+            }
+
+            document.getElementById('indices-table-wrap').style.display = 'block';
+            const tbody = document.getElementById('indices-tbody');
+            tbody.innerHTML = indices.map(idx => {
+                const cfg = idx.config || {};
+                const params = [];
+                if (cfg.nlist != null) params.push(`nlist=${cfg.nlist}`);
+                if (cfg.nprobe != null) params.push(`nprobe=${cfg.nprobe}`);
+                if (cfg.m != null) params.push(`M=${cfg.m}`);
+                if (cfg.ef_construction != null) params.push(`efC=${cfg.ef_construction}`);
+                if (cfg.ef_search != null) params.push(`efS=${cfg.ef_search}`);
+                if (cfg.pq_m != null) params.push(`pqM=${cfg.pq_m}`);
+                if (cfg.pq_nbits != null) params.push(`pqBits=${cfg.pq_nbits}`);
+                return `
+                    <tr>
+                        <td class="text-white fw-bold">${idx.name}</td>
+                        <td>${cfg.backend || '-'}</td>
+                        <td>${cfg.index_type || '-'}</td>
+                        <td>${cfg.metric || '-'}</td>
+                        <td style="font-size:0.8rem;color:#A0AABF;">${params.join(', ') || '-'}</td>
+                        <td class="text-center">
+                            <i class="fa-solid fa-trash action-icon delete" title="删除此索引"
+                               style="color: #ff6b6b; cursor:pointer;"
+                               onclick="deleteIndex('${datasetId}', '${idx.name}')"></i>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (err) {
+            document.getElementById('indices-loading').style.display = 'none';
+            document.getElementById('indices-empty').style.display = 'block';
+            document.getElementById('indices-empty').innerHTML = `
+                <i class="fa-solid fa-triangle-exclamation fa-3x mb-3" style="color: #ff6b6b;"></i>
+                <div style="color: #ff6b6b;">加载失败: ${err.message || '未知错误'}</div>
+            `;
+        }
+    }
+
+    async function deleteIndex(datasetId, indexName) {
+        if (!confirm(`确定删除索引"${indexName}"吗？\n此操作不可恢复，需要重新构建。`)) return;
+        try {
+            const res = await fetch(`/api/index/${encodeURIComponent(datasetId)}/${encodeURIComponent(indexName)}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '删除失败');
+            await loadIndices(datasetId);
+            await loadDatasets();
+        } catch (err) {
+            alert('删除索引失败: ' + (err.message || '未知错误'));
+        }
+    }
 
     loadDatasets();
 </script>

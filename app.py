@@ -136,20 +136,97 @@ def _index_config_from_payload(payload: Dict[str, Any]) -> IndexConfig:
     return config.update(**overrides)
 
 
-def _index_path(dataset_id: str, use_rep: str) -> Path:
-    return INDEX_DIR / f"{dataset_id}_{use_rep}.index"
+def _index_dir(dataset_id: str) -> Path:
+    return INDEX_DIR / dataset_id
 
 
-def _read_stored_index_config(dataset_id: str, use_rep: str) -> Optional[Dict[str, Any]]:
+def _index_path(dataset_id: str, index_name: str) -> Path:
+    return _index_dir(dataset_id) / f"{index_name}.index"
+
+
+def _default_index_name(use_rep: str, index_type: str, metric: str) -> str:
+    """Auto-generate a default index name from its key characteristics."""
+    return f"{use_rep}_{index_type}_{metric}"
+
+
+def _list_index_names(dataset_id: str) -> List[Dict[str, Any]]:
+    """List all saved indices for a dataset. Returns [{name, path, config}, ...]."""
+    index_dir = _index_dir(dataset_id)
+    if not index_dir.exists():
+        return []
+
+    results: List[Dict[str, Any]] = []
+    for idx_path in sorted(index_dir.glob("*.index")):
+        name = idx_path.stem
+        backup_path = _backup_index_path(idx_path)
+        # Try .npz backup first, then the .index file itself (numpy backend)
+        npz_path = backup_path if backup_path.exists() else None
+        if npz_path is None and idx_path.exists():
+            npz_path = idx_path  # numpy backend stores archive as the .index file
+        config = None
+
+        if npz_path is not None:
+            try:
+                with np.load(npz_path, allow_pickle=False) as data:
+                    if "config_json" in data:
+                        config = json.loads(str(np.asarray(data["config_json"]).item()))
+                    elif "vectors" in data:
+                        # Valid archive with vectors but no config_json (legacy)
+                        config = {
+                            "backend": str(np.asarray(data.get("backend", "auto")).item()),
+                            "index_type": str(np.asarray(data.get("index_type", "flat")).item()),
+                            "metric": str(np.asarray(data.get("metric", "l2")).item()),
+                        }
+            except (KeyError, ValueError, OSError):
+                pass
+
+        results.append({
+            "name": name,
+            "config": config,
+            "ready": True,
+        })
+    return results
+
+
+def _migrate_old_index(dataset_id: str) -> None:
+    """Migrate old flat-format index files to new subdirectory layout."""
+    index_dir = _index_dir(dataset_id)
+    new_path = index_dir / "default.index"
+    if new_path.exists() or _backup_index_path(new_path).exists():
+        return  # already migrated
+
+    for old_file in INDEX_DIR.glob(f"{dataset_id}_*.index*"):
+        if old_file.is_dir():
+            continue
+        index_dir.mkdir(parents=True, exist_ok=True)
+        if old_file.suffix == ".npz":
+            # {dataset_id}_{use_rep}.index.npz
+            stem = old_file.name[:-4]  # remove .npz
+            if stem.endswith(".index"):
+                target = _backup_index_path(new_path)
+            else:
+                continue
+        elif old_file.suffix == ".index":
+            target = new_path
+        else:
+            continue
+        if not target.exists():
+            old_file.rename(target)
+
+
+def _read_stored_index_config(dataset_id: str, index_name: str) -> Optional[Dict[str, Any]]:
     """Read index config from an existing index file without loading vectors."""
-    index_path = _index_path(dataset_id, use_rep)
+    index_path = _index_path(dataset_id, index_name)
     backup_path = _backup_index_path(index_path)
 
     # Prefer reading from the .npz backup (contains full config_json)
     npz_path = backup_path if backup_path.exists() else None
     if npz_path is None and index_path.exists():
+        # Try the .index file itself (numpy backend stores archive directly)
+        npz_path = index_path
+    if npz_path is None and index_path.exists():
         # FAISS binary index without backup — try to find config from cache
-        cached = _INDEX_CACHE.get((dataset_id, use_rep))
+        cached = _INDEX_CACHE.get((dataset_id, index_name))
         if cached is not None:
             cached_indexer, _ = cached
             return cached_indexer.config_summary
@@ -192,38 +269,54 @@ def _get_indexer(
     use_rep: str,
     index_config: IndexConfig,
     build_if_missing: bool = True,
+    index_name: Optional[str] = None,
 ) -> ANNIndexer:
-    cache_key = (dataset_id, use_rep)
-    config_key = _config_cache_key(index_config)
-    cached = _INDEX_CACHE.get(cache_key)
-    if cached is not None:
-        cached_indexer, cached_key = cached
-        if cached_key == config_key:
-            return cached_indexer
+    """Return a ready-to-search ANNIndexer.
 
+    If *index_name* is given, the index is loaded from (or saved to) the
+    per-dataset subdirectory ``INDEX_DIR/<dataset_id>/<index_name>.index``.
+    Otherwise the index is built on-the-fly without persisting to disk.
+    """
+    if index_name is not None:
+        # --- named (persisted) path ---
+        cache_key = (dataset_id, index_name)
+        config_key = _config_cache_key(index_config)
+        cached = _INDEX_CACHE.get(cache_key)
+        if cached is not None:
+            cached_indexer, cached_key = cached
+            if cached_key == config_key:
+                return cached_indexer
+
+        loader = _get_loader(dataset_id)
+        indexer = ANNIndexer(dim=loader.vector_dim(use_rep), config=index_config)
+        index_path = _index_path(dataset_id, index_name)
+        backup_path = _backup_index_path(index_path)
+
+        if index_path.exists() or backup_path.exists():
+            try:
+                indexer.load_index(index_path)
+            except ValueError as exc:
+                if "config mismatch" in str(exc).lower() and build_if_missing:
+                    vectors = loader.get_vectors(use_rep)
+                    indexer.build_index(vectors)
+                    indexer.save_index(index_path, use_rep=use_rep)
+                else:
+                    raise
+        elif build_if_missing:
+            vectors = loader.get_vectors(use_rep)
+            indexer.build_index(vectors)
+            indexer.save_index(index_path, use_rep=use_rep)
+        else:
+            raise FileNotFoundError("Index not found")
+
+        _INDEX_CACHE[cache_key] = (indexer, config_key)
+        return indexer
+
+    # --- unnamed (on-the-fly) path — don't persist ---
     loader = _get_loader(dataset_id)
     indexer = ANNIndexer(dim=loader.vector_dim(use_rep), config=index_config)
-    index_path = _index_path(dataset_id, use_rep)
-    backup_path = _backup_index_path(index_path)
-
-    if index_path.exists() or backup_path.exists():
-        try:
-            indexer.load_index(index_path)
-        except ValueError as exc:
-            if "config mismatch" in str(exc).lower() and build_if_missing:
-                vectors = loader.get_vectors(use_rep)
-                indexer.build_index(vectors)
-                indexer.save_index(index_path)
-            else:
-                raise
-    elif build_if_missing:
-        vectors = loader.get_vectors(use_rep)
-        indexer.build_index(vectors)
-        indexer.save_index(index_path)
-    else:
-        raise FileNotFoundError("Index not found")
-
-    _INDEX_CACHE[cache_key] = (indexer, config_key)
+    vectors = loader.get_vectors(use_rep)
+    indexer.build_index(vectors)
     return indexer
 
 
@@ -317,33 +410,40 @@ def _dataset_payload(dataset_id: str, dataset_path: Path) -> Dict[str, Any]:
     payload["size_mb"] = round(stat.st_size / (1024 * 1024), 2)
     payload["modified_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
 
-    index_path = _index_path(dataset_id, DEFAULT_USE_REP)
-    index_ready = index_path.exists() or _backup_index_path(index_path).exists()
-    payload["index_status"] = "ready" if index_ready else "missing"
+    # Check for indices in new subdirectory layout + migrate old flat files
+    _migrate_old_index(dataset_id)
+    indices = _list_index_names(dataset_id)
+    payload["index_status"] = "ready" if indices else "missing"
     payload["index_backend"] = None
-    cached_entry = _INDEX_CACHE.get((dataset_id, DEFAULT_USE_REP))
-    if cached_entry is not None:
-        cached_indexer, _ = cached_entry
-        payload["index_backend"] = cached_indexer.backend
+    if indices:
+        first = indices[0]
+        if first.get("config") and first["config"].get("backend"):
+            payload["index_backend"] = first["config"]["backend"]
 
     return payload
 
 
 def _metadata_payload(
-    dataset_id: str, use_rep: str, index_config: IndexConfig
+    dataset_id: str,
+    use_rep: str,
+    index_config: IndexConfig,
+    index_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     loader = _get_loader(dataset_id)
     vector_dim = loader.vector_dim(use_rep)
     index_config = _normalize_pq_config_for_dim(index_config, vector_dim)
-    index_path = _index_path(dataset_id, use_rep)
-    backup_path = _backup_index_path(index_path)
-    index_ready = index_path.exists() or backup_path.exists()
+    _migrate_old_index(dataset_id)
+    indices = _list_index_names(dataset_id)
+    index_ready = len(indices) > 0
+    effective_name = index_name or (indices[0]["name"] if indices else None)
+    index_path = _index_path(dataset_id, effective_name) if effective_name else _index_path(dataset_id, "none")
     payload: Dict[str, Any] = {
         "dataset_id": dataset_id,
         "data_path": str(_resolve_dataset_path(dataset_id)),
-        "index_path": str(index_path),
+        "index_path": str(index_path) if effective_name else "",
         "use_rep": use_rep,
         "ready": index_ready,
+        "indices": indices,
         "n_cells": loader.n_cells,
         "n_genes": loader.n_genes,
         "vector_dim": vector_dim,
@@ -353,17 +453,27 @@ def _metadata_payload(
         "obs_columns": loader.obs_columns,
         "index_config": index_config.to_dict(),
     }
-    cached_entry = _INDEX_CACHE.get((dataset_id, use_rep))
-    if cached_entry is not None:
-        cached_indexer, _ = cached_entry
-        payload["index_backend"] = cached_indexer.backend
-        payload["index_type"] = cached_indexer.index_type
-        payload["index_metric"] = cached_indexer.metric
-        payload["index_config"] = cached_indexer.config_summary
-    else:
-        payload["index_backend"] = None
-        payload["index_type"] = index_config.index_type
-        payload["index_metric"] = index_config.metric
+    if effective_name:
+        cache_key = (dataset_id, effective_name)
+        cached_entry = _INDEX_CACHE.get(cache_key)
+        if cached_entry is not None:
+            cached_indexer, _ = cached_entry
+            payload["index_backend"] = cached_indexer.backend
+            payload["index_type"] = cached_indexer.index_type
+            payload["index_metric"] = cached_indexer.metric
+            payload["index_config"] = cached_indexer.config_summary
+            return payload
+        saved_config = _read_stored_index_config(dataset_id, effective_name)
+        if saved_config is not None:
+            payload["index_backend"] = saved_config.get("backend")
+            payload["index_type"] = saved_config.get("index_type")
+            payload["index_metric"] = saved_config.get("metric")
+            payload["index_config"] = saved_config
+            return payload
+
+    payload["index_backend"] = None
+    payload["index_type"] = index_config.index_type
+    payload["index_metric"] = index_config.metric
     return payload
 
 
@@ -459,8 +569,9 @@ def metadata():
         dataset_path = _resolve_dataset_path(dataset_id)
         resolved_id = _dataset_id_from_path(dataset_path)
         use_rep = payload.get("use_rep", DEFAULT_USE_REP)
+        index_name = payload.get("index_name")
         index_config = _index_config_from_payload(payload)
-        return _json_response(_metadata_payload(resolved_id, use_rep, index_config))
+        return _json_response(_metadata_payload(resolved_id, use_rep, index_config, index_name=index_name))
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
 
@@ -476,29 +587,19 @@ def list_datasets():
 
 @app.get("/api/datasets/<dataset_id>/indices")
 def dataset_indices(dataset_id: str):
-    """Return pre-built index info for a dataset so the search page can auto-fill."""
+    """Return all pre-built indices for a dataset so the search page can list them."""
     try:
         dataset_id = _normalize_dataset_id(dataset_id)
-        use_rep = request.args.get("use_rep", DEFAULT_USE_REP)
-
-        # Check in-memory cache first
-        cached = _INDEX_CACHE.get((dataset_id, use_rep))
-        if cached is not None:
-            cached_indexer, _ = cached
-            return _json_response({
-                "ready": True,
-                "index_config": cached_indexer.config_summary,
-            })
-
-        # Check on-disk index
-        stored = _read_stored_index_config(dataset_id, use_rep)
-        if stored is not None:
-            return _json_response({
-                "ready": True,
-                "index_config": stored,
-            })
-
-        return _json_response({"ready": False, "index_config": None})
+        _migrate_old_index(dataset_id)
+        indices = _list_index_names(dataset_id)
+        # Augment with any in-memory cached configs (more complete than on-disk)
+        for entry in indices:
+            cache_key = (dataset_id, entry["name"])
+            cached = _INDEX_CACHE.get(cache_key)
+            if cached is not None:
+                cached_indexer, _ = cached
+                entry["config"] = cached_indexer.config_summary
+        return _json_response({"indices": indices, "ready": len(indices) > 0})
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
 
@@ -729,6 +830,14 @@ def delete_dataset(dataset_id: str):
         if key[0] == dataset_id:
             _INDEX_CACHE.pop(key, None)
 
+    # Remove new subdirectory layout
+    index_dir = _index_dir(dataset_id)
+    if index_dir.exists():
+        for f in index_dir.iterdir():
+            f.unlink(missing_ok=True)
+        index_dir.rmdir()
+
+    # Clean up any leftover old-format flat files
     for index_file in INDEX_DIR.glob(f"{dataset_id}_*.index*"):
         index_file.unlink(missing_ok=True)
 
@@ -748,13 +857,23 @@ def build_index():
         index_config = _normalize_pq_config_for_dim(
             index_config, loader.vector_dim(use_rep)
         )
+        # Allow user to specify a custom index name, or auto-generate one
+        index_name = payload.get("index_name") or _default_index_name(
+            use_rep, index_config.index_type, index_config.metric
+        )
+        # Ensure the subdirectory exists
+        _index_dir(resolved_id).mkdir(parents=True, exist_ok=True)
+        # Remove any previously cached entry for this name (force rebuild)
+        _INDEX_CACHE.pop((resolved_id, index_name), None)
         indexer = _get_indexer(
-            resolved_id, use_rep, index_config, build_if_missing=True
+            resolved_id, use_rep, index_config,
+            build_if_missing=True, index_name=index_name,
         )
         return _json_response(
             {
                 "status": "built",
                 "dataset_id": resolved_id,
+                "index_name": index_name,
                 "use_rep": use_rep,
                 "backend": indexer.backend,
                 "index_type": indexer.index_type,
@@ -768,6 +887,37 @@ def build_index():
         return _json_response({"error": str(exc)}, 400)
 
 
+@app.delete("/api/index/<dataset_id>/<index_name>")
+def delete_index(dataset_id: str, index_name: str):
+    """Delete a single named index for a dataset."""
+    try:
+        dataset_id = _normalize_dataset_id(dataset_id)
+        index_name = _normalize_dataset_id(index_name)
+        index_path = _index_path(dataset_id, index_name)
+        backup_path = _backup_index_path(index_path)
+
+        deleted = False
+        if index_path.exists():
+            index_path.unlink()
+            deleted = True
+        if backup_path.exists():
+            backup_path.unlink()
+            deleted = True
+
+        _INDEX_CACHE.pop((dataset_id, index_name), None)
+
+        index_dir = _index_dir(dataset_id)
+        if index_dir.exists() and not any(index_dir.iterdir()):
+            index_dir.rmdir()
+
+        if not deleted:
+            return _json_response({"error": "index not found"}, 404)
+
+        return _json_response({"status": "deleted", "dataset_id": dataset_id, "index_name": index_name})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
 @app.route("/api/search", methods=["GET", "POST"])
 def search():
     try:
@@ -777,7 +927,14 @@ def search():
         dataset_path = _resolve_dataset_path(dataset_id)
         resolved_id = _dataset_id_from_path(dataset_path)
         use_rep = payload.get("use_rep") or DEFAULT_USE_REP
+        index_name = payload.get("index_name")
         index_config = _index_config_from_payload(payload)
+
+        # When using a pre-built index, read use_rep from the stored config
+        if index_name:
+            stored = _read_stored_index_config(resolved_id, index_name)
+            if stored and stored.get("use_rep"):
+                use_rep = stored["use_rep"]
 
         cell_index_value = payload.get("cell_index")
         cell_id_value = payload.get("cell_id")
@@ -800,9 +957,11 @@ def search():
         if k > MAX_TOP_K:
             return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
 
+        index_name = payload.get("index_name")
         index_prepare_start_time = time.perf_counter()
         indexer = _get_indexer(
-            resolved_id, use_rep, index_config, build_if_missing=True
+            resolved_id, use_rep, index_config,
+            build_if_missing=True, index_name=index_name,
         )
         index_prepare_ms = round(
             (time.perf_counter() - index_prepare_start_time) * 1000.0, 2
@@ -847,6 +1006,7 @@ def search():
                 "k": k,
                 "include_self": include_self,
                 "use_rep": use_rep,
+                "index_name": index_name,
                 "index_backend": indexer.backend,
                 "index_type": indexer.index_type,
                 "index_metric": metric,

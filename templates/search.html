@@ -222,6 +222,18 @@
                     <div class="form-text" style="color: #6f7c92;" id="indexBuildHint">选择索引类型后可调整对应高级参数。</div>
                 </div>
 
+                <!-- 已有索引选择器 -->
+                <div class="mb-4" id="savedIndexSection">
+                    <label class="form-label d-flex justify-content-between">
+                        <span>选择已有索引</span>
+                        <span id="indexCountBadge" class="badge bg-secondary" style="font-size: 0.7rem;">检查中...</span>
+                    </label>
+                    <select class="form-select dark-control" id="savedIndexSelect">
+                        <option value="__manual__" selected>手动配置 (临时构建，不保存)</option>
+                    </select>
+                    <div class="form-text" style="color: #6f7c92;" id="savedIndexHint">切换数据集后自动检测已有索引。</div>
+                </div>
+
                 <div class="mb-4">
                     <label class="form-label">距离度量</label>
                     <select class="form-select dark-control" id="indexMetricSelect">
@@ -409,6 +421,10 @@
     const kValue = document.getElementById('k-value');
     const datasetSelect = document.getElementById('datasetSelect');
     const indexBackendSelect = document.getElementById('indexBackendSelect');
+    const savedIndexSection = document.getElementById('savedIndexSection');
+    const savedIndexSelect = document.getElementById('savedIndexSelect');
+    const indexCountBadge = document.getElementById('indexCountBadge');
+    const savedIndexHint = document.getElementById('savedIndexHint');
     const indexTypeSelect = document.getElementById('indexTypeSelect');
     const indexMetricSelect = document.getElementById('indexMetricSelect');
     const nlistInput = document.getElementById('nlistInput');
@@ -597,6 +613,17 @@
         }
     }
 
+    function setManualControlsDisabled(disabled) {
+        indexBackendSelect.disabled = disabled;
+        indexTypeSelect.disabled = disabled;
+        indexMetricSelect.disabled = disabled;
+        [nlistInput, nprobeInput, mInput, efConstructionInput, efSearchInput, pqMInput, pqNbitsInput]
+            .forEach(el => el.disabled = disabled);
+        savedIndexHint.innerText = disabled
+            ? '已选择预构建索引，将直接加载现有索引文件。'
+            : '选择索引类型后可调整对应高级参数。';
+    }
+
     function updateIndexParamState() {
         const indexType = indexTypeSelect.value;
         const showIVF = indexType === 'ivf_flat';
@@ -636,6 +663,50 @@
     });
     indexMetricSelect.addEventListener('change', () => {
         setDistanceHeader(indexMetricSelect.value);
+        refreshMetadata();
+    });
+
+    savedIndexSelect.addEventListener('change', () => {
+        const selectedName = savedIndexSelect.value;
+        if (selectedName === '__manual__') {
+            // User chose manual config — enable controls
+            setManualControlsDisabled(false);
+            updateIndexParamState();
+            refreshMetadata();
+            return;
+        }
+        // Pre-built index selected — disable manual controls and auto-fill
+        const selectedOpt = savedIndexSelect.options[savedIndexSelect.selectedIndex];
+        const cfg = selectedOpt._config;
+        if (!cfg) return;
+        setManualControlsDisabled(true);
+        // Auto-fill fields from stored config
+        if (cfg.backend) {
+            const validBackends = Array.from(indexBackendSelect.options).map(o => o.value);
+            if (validBackends.includes(cfg.backend)) indexBackendSelect.value = cfg.backend;
+            else if (cfg.backend === 'faiss') indexBackendSelect.value = 'auto';
+        }
+        updateIndexTypeOptions();
+        if (cfg.index_type) {
+            const validTypes = Array.from(indexTypeSelect.options).map(o => o.value);
+            if (validTypes.includes(cfg.index_type)) indexTypeSelect.value = cfg.index_type;
+        }
+        if (cfg.metric) {
+            const validMetrics = Array.from(indexMetricSelect.options).map(o => o.value);
+            if (validMetrics.includes(cfg.metric)) {
+                indexMetricSelect.value = cfg.metric;
+                setDistanceHeader(cfg.metric);
+            }
+        }
+        if (cfg.nlist != null) nlistInput.value = cfg.nlist;
+        if (cfg.nprobe != null) nprobeInput.value = cfg.nprobe;
+        if (cfg.m != null) mInput.value = cfg.m;
+        if (cfg.ef_construction != null) efConstructionInput.value = cfg.ef_construction;
+        if (cfg.ef_search != null) efSearchInput.value = cfg.ef_search;
+        if (cfg.pq_m != null) pqMInput.value = cfg.pq_m;
+        if (cfg.pq_nbits != null) pqNbitsInput.value = cfg.pq_nbits;
+        updateIndexParamState();
+        // Refresh metadata with the selected index name
         refreshMetadata();
     });
     pqMInput.addEventListener('change', () => {
@@ -964,6 +1035,7 @@
             datasetSelect.innerHTML = data.datasets
                 .map(ds => `<option value="${ds.id}">${ds.filename}</option>`)
                 .join('');
+            await checkExistingIndex(datasetSelect.value);
             await refreshMetadata();
             await loadCells(0);
             await loadUmap();
@@ -976,68 +1048,63 @@
     async function checkExistingIndex(datasetId) {
         if (!datasetId) {
             indexStatusBadge.style.display = 'none';
+            indexCountBadge.innerText = '无数据集';
+            indexCountBadge.className = 'badge bg-secondary';
+            savedIndexSelect.innerHTML = '<option value="__manual__" selected>手动配置 (临时构建，不保存)</option>';
+            savedIndexSelect.disabled = true;
             indexBuildHint.innerText = '选择索引类型后可调整对应高级参数。';
+            setManualControlsDisabled(false);
             return;
         }
+        savedIndexSelect.disabled = false;
+        indexCountBadge.innerText = '检查中...';
         try {
             const res = await fetch(`/api/datasets/${encodeURIComponent(datasetId)}/indices`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'failed');
 
-            if (data.ready && data.index_config) {
-                const cfg = data.index_config;
-
-                // Auto-fill backend dropdown
-                const validBackends = Array.from(indexBackendSelect.options).map(o => o.value);
-                if (validBackends.includes(cfg.backend)) {
-                    indexBackendSelect.value = cfg.backend;
-                } else if (cfg.backend === 'faiss') {
-                    indexBackendSelect.value = 'auto';
-                }
-
-                // Rebuild index_type options based on selected backend
-                updateIndexTypeOptions();
-
-                // Auto-fill index_type dropdown
-                const validTypes = Array.from(indexTypeSelect.options).map(o => o.value);
-                if (validTypes.includes(cfg.index_type)) {
-                    indexTypeSelect.value = cfg.index_type;
-                }
-
-                // Auto-fill metric
-                const validMetrics = Array.from(indexMetricSelect.options).map(o => o.value);
-                if (validMetrics.includes(cfg.metric)) {
-                    indexMetricSelect.value = cfg.metric;
-                    setDistanceHeader(cfg.metric);
-                }
-
-                // Auto-fill advanced params
-                if (cfg.nlist != null) nlistInput.value = cfg.nlist;
-                if (cfg.nprobe != null) nprobeInput.value = cfg.nprobe;
-                if (cfg.m != null) mInput.value = cfg.m;
-                if (cfg.ef_construction != null) efConstructionInput.value = cfg.ef_construction;
-                if (cfg.ef_search != null) efSearchInput.value = cfg.ef_search;
-                if (cfg.pq_m != null) pqMInput.value = cfg.pq_m;
-                if (cfg.pq_nbits != null) pqNbitsInput.value = cfg.pq_nbits;
-
-                updateIndexParamState();
-
-                // Visual indicator
+            const indices = data.indices || [];
+            savedIndexSelect.innerHTML = '<option value="__manual__" selected>手动配置 (临时构建，不保存)</option>';
+            if (indices.length > 0) {
+                indices.forEach(idx => {
+                    const cfg = idx.config || {};
+                    const backend = cfg.backend || '?';
+                    const itype = cfg.index_type || '?';
+                    const metric = cfg.metric || '?';
+                    const label = `${idx.name}  [${backend}/${itype}/${metric}]`;
+                    const opt = document.createElement('option');
+                    opt.value = idx.name;
+                    opt.innerText = label;
+                    opt._config = cfg;
+                    savedIndexSelect.appendChild(opt);
+                });
+                savedIndexSelect.value = '__manual__';
+                indexCountBadge.innerText = indices.length;
+                indexCountBadge.className = 'badge bg-success';
                 indexStatusBadge.style.display = 'inline';
                 indexStatusBadge.className = 'badge bg-success ms-2';
                 indexStatusBadge.style.fontSize = '0.7rem';
-                indexStatusBadge.innerText = '已有索引';
-                indexBuildHint.innerText = '已加载预构建索引配置，搜索将即时响应。';
+                indexStatusBadge.innerText = `${indices.length}个索引`;
+                indexBuildHint.innerText = '选择一个已有索引直接使用，或选择手动配置。';
+                savedIndexHint.innerText = `已找到 ${indices.length} 个预构建索引，选中后将自动填入配置。`;
             } else {
+                indexCountBadge.innerText = '0';
+                indexCountBadge.className = 'badge bg-warning text-dark';
                 indexStatusBadge.style.display = 'inline';
                 indexStatusBadge.className = 'badge bg-secondary ms-2';
                 indexStatusBadge.style.fontSize = '0.7rem';
                 indexStatusBadge.innerText = '待构建';
-                indexBuildHint.innerText = '首次检索将自动构建索引，可能需要等待数秒至数分钟。';
+                indexBuildHint.innerText = '该数据集尚无预构建索引，首次检索将自动构建。';
+                savedIndexHint.innerText = '前往数据管理页构建索引以加速后续检索。';
             }
+            setManualControlsDisabled(false);
         } catch {
             indexStatusBadge.style.display = 'none';
-            indexBuildHint.innerText = '选择索引类型后可调整对应高级参数。';
+            indexCountBadge.innerText = '获取失败';
+            indexCountBadge.className = 'badge bg-danger';
+            savedIndexSelect.innerHTML = '<option value="__manual__" selected>手动配置 (临时构建，不保存)</option>';
+            savedIndexHint.innerText = '无法获取已有索引列表，可继续手动配置。';
+            setManualControlsDisabled(false);
         }
     }
 
@@ -1094,34 +1161,42 @@
         tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">正在进行高维空间近邻计算...</td></tr>';
 
         try {
+            const useSavedIndex = savedIndexSelect.value && savedIndexSelect.value !== '__manual__';
             const payload = {
                 dataset_id: datasetId,
                 cell_id: cellId,
                 k: topK,
-                index_backend: indexBackend,
-                index_type: indexType,
-                index_metric: indexMetric
             };
 
-            const nlist = parseInt(nlistInput.value, 10);
-            const nprobe = parseInt(nprobeInput.value, 10);
-            const pqM = parseInt(pqMInput.value, 10);
-            const pqNbits = parseInt(pqNbitsInput.value, 10);
-            const m = parseInt(mInput.value, 10);
-            const efConstruction = parseInt(efConstructionInput.value, 10);
-            const efSearch = parseInt(efSearchInput.value, 10);
+            if (useSavedIndex) {
+                // Use pre-built index — just pass the index name
+                payload.index_name = savedIndexSelect.value;
+            } else {
+                // Manual config — pass all parameters
+                payload.index_backend = indexBackend;
+                payload.index_type = indexType;
+                payload.index_metric = indexMetric;
 
-            if (!Number.isNaN(nlist)) payload.nlist = nlist;
-            if (!Number.isNaN(nprobe)) payload.nprobe = nprobe;
-            if (indexType === 'pq') {
-                payload.pq_m = normalizePqMInput() || pqM;
-            } else if (!Number.isNaN(pqM)) {
-                payload.pq_m = pqM;
+                const nlist = parseInt(nlistInput.value, 10);
+                const nprobe = parseInt(nprobeInput.value, 10);
+                const pqM = parseInt(pqMInput.value, 10);
+                const pqNbits = parseInt(pqNbitsInput.value, 10);
+                const m = parseInt(mInput.value, 10);
+                const efConstruction = parseInt(efConstructionInput.value, 10);
+                const efSearch = parseInt(efSearchInput.value, 10);
+
+                if (!Number.isNaN(nlist)) payload.nlist = nlist;
+                if (!Number.isNaN(nprobe)) payload.nprobe = nprobe;
+                if (indexType === 'pq') {
+                    payload.pq_m = normalizePqMInput() || pqM;
+                } else if (!Number.isNaN(pqM)) {
+                    payload.pq_m = pqM;
+                }
+                if (!Number.isNaN(pqNbits)) payload.pq_nbits = pqNbits;
+                if (!Number.isNaN(m)) payload.m = m;
+                if (!Number.isNaN(efConstruction)) payload.ef_construction = efConstruction;
+                if (!Number.isNaN(efSearch)) payload.ef_search = efSearch;
             }
-            if (!Number.isNaN(pqNbits)) payload.pq_nbits = pqNbits;
-            if (!Number.isNaN(m)) payload.m = m;
-            if (!Number.isNaN(efConstruction)) payload.ef_construction = efConstruction;
-            if (!Number.isNaN(efSearch)) payload.ef_search = efSearch;
 
             const res = await fetch('/api/search', {
                 method: 'POST',

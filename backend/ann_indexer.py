@@ -249,22 +249,22 @@ class ANNIndexer:
         topk_distances = distances[topk_indices].astype(np.float32, copy=False)
         return topk_distances, topk_indices
 
-    def save_index(self, index_path) -> None:
+    def save_index(self, index_path, **extra_config) -> None:
         self._ensure_index_ready()
         path = Path(index_path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
         if self._backend == "faiss" and faiss is not None and self._index is not None:
             faiss.write_index(self._index, str(path))
-            self._save_archive(self._backup_archive_path(path), backend="faiss")
+            self._save_archive(self._backup_archive_path(path), backend="faiss", **extra_config)
             return
 
         if self._backend == "hnswlib" and hnswlib is not None and self._index is not None:
             self._index.save_index(str(path))
-            self._save_archive(self._backup_archive_path(path), backend="hnswlib")
+            self._save_archive(self._backup_archive_path(path), backend="hnswlib", **extra_config)
             return
 
-        self._save_archive(path, backend="numpy")
+        self._save_archive(path, backend="numpy", **extra_config)
 
     def load_index(self, index_path) -> "ANNIndexer":
         path = Path(index_path)
@@ -361,7 +361,7 @@ class ANNIndexer:
         self._build_backend_index(vectors, resolved_backend, resolved_index_type)
         return self
 
-    def _save_archive(self, archive_path: Path, backend: str) -> None:
+    def _save_archive(self, archive_path: Path, backend: str, **extra_config) -> None:
         vectors = self._vectors
         if vectors is None:
             vectors = self._extract_vectors_from_index()
@@ -369,6 +369,7 @@ class ANNIndexer:
             raise RuntimeError("Indexed vectors are unavailable for archival save")
 
         config_payload = self._config_for_storage(backend)
+        config_payload.update(extra_config)  # e.g. use_rep
 
         payload = {
             "vectors": np.asarray(vectors, dtype=np.float32),
