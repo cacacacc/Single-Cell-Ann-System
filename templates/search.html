@@ -208,7 +208,10 @@
                 </div>
 
                 <div class="mb-4">
-                    <label class="form-label">索引类型</label>
+                    <label class="form-label">
+                        索引类型
+                        <span id="indexStatusBadge" class="badge bg-secondary ms-2" style="font-size: 0.7rem; display:none;">-</span>
+                    </label>
                     <select class="form-select dark-control" id="indexTypeSelect">
                         <option value="flat" selected>flat（精确）</option>
                         <option value="ivf_flat">ivf_flat（近似）</option>
@@ -216,6 +219,7 @@
                         <option value="pq">pq（FAISS-PQ）</option>
                         <option value="brute">brute（暴力）</option>
                     </select>
+                    <div class="form-text" style="color: #6f7c92;" id="indexBuildHint">选择索引类型后可调整对应高级参数。</div>
                 </div>
 
                 <div class="mb-4">
@@ -423,6 +427,8 @@
     const effectiveHNSW = document.getElementById('effectiveHNSW');
     const effectivePQ = document.getElementById('effectivePQ');
     const exportCsvBtn = document.getElementById('exportCsvBtn');
+    const indexStatusBadge = document.getElementById('indexStatusBadge');
+    const indexBuildHint = document.getElementById('indexBuildHint');
     const queryCellIdInput = document.getElementById('queryCellId');
     const cellBrowserStatus = document.getElementById('cellBrowserStatus');
     const cellBrowserList = document.getElementById('cellBrowserList');
@@ -577,7 +583,7 @@
         }
     }
 
-    function updateIndexParamState() {
+    function updateIndexTypeOptions() {
         const backend = indexBackendSelect.value;
         const selectedType = indexTypeSelect.value;
         const options = indexTypeOptions[backend] || indexTypeOptions.auto;
@@ -589,7 +595,9 @@
         } else {
             indexTypeSelect.value = options[0].value;
         }
+    }
 
+    function updateIndexParamState() {
         const indexType = indexTypeSelect.value;
         const showIVF = indexType === 'ivf_flat';
         const showHNSW = indexType === 'hnsw';
@@ -618,6 +626,7 @@
     }
 
     indexBackendSelect.addEventListener('change', () => {
+        updateIndexTypeOptions();
         updateIndexParamState();
         refreshMetadata();
     });
@@ -964,9 +973,78 @@
         }
     }
 
+    async function checkExistingIndex(datasetId) {
+        if (!datasetId) {
+            indexStatusBadge.style.display = 'none';
+            indexBuildHint.innerText = '选择索引类型后可调整对应高级参数。';
+            return;
+        }
+        try {
+            const res = await fetch(`/api/datasets/${encodeURIComponent(datasetId)}/indices`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'failed');
+
+            if (data.ready && data.index_config) {
+                const cfg = data.index_config;
+
+                // Auto-fill backend dropdown
+                const validBackends = Array.from(indexBackendSelect.options).map(o => o.value);
+                if (validBackends.includes(cfg.backend)) {
+                    indexBackendSelect.value = cfg.backend;
+                } else if (cfg.backend === 'faiss') {
+                    indexBackendSelect.value = 'auto';
+                }
+
+                // Rebuild index_type options based on selected backend
+                updateIndexTypeOptions();
+
+                // Auto-fill index_type dropdown
+                const validTypes = Array.from(indexTypeSelect.options).map(o => o.value);
+                if (validTypes.includes(cfg.index_type)) {
+                    indexTypeSelect.value = cfg.index_type;
+                }
+
+                // Auto-fill metric
+                const validMetrics = Array.from(indexMetricSelect.options).map(o => o.value);
+                if (validMetrics.includes(cfg.metric)) {
+                    indexMetricSelect.value = cfg.metric;
+                    setDistanceHeader(cfg.metric);
+                }
+
+                // Auto-fill advanced params
+                if (cfg.nlist != null) nlistInput.value = cfg.nlist;
+                if (cfg.nprobe != null) nprobeInput.value = cfg.nprobe;
+                if (cfg.m != null) mInput.value = cfg.m;
+                if (cfg.ef_construction != null) efConstructionInput.value = cfg.ef_construction;
+                if (cfg.ef_search != null) efSearchInput.value = cfg.ef_search;
+                if (cfg.pq_m != null) pqMInput.value = cfg.pq_m;
+                if (cfg.pq_nbits != null) pqNbitsInput.value = cfg.pq_nbits;
+
+                updateIndexParamState();
+
+                // Visual indicator
+                indexStatusBadge.style.display = 'inline';
+                indexStatusBadge.className = 'badge bg-success ms-2';
+                indexStatusBadge.style.fontSize = '0.7rem';
+                indexStatusBadge.innerText = '已有索引';
+                indexBuildHint.innerText = '已加载预构建索引配置，搜索将即时响应。';
+            } else {
+                indexStatusBadge.style.display = 'inline';
+                indexStatusBadge.className = 'badge bg-secondary ms-2';
+                indexStatusBadge.style.fontSize = '0.7rem';
+                indexStatusBadge.innerText = '待构建';
+                indexBuildHint.innerText = '首次检索将自动构建索引，可能需要等待数秒至数分钟。';
+            }
+        } catch {
+            indexStatusBadge.style.display = 'none';
+            indexBuildHint.innerText = '选择索引类型后可调整对应高级参数。';
+        }
+    }
+
     datasetSelect.addEventListener('change', async () => {
+        const datasetId = datasetSelect.value;
+        await checkExistingIndex(datasetId);
         await refreshMetadata();
-        updateIndexParamState();
         await loadCells(0);
         await loadUmap();
     });

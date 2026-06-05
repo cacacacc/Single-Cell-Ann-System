@@ -140,6 +140,43 @@ def _index_path(dataset_id: str, use_rep: str) -> Path:
     return INDEX_DIR / f"{dataset_id}_{use_rep}.index"
 
 
+def _read_stored_index_config(dataset_id: str, use_rep: str) -> Optional[Dict[str, Any]]:
+    """Read index config from an existing index file without loading vectors."""
+    index_path = _index_path(dataset_id, use_rep)
+    backup_path = _backup_index_path(index_path)
+
+    # Prefer reading from the .npz backup (contains full config_json)
+    npz_path = backup_path if backup_path.exists() else None
+    if npz_path is None and index_path.exists():
+        # FAISS binary index without backup — try to find config from cache
+        cached = _INDEX_CACHE.get((dataset_id, use_rep))
+        if cached is not None:
+            cached_indexer, _ = cached
+            return cached_indexer.config_summary
+        return None
+
+    if npz_path is None:
+        return None
+
+    try:
+        with np.load(npz_path, allow_pickle=False) as data:
+            config_json = (
+                str(np.asarray(data["config_json"]).item())
+                if "config_json" in data
+                else None
+            )
+            if config_json:
+                return json.loads(config_json)
+            # Fallback: assemble from individual fields
+            return {
+                "backend": str(np.asarray(data.get("backend", "auto")).item()),
+                "index_type": str(np.asarray(data.get("index_type", "flat")).item()),
+                "metric": str(np.asarray(data.get("metric", "l2")).item()),
+            }
+    except (KeyError, ValueError, OSError):
+        return None
+
+
 def _get_loader(dataset_id: str, dataset_path: Optional[Path] = None) -> DataLoader:
     if dataset_id in _DATASET_CACHE:
         return _DATASET_CACHE[dataset_id]
@@ -435,6 +472,35 @@ def list_datasets():
         dataset_id = _dataset_id_from_path(path)
         datasets.append(_dataset_payload(dataset_id, path))
     return _json_response({"datasets": datasets})
+
+
+@app.get("/api/datasets/<dataset_id>/indices")
+def dataset_indices(dataset_id: str):
+    """Return pre-built index info for a dataset so the search page can auto-fill."""
+    try:
+        dataset_id = _normalize_dataset_id(dataset_id)
+        use_rep = request.args.get("use_rep", DEFAULT_USE_REP)
+
+        # Check in-memory cache first
+        cached = _INDEX_CACHE.get((dataset_id, use_rep))
+        if cached is not None:
+            cached_indexer, _ = cached
+            return _json_response({
+                "ready": True,
+                "index_config": cached_indexer.config_summary,
+            })
+
+        # Check on-disk index
+        stored = _read_stored_index_config(dataset_id, use_rep)
+        if stored is not None:
+            return _json_response({
+                "ready": True,
+                "index_config": stored,
+            })
+
+        return _json_response({"ready": False, "index_config": None})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
 
 
 @app.get("/api/cells")
