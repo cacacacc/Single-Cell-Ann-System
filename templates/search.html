@@ -229,7 +229,9 @@
 
                 <div class="mb-4">
                     <label class="form-label">高级参数</label>
-                    <div class="row g-2">
+
+                    <!-- IVF 参数组 -->
+                    <div id="ivfParamsGroup" class="row g-2 d-none">
                         <div class="col-6">
                             <label class="form-label mb-1" style="font-size: 0.8rem;">nlist</label>
                             <input type="number" min="1" class="form-control dark-control" id="nlistInput" value="100">
@@ -238,14 +240,10 @@
                             <label class="form-label mb-1" style="font-size: 0.8rem;">nprobe</label>
                             <input type="number" min="1" class="form-control dark-control" id="nprobeInput" value="10">
                         </div>
-                        <div class="col-6">
-                            <label class="form-label mb-1" style="font-size: 0.8rem;">PQ M</label>
-                            <input type="number" min="1" class="form-control dark-control" id="pqMInput" value="8">
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label mb-1" style="font-size: 0.8rem;">PQ nbits</label>
-                            <input type="number" min="1" max="16" class="form-control dark-control" id="pqNbitsInput" value="8">
-                        </div>
+                    </div>
+
+                    <!-- HNSW 参数组 -->
+                    <div id="hnswParamsGroup" class="row g-2 d-none">
                         <div class="col-6">
                             <label class="form-label mb-1" style="font-size: 0.8rem;">M</label>
                             <input type="number" min="2" class="form-control dark-control" id="mInput" value="16">
@@ -259,7 +257,20 @@
                             <input type="number" min="1" class="form-control dark-control" id="efSearchInput" value="50">
                         </div>
                     </div>
-                    <div class="form-text" style="color: #6f7c92;" id="indexParamHint">IVF 使用 nlist/nprobe；HNSW 使用 M/ef_*；PQ 使用 pq_m/pq_nbits。</div>
+
+                    <!-- PQ 参数组 -->
+                    <div id="pqParamsGroup" class="row g-2 d-none">
+                        <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">PQ M</label>
+                            <input type="number" min="1" class="form-control dark-control" id="pqMInput" value="8">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label mb-1" style="font-size: 0.8rem;">PQ nbits</label>
+                            <input type="number" min="1" max="16" class="form-control dark-control" id="pqNbitsInput" value="8">
+                        </div>
+                    </div>
+
+                    <div class="form-text" style="color: #6f7c92;" id="indexParamHint">选择索引类型后可调整对应高级参数。</div>
                 </div>
 
                 <div class="mb-4">
@@ -277,15 +288,15 @@
                             <span>metric</span>
                             <span id="effectiveMetric" class="text-white">-</span>
                         </div>
-                        <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
+                        <div id="effectiveIVFRow" class="d-flex justify-content-between mt-2 d-none" style="font-size: 0.85rem; color: #8A96A8;">
                             <span>nlist / nprobe</span>
                             <span id="effectiveIVF" class="text-white">-</span>
                         </div>
-                        <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
+                        <div id="effectiveHNSWRow" class="d-flex justify-content-between mt-2 d-none" style="font-size: 0.85rem; color: #8A96A8;">
                             <span>M / ef构建 / ef查询</span>
                             <span id="effectiveHNSW" class="text-white">-</span>
                         </div>
-                        <div class="d-flex justify-content-between mt-2" style="font-size: 0.85rem; color: #8A96A8;">
+                        <div id="effectivePQRow" class="d-flex justify-content-between mt-2 d-none" style="font-size: 0.85rem; color: #8A96A8;">
                             <span>PQ M / nbits</span>
                             <span id="effectivePQ" class="text-white">-</span>
                         </div>
@@ -579,23 +590,26 @@
         }
 
         const indexType = indexTypeSelect.value;
-        const enableIVF = indexType === 'ivf_flat';
-        const enableHNSW = indexType === 'hnsw';
-        const enablePQ = indexType === 'pq';
+        const showIVF = indexType === 'ivf_flat';
+        const showHNSW = indexType === 'hnsw';
+        const showPQ = indexType === 'pq';
 
-        nlistInput.disabled = !enableIVF;
-        nprobeInput.disabled = !enableIVF;
-        pqMInput.disabled = !enablePQ;
-        pqNbitsInput.disabled = !enablePQ;
-        mInput.disabled = !enableHNSW;
-        efConstructionInput.disabled = !enableHNSW;
-        efSearchInput.disabled = !enableHNSW;
+        // 显示/隐藏对应算法的参数组
+        const toggleGroup = (id, show) => document.getElementById(id).classList.toggle('d-none', !show);
+        toggleGroup('ivfParamsGroup', showIVF);
+        toggleGroup('hnswParamsGroup', showHNSW);
+        toggleGroup('pqParamsGroup', showPQ);
 
-        if (indexType === 'ivf_flat') {
-            indexParamHint.innerText = 'IVF 使用 nlist/nprobe（FAISS）。';
-        } else if (indexType === 'hnsw') {
-            indexParamHint.innerText = 'HNSW 使用 M/ef_construction/ef_search。';
-        } else if (indexType === 'pq') {
+        // 同步显示/隐藏生效配置行
+        toggleGroup('effectiveIVFRow', showIVF);
+        toggleGroup('effectiveHNSWRow', showHNSW);
+        toggleGroup('effectivePQRow', showPQ);
+
+        if (showIVF) {
+            indexParamHint.innerText = 'IVF 使用 nlist/nprobe（FAISS）。nlist 控制聚类数，nprobe 控制搜索时探测的聚类数。';
+        } else if (showHNSW) {
+            indexParamHint.innerText = 'HNSW 使用 M/ef_construction/ef_search。M 控制图层连接数，ef 控制搜索宽度。';
+        } else if (showPQ) {
             indexParamHint.innerText = 'PQ 使用 pq_m/pq_nbits，pq_m 需整除向量维度（FAISS）。';
         } else {
             indexParamHint.innerText = '当前索引类型无需高级参数。';
