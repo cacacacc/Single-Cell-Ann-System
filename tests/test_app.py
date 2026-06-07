@@ -57,27 +57,132 @@ class FlaskAppTests(unittest.TestCase):
         self.original_data_dir = app_module.DATA_DIR
         self.original_index_dir = app_module.INDEX_DIR
         self.original_default_data_path = app_module.DEFAULT_DATA_PATH
+        self.original_user_db_path = app_module.USER_DB_PATH
 
         app_module.DATA_DIR = self.data_dir
         app_module.INDEX_DIR = self.index_dir
+        app_module.USER_DB_PATH = self.base_path / "users.sqlite3"
         app_module.DEFAULT_DATA_PATH = str(self.dataset_path)
         app_module._DATASET_CACHE.clear()
         app_module._INDEX_CACHE.clear()
         app_module._BENCHMARK_INDEX_CACHE.clear()
+        app_module._USER_STORE = None
+        app_module._USER_STORE_PATH = None
 
         self.app = app_module.create_app()
+        self.app.config.update(TESTING=True)
         self.client = self.app.test_client()
 
     def tearDown(self) -> None:
         app_module.DATA_DIR = self.original_data_dir
         app_module.INDEX_DIR = self.original_index_dir
         app_module.DEFAULT_DATA_PATH = self.original_default_data_path
+        app_module.USER_DB_PATH = self.original_user_db_path
         app_module._DATASET_CACHE.clear()
         app_module._INDEX_CACHE.clear()
         app_module._BENCHMARK_INDEX_CACHE.clear()
+        app_module._USER_STORE = None
+        app_module._USER_STORE_PATH = None
         self.tmpdir.cleanup()
 
+    def login_admin(self) -> dict:
+        response = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "Admin@123456"},
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.get_json()["user"]
+
+    def register_user(self, username: str = "researcher") -> dict:
+        response = self.client.post(
+            "/api/auth/register",
+            json={
+                "username": username,
+                "password": "User@123456",
+                "full_name": "Research User",
+                "email": f"{username}@example.com",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        return response.get_json()["user"]
+
+    def test_protected_page_redirects_to_login(self) -> None:
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
+
+    def test_admin_login_returns_current_user(self) -> None:
+        user = self.login_admin()
+
+        self.assertEqual(user["username"], "admin")
+        self.assertEqual(user["role"], "admin")
+
+        response = self.client.get("/api/auth/me")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["authenticated"])
+        self.assertEqual(payload["user"]["username"], "admin")
+
+    def test_register_login_and_update_profile(self) -> None:
+        user = self.register_user("researcher_01")
+
+        self.assertEqual(user["role"], "user")
+        self.assertTrue(user["is_active"])
+
+        update_response = self.client.patch(
+            "/api/profile",
+            json={"full_name": "Updated User", "email": "updated@example.com"},
+        )
+        self.assertEqual(update_response.status_code, 200)
+        updated = update_response.get_json()["user"]
+        self.assertEqual(updated["full_name"], "Updated User")
+        self.assertEqual(updated["email"], "updated@example.com")
+
+    def test_non_admin_cannot_manage_users(self) -> None:
+        self.register_user("normal_user")
+
+        response = self.client.get("/api/users")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("管理员权限", response.get_json()["error"])
+
+    def test_admin_can_create_update_reset_and_delete_user(self) -> None:
+        self.login_admin()
+
+        create_response = self.client.post(
+            "/api/users",
+            json={
+                "username": "managed_user",
+                "full_name": "Managed User",
+                "email": "managed@example.com",
+                "role": "user",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201)
+        payload = create_response.get_json()
+        user_id = payload["user"]["id"]
+        self.assertEqual(payload["initial_password"], "Nankai@123")
+
+        update_response = self.client.patch(
+            f"/api/users/{user_id}",
+            json={"role": "admin", "is_active": False},
+        )
+        self.assertEqual(update_response.status_code, 200)
+        updated = update_response.get_json()["user"]
+        self.assertEqual(updated["role"], "admin")
+        self.assertFalse(updated["is_active"])
+
+        reset_response = self.client.post(f"/api/users/{user_id}/reset-password", json={})
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(reset_response.get_json()["initial_password"], "Nankai@123")
+
+        delete_response = self.client.delete(f"/api/users/{user_id}")
+        self.assertEqual(delete_response.status_code, 200)
+
     def test_health_reports_default_dataset_metadata(self) -> None:
+        self.login_admin()
+
         response = self.client.get("/api/health")
 
         self.assertEqual(response.status_code, 200)
@@ -89,6 +194,8 @@ class FlaskAppTests(unittest.TestCase):
         self.assertFalse(payload["ready"])
 
     def test_datasets_lists_available_h5ad_files(self) -> None:
+        self.login_admin()
+
         response = self.client.get("/api/datasets")
 
         self.assertEqual(response.status_code, 200)
@@ -98,6 +205,8 @@ class FlaskAppTests(unittest.TestCase):
         self.assertEqual(datasets[0]["index_status"], "missing")
 
     def test_index_build_and_search_return_results(self) -> None:
+        self.login_admin()
+
         build_response = self.client.post(
             "/api/index/build",
             json={
@@ -134,12 +243,16 @@ class FlaskAppTests(unittest.TestCase):
         self.assertEqual(search_payload["results"][0]["cell_id"], "cell-1")
 
     def test_search_requires_cell_index_or_cell_id(self) -> None:
+        self.login_admin()
+
         response = self.client.post("/api/search", json={"dataset_id": "tiny", "k": 2})
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("cell_index or cell_id is required", response.get_json()["error"])
 
     def test_cells_endpoint_paginates_cell_ids(self) -> None:
+        self.login_admin()
+
         response = self.client.get("/api/cells?dataset_id=tiny&offset=1&limit=2")
 
         self.assertEqual(response.status_code, 200)
@@ -149,6 +262,8 @@ class FlaskAppTests(unittest.TestCase):
         self.assertEqual([cell["cell_id"] for cell in payload["cells"]], ["cell-1", "cell-2"])
 
     def test_umap_endpoint_returns_sampled_points(self) -> None:
+        self.login_admin()
+
         response = self.client.get("/api/umap?dataset_id=tiny&limit=2&seed=1")
 
         self.assertEqual(response.status_code, 200)

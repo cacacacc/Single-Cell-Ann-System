@@ -11,7 +11,7 @@
         border: 1px solid rgba(255,255,255,0.05);
         margin-bottom: 24px;
     }
-    
+
     .avatar-large {
         width: 100px;
         height: 100px;
@@ -26,27 +26,26 @@
         border: 1px solid rgba(255, 255, 255, 0.1);
         color: white;
     }
+
     .dark-input:focus {
         background-color: rgba(0, 0, 0, 0.4);
         border-color: #4A90E2;
         box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.2);
         color: white;
     }
-    /* ... 之前的 dark-input:focus 代码 ... */
 
-    /* 强制提亮所有状态下的占位符文字颜色 */
     .dark-input::placeholder {
-        color: #8A96A8 !important; /* 明亮的灰蓝色 */
-        opacity: 1 !important;     /* 强制不透明，防止有些浏览器自动变淡 */
+        color: #8A96A8 !important;
+        opacity: 1 !important;
         font-weight: 400;
     }
 
-    /* 针对被禁用(disabled)的输入框，也稍微提亮一点，防止像截图里那样灰成一块 */
     .dark-input:disabled {
         background-color: rgba(255, 255, 255, 0.05) !important;
         color: #A0AABF !important;
         opacity: 1 !important;
     }
+
     .btn-glow-purple {
         background-color: #923a73;
         border: none;
@@ -55,9 +54,33 @@
         border-radius: 6px;
         transition: all 0.3s;
     }
+
     .btn-glow-purple:hover {
         background-color: #a84685;
         box-shadow: 0 0 15px rgba(168, 70, 133, 0.5);
+        color: white;
+    }
+
+    .profile-alert {
+        display: none;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 16px;
+        font-size: 0.9rem;
+    }
+
+    .profile-alert.show-success {
+        display: block;
+        background: rgba(46, 204, 113, 0.12);
+        border: 1px solid rgba(46, 204, 113, 0.35);
+        color: #9ff0c4;
+    }
+
+    .profile-alert.show-error {
+        display: block;
+        background: rgba(255, 71, 87, 0.12);
+        border: 1px solid rgba(255, 71, 87, 0.35);
+        color: #ffb8c0;
     }
 </style>
 
@@ -68,43 +91,49 @@
         </h3>
     </div>
 
-    <!-- 顶部个人名片 -->
     <div class="col-12">
         <div class="profile-header">
-            <img src="https://ui-avatars.com/api/?name=Admin&background=6F2656&color=fff&size=200" alt="Avatar" class="avatar-large">
+            <img src="https://ui-avatars.com/api/?name={{ current_user.username|urlencode }}&background=6F2656&color=fff&size=200" alt="Avatar" class="avatar-large">
             <div>
-                <h3 class="fw-bold text-white mb-2">maruko</h3>
+                <h3 class="fw-bold text-white mb-2">{{ current_user.full_name or current_user.username }}</h3>
                 <div class="mb-2">
-                    <span class="badge" style="background-color: var(--nankai-purple); font-size: 0.9rem;"><i class="fa-solid fa-shield-halved me-1"></i> 系统超级管理员</span>
+                    {% if current_user.role == 'admin' %}
+                    <span class="badge" style="background-color: var(--nankai-purple); font-size: 0.9rem;"><i class="fa-solid fa-shield-halved me-1"></i> 系统管理员</span>
+                    {% else %}
+                    <span class="badge bg-secondary" style="font-size: 0.9rem;"><i class="fa-solid fa-user me-1"></i> 普通用户</span>
+                    {% endif %}
+                    {% if current_user.is_active %}
+                    <span class="badge bg-success ms-2" style="font-size: 0.9rem;"><i class="fa-solid fa-circle-check me-1"></i> 已启用</span>
+                    {% endif %}
                 </div>
                 <div style="color: #8A96A8; font-size: 0.95rem;">
-                    <i class="fa-solid fa-envelope me-1"></i> admin@nankai.edu.cn &nbsp;&nbsp;|&nbsp;&nbsp; 
-                    <i class="fa-solid fa-clock me-1"></i> 注册于: 2023-09-01
+                    <i class="fa-solid fa-envelope me-1"></i> {{ current_user.email or '未填写邮箱' }} &nbsp;&nbsp;|&nbsp;&nbsp;
+                    <i class="fa-solid fa-clock me-1"></i> 注册于: {{ current_user.created_at }}
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 左右分栏：基本信息 与 安全设置 -->
     <div class="col-md-6">
         <div class="dark-card">
             <h5 class="fw-bold text-white mb-4 border-bottom pb-3" style="border-color: rgba(255,255,255,0.05) !important;">
                 基本资料修改
             </h5>
-            <form>
+            <div id="profile-alert" class="profile-alert"></div>
+            <form id="profile-form">
                 <div class="mb-3">
                     <label class="form-label" style="color: #8A96A8;">登录账号 (不可修改)</label>
-                    <input type="text" class="form-control dark-input" value="admin_lhz" disabled style="opacity: 0.6;">
+                    <input type="text" class="form-control dark-input" value="{{ current_user.username }}" disabled>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label" style="color: #8A96A8;">真实姓名</label>
-                    <input type="text" class="form-control dark-input" value="刘璇">
+                    <label class="form-label" for="profile-full-name" style="color: #8A96A8;">真实姓名</label>
+                    <input id="profile-full-name" type="text" class="form-control dark-input" value="{{ current_user.full_name }}">
                 </div>
                 <div class="mb-4">
-                    <label class="form-label" style="color: #8A96A8;">联系邮箱</label>
-                    <input type="email" class="form-control dark-input" value="admin@nankai.edu.cn">
+                    <label class="form-label" for="profile-email" style="color: #8A96A8;">联系邮箱</label>
+                    <input id="profile-email" type="email" class="form-control dark-input" value="{{ current_user.email }}">
                 </div>
-                <button type="button" class="btn btn-glow-purple" onclick="alert('资料保存成功！')">保存修改</button>
+                <button type="submit" class="btn btn-glow-purple">保存修改</button>
             </form>
         </div>
     </div>
@@ -114,22 +143,79 @@
             <h5 class="fw-bold text-white mb-4 border-bottom pb-3" style="border-color: rgba(255,255,255,0.05) !important;">
                 安全与密码设置
             </h5>
-            <form>
+            <div id="password-alert" class="profile-alert"></div>
+            <form id="password-form">
                 <div class="mb-3">
-                    <label class="form-label" style="color: #8A96A8;">原密码</label>
-                    <input type="password" class="form-control dark-input" placeholder="输入当前登录密码">
+                    <label class="form-label" for="old-password" style="color: #8A96A8;">原密码</label>
+                    <input id="old-password" type="password" class="form-control dark-input" autocomplete="current-password" placeholder="输入当前登录密码">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label" style="color: #8A96A8;">新密码</label>
-                    <input type="password" class="form-control dark-input" placeholder="至少8位字母数字组合">
+                    <label class="form-label" for="new-password" style="color: #8A96A8;">新密码</label>
+                    <input id="new-password" type="password" class="form-control dark-input" autocomplete="new-password" placeholder="至少 8 位">
                 </div>
                 <div class="mb-4">
-                    <label class="form-label" style="color: #8A96A8;">确认新密码</label>
-                    <input type="password" class="form-control dark-input" placeholder="再次输入新密码">
+                    <label class="form-label" for="new-password-confirm" style="color: #8A96A8;">确认新密码</label>
+                    <input id="new-password-confirm" type="password" class="form-control dark-input" autocomplete="new-password" placeholder="再次输入新密码">
                 </div>
-                <button type="button" class="btn btn-outline-danger" onclick="alert('密码修改成功，请重新登录。')">强制修改密码</button>
+                <button type="submit" class="btn btn-outline-danger">修改密码</button>
             </form>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function showAlert(id, message, type = 'success') {
+        const el = document.getElementById(id);
+        el.textContent = message;
+        el.className = `profile-alert show-${type}`;
+    }
+
+    async function sendJson(url, method, payload) {
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || '请求失败');
+        }
+        return data;
+    }
+
+    document.getElementById('profile-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            await sendJson('/api/profile', 'PATCH', {
+                full_name: document.getElementById('profile-full-name').value,
+                email: document.getElementById('profile-email').value,
+            });
+            showAlert('profile-alert', '资料已保存，刷新后顶部用户名会同步更新。');
+        } catch (error) {
+            showAlert('profile-alert', error.message, 'error');
+        }
+    });
+
+    document.getElementById('password-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const newPassword = document.getElementById('new-password').value;
+        const confirmPassword = document.getElementById('new-password-confirm').value;
+        if (newPassword !== confirmPassword) {
+            showAlert('password-alert', '两次输入的新密码不一致', 'error');
+            return;
+        }
+        try {
+            await sendJson('/api/profile/password', 'POST', {
+                old_password: document.getElementById('old-password').value,
+                new_password: newPassword,
+            });
+            document.getElementById('password-form').reset();
+            showAlert('password-alert', '密码已修改，请妥善保管新密码。');
+        } catch (error) {
+            showAlert('password-alert', error.message, 'error');
+        }
+    });
+</script>
 {% endblock %}

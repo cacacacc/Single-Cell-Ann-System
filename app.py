@@ -4,16 +4,25 @@ import json
 import math
 import os
 import time
+from datetime import timedelta
+from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import numpy as np
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
 from backend.ann_indexer import ANNIndexer, IndexConfig
 from backend.data_reader import DataLoader
+from backend.user_store import (
+    AuthenticationError,
+    DuplicateUserError,
+    LastAdminError,
+    UserStore,
+    UserStoreError,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -29,6 +38,15 @@ _DATASET_CACHE: Dict[str, DataLoader] = {}
 _INDEX_CACHE: Dict[Tuple[str, str], Tuple[ANNIndexer, Tuple[Any, ...]]] = {}
 _BENCHMARK_INDEX_CACHE: Dict[Tuple[str, str, Tuple[Any, ...]], ANNIndexer] = {}
 _BENCHMARK_HISTORY_PATH = DATA_DIR / "benchmark_history.json"
+USER_DB_PATH: Optional[Path] = None
+DEFAULT_ADMIN_USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")
+DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "Admin@123456")
+DEFAULT_ADMIN_NAME = os.getenv("DEFAULT_ADMIN_NAME", "系统管理员")
+DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@example.com")
+DEFAULT_NEW_USER_PASSWORD = os.getenv("DEFAULT_NEW_USER_PASSWORD", "Nankai@123")
+_USER_STORE: Optional[UserStore] = None
+_USER_STORE_PATH: Optional[Path] = None
+ViewFunc = TypeVar("ViewFunc", bound=Callable[..., Any])
 
 
 def _normalize_dataset_id(dataset_id: Optional[str]) -> Optional[str]:
@@ -482,6 +500,12 @@ app = Flask(
     template_folder=str(BASE_DIR / "templates"),
     static_folder=str(BASE_DIR / "static"),
 )
+app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+)
 CORS(app)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_DIR.mkdir(parents=True, exist_ok=True)
@@ -491,17 +515,140 @@ def create_app() -> Flask:
     return app
 
 
+def _configured_user_db_path() -> Path:
+    if USER_DB_PATH is not None:
+        return Path(USER_DB_PATH)
+    raw_path = os.getenv("USER_DB_PATH")
+    if raw_path:
+        return Path(raw_path)
+    return DATA_DIR / "users.sqlite3"
+
+
+def _user_store() -> UserStore:
+    global _USER_STORE, _USER_STORE_PATH
+    db_path = _configured_user_db_path()
+    if _USER_STORE is None or _USER_STORE_PATH != db_path:
+        store = UserStore(db_path)
+        store.init_db(
+            default_admin_username=DEFAULT_ADMIN_USERNAME,
+            default_admin_password=DEFAULT_ADMIN_PASSWORD,
+            default_admin_name=DEFAULT_ADMIN_NAME,
+            default_admin_email=DEFAULT_ADMIN_EMAIL,
+        )
+        _USER_STORE = store
+        _USER_STORE_PATH = db_path
+    return _USER_STORE
+
+
+def _current_user() -> Optional[Dict[str, Any]]:
+    user_id = session.get("user_id")
+    if user_id is None:
+        return None
+    try:
+        user = _user_store().get_user(int(user_id))
+    except (TypeError, ValueError):
+        session.clear()
+        return None
+    if user is None or not user["is_active"]:
+        session.clear()
+        return None
+    return user
+
+
+def _set_session_user(user: Dict[str, Any], remember: bool = False) -> None:
+    session.clear()
+    session.permanent = bool(remember)
+    session["user_id"] = user["id"]
+    session["role"] = user["role"]
+
+
+def _auth_required_response():
+    if request.path.startswith("/api/"):
+        return _json_response({"error": "请先登录"}, 401)
+    return redirect(url_for("login", next=request.path))
+
+
+def _forbidden_response():
+    if request.path.startswith("/api/"):
+        return _json_response({"error": "需要管理员权限"}, 403)
+    return "需要管理员权限", 403
+
+
+def _user_error_response(exc: Exception, default_status: int = 400):
+    if isinstance(exc, AuthenticationError):
+        status = 401
+    elif isinstance(exc, DuplicateUserError):
+        status = 409
+    elif isinstance(exc, LastAdminError):
+        status = 403
+    else:
+        status = default_status
+    return _json_response({"error": str(exc)}, status)
+
+
+def _payload_bool(value: Any, default: bool = True) -> bool:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(value)
+
+
+def login_required(view: ViewFunc) -> ViewFunc:
+    @wraps(view)
+    def wrapped(*args: Any, **kwargs: Any):
+        if _current_user() is None:
+            return _auth_required_response()
+        return view(*args, **kwargs)
+
+    return wrapped  # type: ignore[return-value]
+
+
+def admin_required(view: ViewFunc) -> ViewFunc:
+    @wraps(view)
+    def wrapped(*args: Any, **kwargs: Any):
+        user = _current_user()
+        if user is None:
+            return _auth_required_response()
+        if user["role"] != "admin":
+            return _forbidden_response()
+        return view(*args, **kwargs)
+
+    return wrapped  # type: ignore[return-value]
+
+
+@app.before_request
+def ensure_user_store_ready() -> None:
+    _user_store()
+
+
+@app.context_processor
+def inject_current_user() -> Dict[str, Any]:
+    return {"current_user": _current_user()}
+
+
 # 路由 1：系统大屏首页 (登录后看到的)
 @app.route('/')
+@login_required
 def index():
     return render_template('index.html')
 
 # 路由 2：登录/注册页 (独立页面，不带侧边栏)
 @app.route('/login')
 def login():
+    if _current_user() is not None:
+        next_path = request.args.get("next") or url_for("index")
+        return redirect(next_path)
     return render_template('login.html')
 
 @app.route('/data')
+@login_required
 def data_manage():
     return render_template('data_manage.html')
 
@@ -509,6 +656,7 @@ def data_manage():
 # 相似检索页路由
 # ================================
 @app.route('/search')
+@login_required
 def similarity_search():
     return render_template('search.html')
 
@@ -516,10 +664,12 @@ def similarity_search():
 # 用户管理页路由 (仅管理员可见)
 # ================================
 @app.route('/users')
+@admin_required
 def user_management():
     return render_template('users.html')
 
 @app.route('/profile')
+@login_required
 def profile():
     return render_template('profile.html')
 
@@ -527,22 +677,186 @@ def profile():
 # 性能评测页路由
 # ================================
 @app.route('/benchmark')
+@login_required
 def benchmark():
     return render_template('benchmark.html')
 
 
+@app.post("/api/auth/register")
+def register_api():
+    try:
+        payload = _request_payload()
+        user = _user_store().create_user(
+            username=str(payload.get("username") or ""),
+            password=str(payload.get("password") or ""),
+            full_name=str(payload.get("full_name") or ""),
+            email=str(payload.get("email") or ""),
+            role="user",
+            is_active=True,
+        )
+        _set_session_user(user, remember=bool(payload.get("remember")))
+        return _json_response({"status": "registered", "user": user}, 201)
+    except UserStoreError as exc:
+        return _user_error_response(exc)
+
+
+@app.post("/api/auth/login")
+def login_api():
+    try:
+        payload = _request_payload()
+        user = _user_store().authenticate(
+            str(payload.get("username") or ""),
+            str(payload.get("password") or ""),
+        )
+        _set_session_user(user, remember=bool(payload.get("remember")))
+        return _json_response({"status": "logged_in", "user": user})
+    except UserStoreError as exc:
+        return _user_error_response(exc)
+
+
+@app.post("/api/auth/logout")
+def logout_api():
+    session.clear()
+    return _json_response({"status": "logged_out"})
+
+
+@app.get("/api/auth/me")
+def me_api():
+    user = _current_user()
+    return _json_response({"authenticated": user is not None, "user": user})
+
+
+@app.patch("/api/profile")
+@login_required
+def update_profile_api():
+    user = _current_user()
+    assert user is not None
+    try:
+        payload = _request_payload()
+        updated = _user_store().update_user(
+            user["id"],
+            full_name=str(payload.get("full_name") or ""),
+            email=str(payload.get("email") or ""),
+        )
+        return _json_response({"status": "updated", "user": updated})
+    except UserStoreError as exc:
+        return _user_error_response(exc)
+
+
+@app.post("/api/profile/password")
+@login_required
+def change_password_api():
+    user = _current_user()
+    assert user is not None
+    try:
+        payload = _request_payload()
+        _user_store().change_password(
+            user["id"],
+            str(payload.get("old_password") or ""),
+            str(payload.get("new_password") or ""),
+        )
+        return _json_response({"status": "password_changed"})
+    except UserStoreError as exc:
+        return _user_error_response(exc)
+
+
+@app.get("/api/users")
+@admin_required
+def list_users_api():
+    query = request.args.get("q", "")
+    users = _user_store().list_users(query=query)
+    return _json_response({"users": users, "total": len(users)})
+
+
+@app.post("/api/users")
+@admin_required
+def create_user_api():
+    try:
+        payload = _request_payload()
+        password = str(payload.get("password") or DEFAULT_NEW_USER_PASSWORD)
+        user = _user_store().create_user(
+            username=str(payload.get("username") or ""),
+            password=password,
+            full_name=str(payload.get("full_name") or ""),
+            email=str(payload.get("email") or ""),
+            role=str(payload.get("role") or "user"),
+            is_active=_payload_bool(payload.get("is_active"), default=True),
+        )
+        return _json_response({"status": "created", "user": user, "initial_password": password}, 201)
+    except UserStoreError as exc:
+        return _user_error_response(exc)
+
+
+@app.patch("/api/users/<int:user_id>")
+@admin_required
+def update_user_api(user_id: int):
+    current = _current_user()
+    assert current is not None
+    try:
+        payload = _request_payload()
+        if user_id == current["id"] and payload.get("is_active") is False:
+            return _json_response({"error": "不能禁用当前登录管理员"}, 400)
+        updated = _user_store().update_user(
+            user_id,
+            full_name=payload.get("full_name") if "full_name" in payload else None,
+            email=payload.get("email") if "email" in payload else None,
+            role=payload.get("role") if "role" in payload else None,
+            is_active=_payload_bool(payload.get("is_active")) if "is_active" in payload else None,
+        )
+        if user_id == current["id"]:
+            session["role"] = updated["role"]
+        return _json_response({"status": "updated", "user": updated})
+    except UserStoreError as exc:
+        return _user_error_response(exc)
+
+
+@app.post("/api/users/<int:user_id>/reset-password")
+@admin_required
+def reset_user_password_api(user_id: int):
+    try:
+        payload = _request_payload()
+        password = str(payload.get("password") or DEFAULT_NEW_USER_PASSWORD)
+        _user_store().set_password(user_id, password)
+        return _json_response({"status": "password_reset", "initial_password": password})
+    except UserStoreError as exc:
+        return _user_error_response(exc)
+
+
+@app.delete("/api/users/<int:user_id>")
+@admin_required
+def delete_user_api(user_id: int):
+    current = _current_user()
+    assert current is not None
+    if user_id == current["id"]:
+        return _json_response({"error": "不能删除当前登录管理员"}, 400)
+    try:
+        _user_store().delete_user(user_id)
+        return _json_response({"status": "deleted", "user_id": user_id})
+    except UserStoreError as exc:
+        return _user_error_response(exc)
+
+
 @app.get("/api")
+@login_required
 def api_root():
     return _json_response(
         {
             "message": "Single-Cell ANN API",
-            "endpoints": ["/api/health", "/api/metadata", "/api/search"],
+            "endpoints": [
+                "/api/health",
+                "/api/metadata",
+                "/api/search",
+                "/api/auth/login",
+                "/api/auth/register",
+                "/api/users",
+            ],
             "datasets": "/api/datasets",
         }
     )
 
 
 @app.get("/api/health")
+@login_required
 def health():
     try:
         dataset_path = _resolve_dataset_path(None)
@@ -562,6 +876,7 @@ def health():
 
 
 @app.get("/api/metadata")
+@login_required
 def metadata():
     try:
         payload = dict(request.args)
@@ -577,6 +892,7 @@ def metadata():
 
 
 @app.get("/api/datasets")
+@login_required
 def list_datasets():
     datasets = []
     for path in sorted(DATA_DIR.glob("*.h5ad")):
@@ -586,6 +902,7 @@ def list_datasets():
 
 
 @app.get("/api/datasets/<dataset_id>/indices")
+@login_required
 def dataset_indices(dataset_id: str):
     """Return all pre-built indices for a dataset so the search page can list them."""
     try:
@@ -605,6 +922,7 @@ def dataset_indices(dataset_id: str):
 
 
 @app.get("/api/cells")
+@login_required
 def list_cells():
     try:
         payload = dict(request.args)
@@ -658,6 +976,7 @@ def list_cells():
 
 
 @app.get("/api/umap")
+@login_required
 def umap_points():
     try:
         payload = dict(request.args)
@@ -732,6 +1051,7 @@ def umap_points():
 
 
 @app.post("/api/umap/cells")
+@login_required
 def umap_cells():
     try:
         payload = _request_payload()
@@ -796,6 +1116,7 @@ def umap_cells():
 
 
 @app.post("/api/datasets/upload")
+@admin_required
 def upload_dataset():
     if "file" not in request.files:
         return _json_response({"error": "file is required"}, 400)
@@ -816,6 +1137,7 @@ def upload_dataset():
 
 
 @app.delete("/api/datasets/<dataset_id>")
+@admin_required
 def delete_dataset(dataset_id: str):
     try:
         dataset_path = _resolve_dataset_path(dataset_id)
@@ -845,6 +1167,7 @@ def delete_dataset(dataset_id: str):
 
 
 @app.post("/api/index/build")
+@admin_required
 def build_index():
     try:
         payload = _request_payload()
@@ -888,6 +1211,7 @@ def build_index():
 
 
 @app.delete("/api/index/<dataset_id>/<index_name>")
+@admin_required
 def delete_index(dataset_id: str, index_name: str):
     """Delete a single named index for a dataset."""
     try:
@@ -919,6 +1243,7 @@ def delete_index(dataset_id: str, index_name: str):
 
 
 @app.route("/api/search", methods=["GET", "POST"])
+@login_required
 def search():
     try:
         total_start_time = time.perf_counter()
@@ -1038,6 +1363,7 @@ def search():
 
 
 @app.post("/api/benchmark")
+@login_required
 def benchmark_api():
     try:
         payload = _request_payload()
@@ -1245,6 +1571,7 @@ def benchmark_api():
 
 
 @app.get("/api/benchmark/history")
+@login_required
 def benchmark_history():
     try:
         payload = dict(request.args)
@@ -1279,7 +1606,7 @@ def _json_safe(value: Any) -> Any:
 
 
 def _request_payload() -> Dict[str, Any]:
-    if request.method == "POST":
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         return dict(request.get_json(silent=True) or {})
     return dict(request.args)
 
