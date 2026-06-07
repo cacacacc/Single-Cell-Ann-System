@@ -186,6 +186,35 @@ body {
     margin-right: 5px;
 }
 
+/* 通知下拉框：保持深色主题，避免 Bootstrap 默认白底吞掉白色文字 */
+.dark-dropdown {
+    background-color: var(--bg-card);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+}
+
+.dark-dropdown .dropdown-item {
+    color: var(--text-main);
+    background-color: transparent;
+    margin-left: 0;
+    padding: 10px 14px;
+}
+
+.dark-dropdown .dropdown-item:hover,
+.dark-dropdown .dropdown-item:focus {
+    background-color: rgba(74, 144, 226, 0.12);
+    color: var(--text-main);
+}
+
+.dark-dropdown .noti-item small,
+.dark-dropdown .text-muted {
+    color: #A0AABF !important;
+}
+
+.dark-dropdown .noti-list {
+    background-color: var(--bg-card);
+}
+
 /* ================= 卡片样式 ================= */
 .dark-card {
     background-color: var(--bg-card);

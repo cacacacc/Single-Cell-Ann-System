@@ -6,35 +6,33 @@
     <title>登录 - 单细胞智慧可视化系统</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    
+
     <style>
         :root {
             --nankai-purple: #6F2656;
-            --tech-blue: #4A90E2; /* 科技蓝点缀色 */
+            --tech-blue: #4A90E2;
             --text-main: #FFFFFF;
             --text-muted: #8A96A8;
         }
 
         body, html {
-            height: 100%;
+            min-height: 100%;
             margin: 0;
             font-family: 'Segoe UI', system-ui, sans-serif;
-            /* 统一的深色科技蓝渐变背景，右下角带一点点南开紫的暗光 */
-            background: linear-gradient(135deg, #0B1021 0%, #162242 55%, #1F1528 100%);
+            background:
+                radial-gradient(circle at 18% 18%, rgba(74, 144, 226, 0.22), transparent 28%),
+                linear-gradient(135deg, #0B1021 0%, #162242 55%, #1F1528 100%);
             color: var(--text-main);
-            overflow: hidden;
         }
 
-        /* 全屏弹性容器，替代原来的硬分割 */
         .login-container {
             display: flex;
-            height: 100vh;
+            min-height: 100vh;
             align-items: center;
             justify-content: center;
-            padding: 0 8%;
+            padding: 40px 8%;
         }
 
-        /* ================= 左侧：文案展示区 (无背景，悬浮在渐变之上) ================= */
         .text-section {
             flex: 1.2;
             padding-right: 50px;
@@ -43,14 +41,14 @@
         .text-section i {
             color: var(--tech-blue);
             margin-bottom: 25px;
-            text-shadow: 0 0 20px rgba(74, 144, 226, 0.4); /* 发光特效 */
+            text-shadow: 0 0 20px rgba(74, 144, 226, 0.4);
         }
 
         .text-section h1 {
             font-weight: 700;
             font-size: 3.2rem;
             margin-bottom: 15px;
-            letter-spacing: 1px;
+            letter-spacing: 0;
             text-shadow: 0 4px 15px rgba(0,0,0,0.5);
         }
 
@@ -61,8 +59,6 @@
             line-height: 1.6;
         }
 
-
-       /* ================= 右侧：毛玻璃表单卡片 ================= */
         .form-section {
             flex: 1;
             display: flex;
@@ -70,35 +66,28 @@
         }
 
         .glass-card {
-            /* 1. 稍微提亮卡片底色，与极暗的背景彻底拉开色阶 */
-            background: rgba(34, 43, 69, 0.7); 
+            background: rgba(34, 43, 69, 0.72);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
-            
-            /* 2. 边缘高光处理（核心！顶部和左侧边框调亮，模拟光线照射的玻璃边缘） */
             border: 1px solid rgba(255, 255, 255, 0.12);
             border-top: 1px solid rgba(255, 255, 255, 0.25);
             border-left: 1px solid rgba(255, 255, 255, 0.25);
-            
             border-radius: 16px;
-            padding: 45px 40px;
+            padding: 42px 40px;
             width: 100%;
-            max-width: 420px;
-            
-            /* 3. 加深加厚底部阴影，产生强烈的“悬浮”感 */
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6); 
+            max-width: 440px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6);
         }
 
         .glass-card h3 {
             font-weight: 600;
             margin-bottom: 8px;
-            color: var(--text-main);
         }
 
         .glass-card .subtitle {
             color: var(--text-muted);
             font-size: 0.9rem;
-            margin-bottom: 35px;
+            margin-bottom: 26px;
         }
 
         .form-label {
@@ -107,11 +96,10 @@
             margin-bottom: 8px;
         }
 
-        /* 优化输入框：加深背景色制造“凹陷”感，与凸起的卡片形成反差 */
         .dark-input {
-            background-color: rgba(0, 0, 0, 0.35); 
+            background-color: rgba(0, 0, 0, 0.35);
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-top: 1px solid rgba(0, 0, 0, 0.3); /* 顶部暗边，加强凹陷立体感 */
+            border-top: 1px solid rgba(0, 0, 0, 0.3);
             color: white;
             padding: 12px 16px;
             border-radius: 8px;
@@ -130,9 +118,8 @@
             color: #5A6A85;
             font-size: 0.95rem;
         }
-        /* 渐变色主按钮 */
+
         .btn-gradient {
-            /* 按钮采用科技蓝到南开紫的完美过渡 */
             background: linear-gradient(90deg, #4A90E2 0%, var(--nankai-purple) 100%);
             border: none;
             color: white;
@@ -149,6 +136,19 @@
             color: white;
         }
 
+        .btn-muted {
+            background-color: #222B45;
+            color: white;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .btn-muted:hover {
+            background-color: #2e3a59;
+            color: white;
+        }
+
         .toggle-link {
             color: var(--tech-blue);
             text-decoration: none;
@@ -161,9 +161,30 @@
             color: #63a4ff;
         }
 
-        /* 响应式调整：屏幕变小的时候上下排列 */
+        .auth-alert {
+            display: none;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 18px;
+            font-size: 0.9rem;
+        }
+
+        .auth-alert.error {
+            display: block;
+            background: rgba(255, 71, 87, 0.12);
+            border: 1px solid rgba(255, 71, 87, 0.35);
+            color: #ffb8c0;
+        }
+
+        .auth-alert.success {
+            display: block;
+            background: rgba(46, 204, 113, 0.12);
+            border: 1px solid rgba(46, 204, 113, 0.35);
+            color: #9ff0c4;
+        }
+
         @media (max-width: 992px) {
-            .login-container { flex-direction: column; text-align: center; padding: 5%; }
+            .login-container { flex-direction: column; text-align: center; padding: 32px 5%; }
             .text-section { padding-right: 0; margin-bottom: 40px; }
             .text-section p { margin: 0 auto; }
             .form-section { justify-content: center; width: 100%; }
@@ -173,97 +194,110 @@
 <body>
 
 <div class="login-container">
-    
-    <!-- 左侧：文案展示区 (融入统一背景中) -->
     <div class="text-section d-none d-lg-block">
         <i class="fa-solid fa-dna fa-4x"></i>
         <h1>单细胞高维向量<br>ANN 检索系统</h1>
         <p>基于先进近似最近邻算法，为您提供百万级单细胞数据的高效聚类、精准比对与动态可视化联合分析服务。</p>
     </div>
 
-    <!-- 右侧：毛玻璃表单卡片区 -->
     <div class="form-section">
         <div class="glass-card">
-            
             <div class="text-center">
                 <h3 id="form-title">欢迎登录</h3>
                 <div class="subtitle" id="form-subtitle">请输入您的账号密码进入系统</div>
             </div>
 
-            <!-- ================= 登录表单 ================= -->
+            <div id="auth-alert" class="auth-alert"></div>
+
             <form id="login-form">
                 <div class="mb-3">
-                    <label class="form-label">系统账号</label>
-                    <input type="text" class="form-control dark-input" placeholder="请输入用户名">
+                    <label class="form-label" for="login-username">系统账号</label>
+                    <input id="login-username" type="text" class="form-control dark-input" autocomplete="username" placeholder="请输入用户名" required>
                 </div>
                 <div class="mb-4">
-                    <label class="form-label">登录密码</label>
-                    <input type="password" class="form-control dark-input" placeholder="请输入密码">
+                    <label class="form-label" for="login-password">登录密码</label>
+                    <input id="login-password" type="password" class="form-control dark-input" autocomplete="current-password" placeholder="请输入密码" required>
                 </div>
-                
+
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <div class="form-check">
-                        <!-- 去掉复选框的白底，改暗 -->
                         <input class="form-check-input" type="checkbox" id="rememberMe" style="background-color: rgba(255,255,255,0.2); border: none;">
                         <label class="form-check-label" for="rememberMe" style="color: var(--text-muted); font-size: 0.9rem;">保持登录</label>
                     </div>
-                    <a href="#" style="color: var(--text-muted); font-size: 0.9rem; text-decoration: none;">忘记密码?</a>
+                    <span style="color: var(--text-muted); font-size: 0.9rem;">默认管理员：admin</span>
                 </div>
 
-                <!-- 登录按钮，点击后跳转大屏首页 -->
-                <button type="button" class="btn btn-gradient w-100" onclick="window.location.href='/'">
+                <button id="login-submit" type="submit" class="btn btn-gradient w-100">
                     登录系统
                 </button>
-                
+
                 <div class="text-center mt-4" style="font-size: 0.95rem;">
-                    <span style="color: var(--text-muted);">没有账号？</span> 
+                    <span style="color: var(--text-muted);">没有账号？</span>
                     <span class="toggle-link" onclick="toggleForm('register')">点击申请权限</span>
                 </div>
             </form>
 
-            <!-- ================= 注册表单 (默认隐藏) ================= -->
             <form id="register-form" style="display: none;">
                 <div class="mb-3">
-                    <label class="form-label">设置账号</label>
-                    <input type="text" class="form-control dark-input" placeholder="仅限英文字母与数字">
+                    <label class="form-label" for="register-username">设置账号</label>
+                    <input id="register-username" type="text" class="form-control dark-input" autocomplete="username" placeholder="3-32 位字母、数字、下划线或短横线" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">真实姓名</label>
-                    <input type="text" class="form-control dark-input" placeholder="用于系统实名备案">
+                    <label class="form-label" for="register-full-name">真实姓名</label>
+                    <input id="register-full-name" type="text" class="form-control dark-input" placeholder="用于系统实名备案">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="register-email">联系邮箱</label>
+                    <input id="register-email" type="email" class="form-control dark-input" autocomplete="email" placeholder="name@example.com">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="register-password">设置密码</label>
+                    <input id="register-password" type="password" class="form-control dark-input" autocomplete="new-password" placeholder="至少 8 位" required>
                 </div>
                 <div class="mb-4">
-                    <label class="form-label">设置密码</label>
-                    <input type="password" class="form-control dark-input" placeholder="至少8位大小写组合">
+                    <label class="form-label" for="register-password-confirm">确认密码</label>
+                    <input id="register-password-confirm" type="password" class="form-control dark-input" autocomplete="new-password" placeholder="再次输入密码" required>
                 </div>
-                
-                <button type="button" class="btn w-100" style="background-color: #222B45; color: white; border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px;">
+
+                <button id="register-submit" type="submit" class="btn btn-muted w-100">
                     提交注册信息
                 </button>
-                
+
                 <div class="text-center mt-4" style="font-size: 0.95rem;">
-                    <span style="color: var(--text-muted);">已有系统权限？</span> 
+                    <span style="color: var(--text-muted);">已有系统权限？</span>
                     <span class="toggle-link" onclick="toggleForm('login')">返回安全登录</span>
                 </div>
             </form>
-
         </div>
     </div>
-
 </div>
 
 <script>
-    // 无刷新切换登录与注册面板
+    const nextUrl = new URLSearchParams(window.location.search).get('next') || '/';
+    const alertBox = document.getElementById('auth-alert');
+
+    function showMessage(message, type = 'error') {
+        alertBox.textContent = message;
+        alertBox.className = `auth-alert ${type}`;
+    }
+
+    function clearMessage() {
+        alertBox.textContent = '';
+        alertBox.className = 'auth-alert';
+    }
+
     function toggleForm(target) {
         const loginForm = document.getElementById('login-form');
         const registerForm = document.getElementById('register-form');
         const title = document.getElementById('form-title');
         const subtitle = document.getElementById('form-subtitle');
+        clearMessage();
 
         if (target === 'register') {
             loginForm.style.display = 'none';
             registerForm.style.display = 'block';
             title.innerText = '注册系统账号';
-            subtitle.innerText = '完善下方信息获取可视化大屏权限';
+            subtitle.innerText = '完善下方信息获取可视化系统权限';
         } else {
             loginForm.style.display = 'block';
             registerForm.style.display = 'none';
@@ -271,6 +305,71 @@
             subtitle.innerText = '请输入您的账号密码进入系统';
         }
     }
+
+    async function postJson(url, payload) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || '请求失败');
+        }
+        return data;
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        clearMessage();
+        const button = document.getElementById('login-submit');
+        button.disabled = true;
+        button.innerText = '正在登录...';
+        try {
+            await postJson('/api/auth/login', {
+                username: document.getElementById('login-username').value,
+                password: document.getElementById('login-password').value,
+                remember: document.getElementById('rememberMe').checked,
+            });
+            window.location.href = nextUrl;
+        } catch (error) {
+            showMessage(error.message);
+        } finally {
+            button.disabled = false;
+            button.innerText = '登录系统';
+        }
+    });
+
+    document.getElementById('register-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        clearMessage();
+        const password = document.getElementById('register-password').value;
+        const confirmPassword = document.getElementById('register-password-confirm').value;
+        if (password !== confirmPassword) {
+            showMessage('两次输入的密码不一致');
+            return;
+        }
+
+        const button = document.getElementById('register-submit');
+        button.disabled = true;
+        button.innerText = '正在注册...';
+        try {
+            await postJson('/api/auth/register', {
+                username: document.getElementById('register-username').value,
+                full_name: document.getElementById('register-full-name').value,
+                email: document.getElementById('register-email').value,
+                password,
+                remember: true,
+            });
+            showMessage('注册成功，正在进入系统...', 'success');
+            window.location.href = nextUrl;
+        } catch (error) {
+            showMessage(error.message);
+        } finally {
+            button.disabled = false;
+            button.innerText = '提交注册信息';
+        }
+    });
 </script>
 
 </body>

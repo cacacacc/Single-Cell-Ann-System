@@ -2,13 +2,13 @@
 
 {% block content %}
 <style>
-    /* 复用暗黑原生表格样式 */
     .table-dark-custom {
         --bs-table-bg: transparent;
         color: #FFFFFF;
         vertical-align: middle;
         margin-bottom: 0;
     }
+
     .table-dark-custom thead th {
         background-color: rgba(0, 0, 0, 0.2);
         color: #8A96A8;
@@ -16,15 +16,16 @@
         font-weight: 600;
         padding: 15px;
     }
+
     .table-dark-custom tbody td {
         padding: 15px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     }
+
     .table-dark-custom tbody tr:hover td {
-        background-color: rgba(111, 38, 86, 0.15); 
+        background-color: rgba(111, 38, 86, 0.15);
     }
 
-    /* 顶部命令栏按钮 */
     .cmd-btn {
         background-color: #222B45;
         color: var(--text-main);
@@ -34,8 +35,9 @@
         margin-right: 10px;
         transition: all 0.2s;
     }
+
     .cmd-btn:hover { background-color: #2e3a59; color: white; }
-    
+
     .btn-glow-purple {
         background-color: #923a73;
         border: none;
@@ -45,67 +47,92 @@
         border-radius: 6px;
         transition: all 0.3s;
     }
+
     .btn-glow-purple:hover {
         background-color: #a84685;
         box-shadow: 0 0 15px rgba(168, 70, 133, 0.5);
         color: white;
     }
 
-    /* 操作图标 */
     .action-icon {
         color: #8A96A8;
         cursor: pointer;
-        margin: 0 10px;
-        font-size: 1.1rem;
+        margin: 0 8px;
+        font-size: 1.05rem;
         transition: color 0.2s;
     }
+
     .action-icon:hover { color: white; }
     .action-icon.danger:hover { color: #ff4757; }
     .action-icon.warning:hover { color: #F5A623; }
+    .action-icon.info:hover { color: #4A90E2; }
 
-    /* 弹窗输入框暗黑化 */
     .dark-input {
         background-color: rgba(0, 0, 0, 0.2);
         border: 1px solid rgba(255, 255, 255, 0.1);
         color: white;
         padding: 10px 15px;
     }
+
     .dark-input:focus {
         background-color: rgba(0, 0, 0, 0.4);
         border-color: #4A90E2;
         box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.2);
         color: white;
     }
+
     .dark-input::placeholder { color: #5A6A85; }
+    .dark-input option { color: #111827; }
+
+    .users-alert {
+        display: none;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 16px;
+        font-size: 0.9rem;
+    }
+
+    .users-alert.show-success {
+        display: block;
+        background: rgba(46, 204, 113, 0.12);
+        border: 1px solid rgba(46, 204, 113, 0.35);
+        color: #9ff0c4;
+    }
+
+    .users-alert.show-error {
+        display: block;
+        background: rgba(255, 71, 87, 0.12);
+        border: 1px solid rgba(255, 71, 87, 0.35);
+        color: #ffb8c0;
+    }
 </style>
 
-<!-- 顶部操作栏 (Command Bar) -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h3 class="fw-bold m-0" style="letter-spacing: 1px;">
         <i class="fa-solid fa-users-gear me-2" style="color: #4A90E2;"></i>系统用户管理
     </h3>
     <div>
-        <!-- 搜索框 -->
         <div class="d-inline-block me-3 position-relative">
             <i class="fa-solid fa-magnifying-glass position-absolute" style="top: 10px; left: 12px; color: #8A96A8;"></i>
-            <input type="text" class="form-control dark-input" style="padding-left: 35px; width: 250px; border-radius: 20px;" placeholder="搜索账号或姓名...">
+            <input id="user-search" type="text" class="form-control dark-input" style="padding-left: 35px; width: 250px; border-radius: 20px;" placeholder="搜索账号或姓名...">
         </div>
-        
+
         <button class="btn btn-glow-purple me-2" data-bs-toggle="modal" data-bs-target="#addUserModal">
             <i class="fa-solid fa-user-plus me-2"></i>添加用户
         </button>
-        <button class="cmd-btn">
+        <button id="bulk-disable-btn" class="cmd-btn">
             <i class="fa-solid fa-ban me-2"></i>批量禁用
         </button>
     </div>
 </div>
 
-<!-- 主内容区：用户表格卡片 -->
+<div id="users-alert" class="users-alert"></div>
+
 <div class="dark-card" style="padding: 0; overflow: hidden;">
     <table class="table table-dark-custom mb-0 w-100">
         <thead>
             <tr>
-                <th style="width: 50px; text-align: center;"><input type="checkbox" class="form-check-input" style="background-color: transparent; border-color: #8A96A8;"></th>
+                <th style="width: 50px; text-align: center;"><input id="select-all-users" type="checkbox" class="form-check-input" style="background-color: transparent; border-color: #8A96A8;"></th>
                 <th>系统账号</th>
                 <th>真实姓名</th>
                 <th>系统角色</th>
@@ -114,81 +141,15 @@
                 <th class="text-center">安全操作</th>
             </tr>
         </thead>
-        <tbody>
-            <!-- 示例用户 1：管理员 -->
+        <tbody id="users-table-body">
             <tr>
-                <td class="text-center">
-                    <input type="checkbox" class="custom-checkbox row-checkbox">
-                </td>
-                <td>
-                    <div class="d-flex align-items-center">
-                        <img src="https://ui-avatars.com/api/?name=Admin&background=6F2656&color=fff" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px;">
-                        <span class="fw-bold text-white">admin_lhz</span>
-                    </div>
-                </td>
-                <td style="color: #d1d5db;">maruko</td>
-                <td><span class="badge" style="background-color: var(--nankai-purple); padding: 6px 10px;">系统管理员</span></td>
-                <td style="color: #8A96A8;">2023-09-01 10:00</td>
-                <td><span class="badge bg-success" style="padding: 6px 10px;"><i class="fa-solid fa-circle-check me-1"></i>正常启用</span></td>
-                <!-- 统一的操作列 -->
-                <td class="text-center">
-                    <i class="fa-solid fa-circle-info action-icon" title="查看详情" onclick="showUserDetail('admin_lhz', '系统管理员')"></i>
-                    <i class="fa-solid fa-pen-to-square action-icon warning" title="编辑权限" onclick="editUserRole('admin_lhz')"></i>
-                    <i class="fa-solid fa-trash action-icon danger" title="删除用户" onclick="deleteUser(this, 'admin_lhz', true)"></i>
-                </td>
-            </tr>
-            
-            <!-- 示例用户 2：普通用户 -->
-            <tr>
-                <td class="text-center">
-                    <input type="checkbox" class="custom-checkbox row-checkbox">
-                </td>
-                <td>
-                    <div class="d-flex align-items-center">
-                        <img src="https://ui-avatars.com/api/?name=User&background=4A90E2&color=fff" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px;">
-                        <span class="fw-bold text-white">researcher_01</span>
-                    </div>
-                </td>
-                <td style="color: #d1d5db;">张科研</td>
-                <td><span class="badge bg-secondary" style="padding: 6px 10px;">普通用户</span></td>
-                <td style="color: #8A96A8;">2024-03-15 14:22</td>
-                <td><span class="badge bg-success" style="padding: 6px 10px;"><i class="fa-solid fa-circle-check me-1"></i>正常启用</span></td>
-                <!-- 统一的操作列 -->
-                <td class="text-center">
-                    <i class="fa-solid fa-circle-info action-icon" title="查看详情" onclick="showUserDetail('researcher_01', '普通用户')"></i>
-                    <i class="fa-solid fa-pen-to-square action-icon warning" title="编辑权限" onclick="editUserRole('researcher_01')"></i>
-                    <i class="fa-solid fa-trash action-icon danger" title="删除用户" onclick="deleteUser(this, 'researcher_01', false)"></i>
-                </td>
-            </tr>
-
-            <!-- 示例用户 3：普通用户 -->
-            <tr>
-                <td class="text-center">
-                    <input type="checkbox" class="custom-checkbox row-checkbox">
-                </td>
-                <td>
-                    <div class="d-flex align-items-center">
-                        <img src="https://ui-avatars.com/api/?name=Guest&background=2A365C&color=8A96A8" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px;">
-                        <span class="fw-bold text-white">guest_temp</span>
-                    </div>
-                </td>
-                <td style="color: #d1d5db;">李临时</td>
-                <td><span class="badge bg-secondary" style="padding: 6px 10px;">普通用户</span></td>
-                <td style="color: #8A96A8;">2024-05-10 09:11</td>
-                <td><span class="badge bg-success" style="padding: 6px 10px;"><i class="fa-solid fa-circle-check me-1"></i>正常启用</span></td>
-                <!-- 统一的操作列 -->
-                <td class="text-center">
-                    <i class="fa-solid fa-circle-info action-icon" title="查看详情" onclick="showUserDetail('guest_temp', '普通用户')"></i>
-                    <i class="fa-solid fa-pen-to-square action-icon warning" title="编辑权限" onclick="editUserRole('guest_temp')"></i>
-                    <i class="fa-solid fa-trash action-icon danger" title="删除用户" onclick="deleteUser(this, 'guest_temp', false)"></i>
-                </td>
+                <td colspan="7" class="text-center" style="color: #8A96A8;">正在加载用户...</td>
             </tr>
         </tbody>
     </table>
-    
-    <!-- 底部简易分页器 -->
+
     <div class="d-flex justify-content-between align-items-center p-3 border-top" style="border-color: rgba(255,255,255,0.05) !important;">
-        <span style="color: #8A96A8; font-size: 0.9rem;">共 3 条记录</span>
+        <span id="users-count" style="color: #8A96A8; font-size: 0.9rem;">共 0 条记录</span>
         <ul class="pagination pagination-sm mb-0">
             <li class="page-item disabled"><a class="page-link" href="#" style="background-color: #141A30; border-color: rgba(255,255,255,0.1); color: #8A96A8;">上一页</a></li>
             <li class="page-item active"><a class="page-link" href="#" style="background-color: var(--nankai-purple); border-color: var(--nankai-purple);">1</a></li>
@@ -197,7 +158,6 @@
     </div>
 </div>
 
-<!-- ================= 居中模态弹窗：添加新用户 ================= -->
 <div class="modal fade" id="addUserModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content" style="background-color: var(--bg-card); color: white; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 15px 35px rgba(0,0,0,0.5);">
@@ -205,30 +165,36 @@
                 <h5 class="modal-title fw-bold"><i class="fa-solid fa-user-plus me-2" style="color: #4A90E2;"></i>添加新系统用户</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body p-4">
-                <div class="mb-3">
-                    <label class="form-label" style="color: #8A96A8;">系统账号 (必须唯一)</label>
-                    <input type="text" class="form-control dark-input" placeholder="输入英文/数字账号">
+            <form id="add-user-form">
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label" for="new-username" style="color: #8A96A8;">系统账号 (必须唯一)</label>
+                        <input id="new-username" type="text" class="form-control dark-input" placeholder="输入英文/数字账号" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="new-full-name" style="color: #8A96A8;">真实姓名</label>
+                        <input id="new-full-name" type="text" class="form-control dark-input" placeholder="输入真实姓名">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="new-email" style="color: #8A96A8;">联系邮箱</label>
+                        <input id="new-email" type="email" class="form-control dark-input" placeholder="name@example.com">
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label" for="new-role" style="color: #8A96A8;">分配角色</label>
+                        <select id="new-role" class="form-select dark-input">
+                            <option value="user" selected>普通用户 (可查看和检索)</option>
+                            <option value="admin">系统管理员 (用户、数据和索引管理)</option>
+                        </select>
+                    </div>
+                    <div class="alert" style="background-color: rgba(74, 144, 226, 0.1); border: 1px solid rgba(74, 144, 226, 0.3); color: #4A90E2; font-size: 0.85rem;">
+                        <i class="fa-solid fa-circle-info me-2"></i>默认初始密码为: <strong>Nankai@123</strong>，管理员可在创建后重置。
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label" style="color: #8A96A8;">真实姓名</label>
-                    <input type="text" class="form-control dark-input" placeholder="输入真实姓名">
+                <div class="modal-footer border-top border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" style="background-color: #222B45; border: none;">取消</button>
+                    <button type="submit" class="btn btn-glow-purple">确认添加</button>
                 </div>
-                <div class="mb-4">
-                    <label class="form-label" style="color: #8A96A8;">分配角色</label>
-                    <select class="form-select dark-input">
-                        <option value="user" selected>普通用户 (仅查询权限)</option>
-                        <option value="admin">系统管理员 (完全控制权限)</option>
-                    </select>
-                </div>
-                <div class="alert" style="background-color: rgba(74, 144, 226, 0.1); border: 1px solid rgba(74, 144, 226, 0.3); color: #4A90E2; font-size: 0.85rem;">
-                    <i class="fa-solid fa-circle-info me-2"></i>默认初始密码为: <strong>Nankai@123</strong>，首次登录需强制修改。
-                </div>
-            </div>
-            <div class="modal-footer border-top border-secondary">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" style="background-color: #222B45; border: none;">取消</button>
-                <button type="button" class="btn btn-glow-purple" data-bs-dismiss="modal">确认添加</button>
-            </div>
+            </form>
         </div>
     </div>
 </div>
@@ -236,46 +202,216 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- 确保引入了 Bootstrap 的 JS 以支持 Modal 弹窗 -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
 <script>
-    // 模拟重置密码的交互逻辑
-    function resetPassword(username) {
-        if(confirm(`确定要将用户 [${username}] 的密码重置为系统默认密码吗？`)) {
-            alert("密码重置成功！");
-            // 实际开发中，这里需要发送 ajax 请求给后端修改数据库
+    let users = [];
+    let addUserModal;
+    const currentUserId = Number('{{ current_user.id }}');
+
+    function roleLabel(role) {
+        return role === 'admin' ? '系统管理员' : '普通用户';
+    }
+
+    function showAlert(message, type = 'success') {
+        const el = document.getElementById('users-alert');
+        el.textContent = message;
+        el.className = `users-alert show-${type}`;
+    }
+
+    async function requestJson(url, options = {}) {
+        const response = await fetch(url, {
+            headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+            ...options,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || '请求失败');
         }
+        return data;
     }
 
-    // 查看详情弹窗 (演示用)
-    function showUserDetail(username, roleLabel) {
-        alert(`用户详情\n账号: ${username}\n角色: ${roleLabel}\n状态: 正常启用`);
-    }
-
-    // 编辑权限弹窗 (演示用)
-    function editUserRole(username) {
-        const nextRole = confirm(`是否将用户 [${username}] 提升为系统管理员？\n取消则保持为普通用户。`);
-        if (nextRole) {
-            alert(`已将 ${username} 设置为系统管理员。`);
-        } else {
-            alert(`已将 ${username} 保持为普通用户。`);
-        }
-    }
-
-    // 删除用户交互 (演示用)
-    function deleteUser(iconEl, username, isAdmin) {
-        if (isAdmin) {
-            alert("系统管理员账号不可删除！");
+    function renderUsers() {
+        const tbody = document.getElementById('users-table-body');
+        if (!users.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="color: #8A96A8;">暂无用户</td></tr>';
+            document.getElementById('users-count').textContent = '共 0 条记录';
             return;
         }
-        if (confirm(`确定要删除用户 [${username}] 吗？此操作不可恢复。`)) {
-            const row = iconEl.closest('tr');
-            if (row) {
-                row.remove();
-            }
-            alert("用户已删除。");
+
+        tbody.innerHTML = users.map(user => {
+            const bg = user.role === 'admin' ? '6F2656' : '4A90E2';
+            const roleBadge = user.role === 'admin'
+                ? '<span class="badge" style="background-color: var(--nankai-purple); padding: 6px 10px;">系统管理员</span>'
+                : '<span class="badge bg-secondary" style="padding: 6px 10px;">普通用户</span>';
+            const statusBadge = user.is_active
+                ? '<span class="badge bg-success" style="padding: 6px 10px;"><i class="fa-solid fa-circle-check me-1"></i>正常启用</span>'
+                : '<span class="badge bg-danger" style="padding: 6px 10px;"><i class="fa-solid fa-ban me-1"></i>已禁用</span>';
+            const nextRoleTitle = user.role === 'admin' ? '设为普通用户' : '设为管理员';
+            const nextStatusTitle = user.is_active ? '禁用账号' : '启用账号';
+
+            return `
+                <tr data-user-id="${user.id}">
+                    <td class="text-center">
+                        <input type="checkbox" class="form-check-input row-checkbox" value="${user.id}" ${user.id === currentUserId ? 'disabled' : ''}>
+                    </td>
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=${bg}&color=fff" alt="Avatar" style="width: 36px; border-radius: 50%; margin-right: 12px;">
+                            <span class="fw-bold text-white">${user.username}</span>
+                        </div>
+                    </td>
+                    <td style="color: #d1d5db;">${user.full_name || '-'}</td>
+                    <td>${roleBadge}</td>
+                    <td style="color: #8A96A8;">${user.created_at || '-'}</td>
+                    <td>${statusBadge}</td>
+                    <td class="text-center">
+                        <i class="fa-solid fa-circle-info action-icon info" title="查看详情" onclick="showUserDetail(${user.id})"></i>
+                        <i class="fa-solid fa-user-shield action-icon warning" title="${nextRoleTitle}" onclick="toggleUserRole(${user.id})"></i>
+                        <i class="fa-solid fa-key action-icon warning" title="重置密码" onclick="resetPassword(${user.id})"></i>
+                        <i class="fa-solid ${user.is_active ? 'fa-ban' : 'fa-circle-check'} action-icon warning" title="${nextStatusTitle}" onclick="toggleUserStatus(${user.id})"></i>
+                        <i class="fa-solid fa-trash action-icon danger" title="删除用户" onclick="deleteUser(${user.id})"></i>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        document.getElementById('users-count').textContent = `共 ${users.length} 条记录`;
+    }
+
+    async function loadUsers() {
+        const query = document.getElementById('user-search').value.trim();
+        const data = await requestJson(`/api/users${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+        users = data.users || [];
+        renderUsers();
+    }
+
+    function findUser(userId) {
+        return users.find(user => user.id === userId);
+    }
+
+    function showUserDetail(userId) {
+        const user = findUser(userId);
+        if (!user) return;
+        alert(`用户详情\n账号: ${user.username}\n姓名: ${user.full_name || '-'}\n邮箱: ${user.email || '-'}\n角色: ${roleLabel(user.role)}\n状态: ${user.is_active ? '正常启用' : '已禁用'}\n最后登录: ${user.last_login_at || '暂无记录'}`);
+    }
+
+    async function toggleUserRole(userId) {
+        const user = findUser(userId);
+        if (!user) return;
+        const nextRole = user.role === 'admin' ? 'user' : 'admin';
+        if (!confirm(`确定将 [${user.username}] 设置为${roleLabel(nextRole)}吗？`)) return;
+        try {
+            await requestJson(`/api/users/${userId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ role: nextRole }),
+            });
+            showAlert('用户角色已更新。');
+            await loadUsers();
+        } catch (error) {
+            showAlert(error.message, 'error');
         }
     }
+
+    async function toggleUserStatus(userId) {
+        const user = findUser(userId);
+        if (!user) return;
+        const nextActive = !user.is_active;
+        if (!confirm(`确定${nextActive ? '启用' : '禁用'}账号 [${user.username}] 吗？`)) return;
+        try {
+            await requestJson(`/api/users/${userId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ is_active: nextActive }),
+            });
+            showAlert('账号状态已更新。');
+            await loadUsers();
+        } catch (error) {
+            showAlert(error.message, 'error');
+        }
+    }
+
+    async function resetPassword(userId) {
+        const user = findUser(userId);
+        if (!user) return;
+        if (!confirm(`确定要将用户 [${user.username}] 的密码重置为系统默认密码吗？`)) return;
+        try {
+            const data = await requestJson(`/api/users/${userId}/reset-password`, {
+                method: 'POST',
+                body: JSON.stringify({}),
+            });
+            showAlert(`密码已重置为：${data.initial_password}`);
+        } catch (error) {
+            showAlert(error.message, 'error');
+        }
+    }
+
+    async function deleteUser(userId) {
+        const user = findUser(userId);
+        if (!user) return;
+        if (!confirm(`确定要删除用户 [${user.username}] 吗？此操作不可恢复。`)) return;
+        try {
+            await requestJson(`/api/users/${userId}`, { method: 'DELETE' });
+            showAlert('用户已删除。');
+            await loadUsers();
+        } catch (error) {
+            showAlert(error.message, 'error');
+        }
+    }
+
+    document.getElementById('add-user-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            const data = await requestJson('/api/users', {
+                method: 'POST',
+                body: JSON.stringify({
+                    username: document.getElementById('new-username').value,
+                    full_name: document.getElementById('new-full-name').value,
+                    email: document.getElementById('new-email').value,
+                    role: document.getElementById('new-role').value,
+                }),
+            });
+            event.target.reset();
+            addUserModal.hide();
+            showAlert(`用户已创建，初始密码：${data.initial_password}`);
+            await loadUsers();
+        } catch (error) {
+            showAlert(error.message, 'error');
+        }
+    });
+
+    document.getElementById('user-search').addEventListener('input', () => {
+        window.clearTimeout(window.userSearchTimer);
+        window.userSearchTimer = window.setTimeout(loadUsers, 250);
+    });
+
+    document.getElementById('select-all-users').addEventListener('change', (event) => {
+        document.querySelectorAll('.row-checkbox:not(:disabled)').forEach(checkbox => {
+            checkbox.checked = event.target.checked;
+        });
+    });
+
+    document.getElementById('bulk-disable-btn').addEventListener('click', async () => {
+        const selectedIds = [...document.querySelectorAll('.row-checkbox:checked')].map(el => Number(el.value));
+        if (!selectedIds.length) {
+            showAlert('请先选择需要禁用的用户。', 'error');
+            return;
+        }
+        if (!confirm(`确定禁用选中的 ${selectedIds.length} 个账号吗？`)) return;
+        try {
+            for (const id of selectedIds) {
+                await requestJson(`/api/users/${id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ is_active: false }),
+                });
+            }
+            document.getElementById('select-all-users').checked = false;
+            showAlert('已完成批量禁用。');
+            await loadUsers();
+        } catch (error) {
+            showAlert(error.message, 'error');
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        addUserModal = new bootstrap.Modal(document.getElementById('addUserModal'));
+        loadUsers().catch(error => showAlert(error.message, 'error'));
+    });
 </script>
 {% endblock %}

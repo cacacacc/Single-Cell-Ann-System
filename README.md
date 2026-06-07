@@ -24,11 +24,20 @@ conda install -c conda-forge faiss-cpu
 ```bash
 python app.py
 ```
-5. 打开前端页面进行检索，默认服务地址：
+5. 打开前端页面并登录系统，默认服务地址：
 
 ```text
 http://127.0.0.1:5000
 ```
+
+开发默认管理员账号：
+
+```text
+账号：admin
+密码：Admin@123456
+```
+
+首次运行会自动在 `data/users.sqlite3` 中创建用户表和默认管理员。正式部署前请通过环境变量修改 `SECRET_KEY`、`DEFAULT_ADMIN_USERNAME`、`DEFAULT_ADMIN_PASSWORD`，并及时修改默认密码。
 
 
 ## 核心功能
@@ -72,6 +81,15 @@ http://127.0.0.1:5000
 - 使用表格展示相似细胞结果
 - 可扩展使用 ECharts 展示散点图或简单可视化结果
 
+### 6. 用户信息模块
+
+- 支持账号密码注册、登录、退出和会话保持
+- 密码使用 Werkzeug 哈希存储，用户数据默认持久化到 SQLite
+- 登录用户可以查看可视化系统、相似检索、数据集列表、性能评测和个人信息
+- 普通用户可以修改个人资料和登录密码
+- 管理员可以查看用户列表、添加用户、调整角色、启用/禁用账号、重置密码和删除用户
+- 管理员权限保护数据上传、数据删除、索引构建和索引删除等系统管理操作
+
 ## 项目结构
 
 ```text
@@ -79,9 +97,11 @@ http://127.0.0.1:5000
 ├── app.py                    # Flask Web 服务主入口
 ├── backend/
 │   ├── data_reader.py        # 数据读取与向量提取模块
-│   └── ann_indexer.py        # ANN 索引构建与检索模块
+│   ├── ann_indexer.py        # ANN 索引构建与检索模块
+│   └── user_store.py         # 用户注册、登录、权限与 SQLite 持久化模块
 ├── data/
-│   └── liver.h5ad            # 示例单细胞数据文件
+│   ├── liver.h5ad            # 示例单细胞数据文件
+│   └── users.sqlite3         # 自动生成的用户数据库
 ├── docs/
 │   └── 项目说明.md           # 详细说明文档
 ├── static/                   # 静态资源（如 CSS）

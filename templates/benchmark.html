@@ -52,6 +52,11 @@
         font-family: monospace;
         font-size: 1.1rem;
     }
+    .field-hint {
+        color: #A0AABF;
+        font-size: 0.85rem;
+        line-height: 1.5;
+    }
 </style>
 
 <div class="search-layout">
@@ -98,7 +103,7 @@
                 <div class="mb-4">
                     <label class="form-label">随机抽样查询次数</label>
                     <input type="number" class="form-control dark-control" id="queryCount" value="500" min="10" max="5000">
-                    <small class="text-muted mt-1 d-block">系统将随机抽取这些数量的细胞进行查询跑分。</small>
+                    <small class="field-hint mt-1 d-block">系统将随机抽取这些数量的细胞进行查询跑分。</small>
                 </div>
 
                 <div class="mb-5">
