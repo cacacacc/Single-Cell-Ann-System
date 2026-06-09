@@ -9,6 +9,14 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
+# 自动加载项目根目录的 .env 文件（Windows/Mac/Linux 通用）
+# 需安装：pip install python-dotenv
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+except ImportError:
+    pass  # python-dotenv 未安装时跳过，不影响正常运行
+
 import numpy as np
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from flask_cors import CORS
@@ -21,6 +29,12 @@ from backend.vector_store import (
     get_or_create_store,
     is_chroma_available,
     DEFAULT_CHROMA_DIR,
+)
+from backend.llm_client import LLMClient, get_llm_client, reset_llm_client
+from backend.rag_engine import (
+    RAGEngine,
+    get_or_create_engine,
+    _CHAT_HISTORY,
 )
 from backend.user_store import (
     AuthenticationError,
@@ -1842,6 +1856,194 @@ def vectordb_delete_collection():
         )
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
+
+
+# ============================================================
+# RAG 大模型问答 API — 任务 3.3
+# ============================================================
+
+@app.post("/api/chat")
+@login_required
+def chat_api():
+    """RAG 问答核心接口：自然语言 → 向量检索 → LLM 生成回答。
+
+    Request JSON
+    -----------
+    question : str
+        用户的自然语言问题（必填）。
+    dataset_id : str, optional
+        数据集 ID，省略时使用默认数据集。
+    cell_index : int, optional
+        使用指定细胞的向量作为查询向量（与 cell_id 二选一）。
+        若不提供则尝试调用 Embedding API 将问题转为向量。
+    cell_id : str, optional
+        使用指定细胞的向量作为查询向量（与 cell_index 二选一）。
+    use_rep : str, optional
+        向量表示键，默认 X_pca。
+    n_results : int, optional
+        检索细胞数量，默认 5。
+    session_id : str, optional
+        会话 ID，提供时启用多轮对话（历史上下文自动注入 Prompt）。
+    where : dict, optional
+        ChromaDB 元数据过滤条件。
+
+    Response JSON
+    ------------
+    answer : str            大模型生成的回答
+    retrieved_cells : list  检索到的相似细胞列表
+    context_used : str      喂给大模型的上下文（调试用）
+    elapsed_ms : float      总耗时
+    retrieve_ms : float     向量检索耗时
+    llm_ms : float          LLM 生成耗时
+    session_id : str        当前会话 ID
+    model : str             使用的模型名称
+    """
+    if not is_chroma_available():
+        return _json_response({"error": "chromadb 未安装，向量数据库不可用"}, 501)
+
+    try:
+        payload = _request_payload()
+        question = str(payload.get("question") or "").strip()
+        if not question:
+            return _json_response({"error": "question 不能为空"}, 400)
+
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        use_rep = str(payload.get("use_rep") or "X_pca")
+        n_results = int(payload.get("n_results") or 5)
+        session_id = str(payload.get("session_id") or "").strip() or None
+        where = payload.get("where") or None
+
+        # 获取向量数据库
+        collection_name = _chroma_collection_name(resolved_id)
+        store = get_or_create_store(
+            collection_name=collection_name,
+            persist_dir=CHROMA_DIR,
+        )
+        if not store.is_populated():
+            return _json_response(
+                {
+                    "error": "向量数据库尚未初始化，请先调用 POST /api/vectordb/init",
+                    "action": "init_vectordb",
+                },
+                400,
+            )
+
+        # 构建数据集背景信息（注入 system prompt）
+        loader = _get_loader(resolved_id, dataset_path)
+        dataset_info = (
+            f"数据集 ID：{resolved_id}，"
+            f"细胞总数：{loader.n_cells}，"
+            f"基因数：{loader.n_genes}，"
+            f"使用向量表示：{use_rep}"
+        )
+
+        # 获取 RAG 引擎
+        engine = get_or_create_engine(
+            vector_store=store,
+            dataset_id=resolved_id,
+            dataset_info=dataset_info,
+            n_results=n_results,
+        )
+
+        # 解析查询向量（可选，不提供则由引擎调用 Embedding API）
+        query_vector = None
+        cell_index_value = payload.get("cell_index")
+        cell_id_value = payload.get("cell_id")
+        if cell_index_value is not None and cell_index_value != "":
+            cell_index = int(cell_index_value)
+            actual_rep = use_rep if use_rep in loader.available_reps else "X_pca"
+            if actual_rep not in loader.available_reps:
+                actual_rep = "X"
+            query_vector = loader.get_vector(cell_index, use_rep=actual_rep).tolist()
+        elif cell_id_value is not None and str(cell_id_value).strip():
+            cell_index = loader.cell_index_from_id(str(cell_id_value))
+            actual_rep = use_rep if use_rep in loader.available_reps else "X_pca"
+            if actual_rep not in loader.available_reps:
+                actual_rep = "X"
+            query_vector = loader.get_vector(cell_index, use_rep=actual_rep).tolist()
+
+        # 执行 RAG
+        result = engine.ask(
+            question=question,
+            query_vector=query_vector,
+            session_id=session_id,
+            n_results=n_results,
+            where_filter=where,
+        )
+
+        return _json_response(result)
+
+    except ValueError as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, 503)
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 500)
+
+
+@app.get("/api/chat/history")
+@login_required
+def chat_history_api():
+    """获取指定会话的对话历史。
+
+    Query Params
+    -----------
+    session_id : str  （必填）
+    """
+    session_id = request.args.get("session_id", "").strip()
+    if not session_id:
+        return _json_response({"error": "session_id 不能为空"}, 400)
+    history = _CHAT_HISTORY.get(session_id)
+    return _json_response({"session_id": session_id, "history": history, "rounds": len(history) // 2})
+
+
+@app.delete("/api/chat/history")
+@login_required
+def clear_chat_history_api():
+    """清空指定会话的对话历史。
+
+    Query Params
+    -----------
+    session_id : str  （必填）
+    """
+    session_id = request.args.get("session_id", "").strip()
+    if not session_id:
+        return _json_response({"error": "session_id 不能为空"}, 400)
+    _CHAT_HISTORY.clear(session_id)
+    return _json_response({"status": "cleared", "session_id": session_id})
+
+
+@app.get("/api/llm/info")
+@login_required
+def llm_info_api():
+    """返回当前 LLM 客户端配置信息（不含 API Key 明文）。
+
+    可用于前端判断 AI 功能是否已配置，以及使用的是哪个大模型。
+    """
+    client = get_llm_client()
+    return _json_response(client.get_info())
+
+
+@app.post("/api/llm/ping")
+@login_required
+def llm_ping_api():
+    """向大模型发送测试请求，验证 API Key 和网络连通性。
+
+    Response JSON
+    ------------
+    ok : bool           是否连通
+    provider : str      厂商名称
+    model : str         模型名称
+    reply : str         模型回复（连通时）
+    elapsed_ms : float  耗时
+    error : str         错误信息（失败时）
+    """
+    client = get_llm_client()
+    result = client.ping()
+    status = 200 if result["ok"] else 503
+    return _json_response(result, status)
 
 
 @app.get("/api/benchmark/history")

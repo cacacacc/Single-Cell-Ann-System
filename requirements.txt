@@ -1,5 +1,6 @@
 Flask>=3.0
 flask-cors>=4.0
+python-dotenv>=1.0       # 从 .env 文件自动加载环境变量（Windows/Mac/Linux 通用）
 numpy>=1.24
 pandas>=2.0
 anndata>=0.10
@@ -10,3 +11,6 @@ faiss-cpu>=1.7.4; platform_system != "Windows"
 hnswlib>=0.8.0; platform_python_implementation == "CPython"
 # 任务 3.1 — 向量数据库（ChromaDB 轻量级持久化方案）
 chromadb>=0.5.0
+# 任务 3.3 — 大模型 API（二选一安装，推荐智谱 GLM）
+zhipuai>=2.1.0          # 智谱 GLM（推荐，国内访问稳定，有免费额度）
+openai>=1.0.0           # OpenAI / DeepSeek / 阿里通义等兼容接口
