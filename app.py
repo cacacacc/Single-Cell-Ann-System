@@ -16,6 +16,12 @@ from werkzeug.utils import secure_filename
 
 from backend.ann_indexer import ANNIndexer, IndexConfig
 from backend.data_reader import DataLoader
+from backend.vector_store import (
+    CellVectorStore,
+    get_or_create_store,
+    is_chroma_available,
+    DEFAULT_CHROMA_DIR,
+)
 from backend.user_store import (
     AuthenticationError,
     DuplicateUserError,
@@ -27,6 +33,7 @@ from backend.user_store import (
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 INDEX_DIR = BASE_DIR / "indexes"
+CHROMA_DIR = BASE_DIR / DEFAULT_CHROMA_DIR
 
 DEFAULT_DATA_PATH = "data/liver.h5ad"
 DEFAULT_USE_REP = "X_pca"
@@ -851,6 +858,13 @@ def api_root():
                 "/api/users",
             ],
             "datasets": "/api/datasets",
+            "vectordb": {
+                "init": "POST /api/vectordb/init",
+                "status": "GET /api/vectordb/status",
+                "query": "POST /api/vectordb/query",
+                "delete": "DELETE /api/vectordb/collection",
+                "chroma_available": is_chroma_available(),
+            },
         }
     )
 
@@ -1568,6 +1582,266 @@ def benchmark_api():
         return _json_response({"error": str(exc)}, 400)
     except RuntimeError as exc:
         return _json_response({"error": str(exc)}, 503)
+
+
+# ============================================================
+# 向量数据库 (ChromaDB) API — 任务 3.1
+# ============================================================
+
+def _chroma_collection_name(dataset_id: str) -> str:
+    """将 dataset_id 映射为合法的 ChromaDB Collection 名称。"""
+    # ChromaDB collection 名称只允许 [a-zA-Z0-9_-]，且长度 3~63
+    import re
+    name = re.sub(r"[^a-zA-Z0-9_-]", "_", str(dataset_id))
+    if len(name) < 3:
+        name = name + "_db"
+    return name[:63]
+
+
+@app.post("/api/vectordb/init")
+@login_required
+def vectordb_init():
+    """初始化向量数据库：将指定数据集的细胞向量写入 ChromaDB Collection。
+
+    Request JSON
+    -----------
+    dataset_id : str, optional
+        目标数据集 ID，省略时使用默认数据集。
+    use_rep : str, optional
+        向量表示键（默认 X_pca）。
+    distance_metric : str, optional
+        距离度量：cosine / l2 / ip（默认 cosine）。
+    force : bool, optional
+        是否强制重写（默认 false，已有数据时跳过）。
+    top_genes : int, optional
+        元数据中记录高表达基因数（默认 20）。
+
+    Response JSON
+    ------------
+    status : "initialized" | "skipped"
+    collection_name : str
+    count : int
+    elapsed_ms : float
+    """
+    if not is_chroma_available():
+        return _json_response(
+            {"error": "chromadb 未安装，请执行: pip install chromadb"},
+            501,
+        )
+    try:
+        payload = _request_payload()
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        use_rep = str(payload.get("use_rep") or "X_pca")
+        distance_metric = str(payload.get("distance_metric") or "cosine")
+        force = bool(payload.get("force", False))
+        top_genes = int(payload.get("top_genes") or 20)
+
+        collection_name = _chroma_collection_name(resolved_id)
+        store = get_or_create_store(
+            collection_name=collection_name,
+            persist_dir=CHROMA_DIR,
+            distance_metric=distance_metric,
+        )
+
+        if store.is_populated() and not force:
+            return _json_response(
+                {
+                    "status": "skipped",
+                    "message": "Collection 已存在数据，传入 force=true 可强制重写",
+                    "collection_name": collection_name,
+                    "count": store.count(),
+                }
+            )
+
+        loader = _get_loader(resolved_id, dataset_path)
+        t0 = time.perf_counter()
+        count = store.populate_from_loader(
+            loader=loader,
+            use_rep=use_rep,
+            force=force,
+            top_genes=top_genes,
+        )
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+
+        return _json_response(
+            {
+                "status": "initialized",
+                "dataset_id": resolved_id,
+                "collection_name": collection_name,
+                "use_rep": use_rep,
+                "distance_metric": distance_metric,
+                "count": count,
+                "elapsed_ms": elapsed_ms,
+            },
+            201,
+        )
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
+@app.get("/api/vectordb/status")
+@login_required
+def vectordb_status():
+    """查询向量数据库状态。
+
+    Query Params
+    -----------
+    dataset_id : str, optional
+
+    Response JSON
+    ------------
+    chroma_available : bool
+    persist_dir : str
+    collection_name : str
+    count : int
+    is_populated : bool
+    distance_metric : str
+    """
+    if not is_chroma_available():
+        return _json_response(
+            {
+                "chroma_available": False,
+                "error": "chromadb 未安装",
+            }
+        )
+    try:
+        payload = dict(request.args)
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        collection_name = _chroma_collection_name(resolved_id)
+        store = get_or_create_store(
+            collection_name=collection_name,
+            persist_dir=CHROMA_DIR,
+        )
+        return _json_response(store.get_collection_info())
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
+@app.post("/api/vectordb/query")
+@login_required
+def vectordb_query():
+    """向量相似检索接口（直接操作 ChromaDB）。
+
+    与 /api/search 不同，本接口使用 ChromaDB 的 HNSW 索引执行检索，
+    并在结果中附带高表达基因列表和文档文本，便于后续 RAG Prompt 组装。
+
+    Request JSON
+    -----------
+    dataset_id : str, optional
+    cell_index : int      查询细胞的整数索引（与 cell_id 二选一）
+    cell_id : str         查询细胞的字符串 ID
+    n_results : int, optional  返回结果数（默认 10）
+    use_rep : str, optional    向量表示（默认 X_pca）
+    where : dict, optional     ChromaDB 元数据过滤条件
+
+    Response JSON
+    ------------
+    results : list
+        每条包含 rank / cell_id / cell_type / distance / top_genes / document
+    """
+    if not is_chroma_available():
+        return _json_response({"error": "chromadb 未安装"}, 501)
+    try:
+        payload = _request_payload()
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        use_rep = str(payload.get("use_rep") or "X_pca")
+        n_results = int(payload.get("n_results") or 10)
+        where = payload.get("where") or None
+
+        collection_name = _chroma_collection_name(resolved_id)
+        store = get_or_create_store(
+            collection_name=collection_name,
+            persist_dir=CHROMA_DIR,
+        )
+        if not store.is_populated():
+            return _json_response(
+                {
+                    "error": "向量数据库尚未初始化，请先调用 POST /api/vectordb/init",
+                    "action": "init_vectordb",
+                },
+                400,
+            )
+
+        loader = _get_loader(resolved_id, dataset_path)
+
+        # 解析查询细胞
+        cell_index_value = payload.get("cell_index")
+        cell_id_value = payload.get("cell_id")
+        if cell_index_value is None or cell_index_value == "":
+            if cell_id_value is None or str(cell_id_value).strip() == "":
+                raise ValueError("cell_index 或 cell_id 必须提供其中之一")
+            cell_index = loader.cell_index_from_id(str(cell_id_value))
+        else:
+            cell_index = int(cell_index_value)
+
+        # 解析向量表示（需与写入时一致）
+        actual_rep = use_rep if use_rep in loader.available_reps else "X_pca"
+        if actual_rep not in loader.available_reps:
+            actual_rep = "X"
+        query_vector = loader.get_vector(cell_index, use_rep=actual_rep)
+
+        t0 = time.perf_counter()
+        results = store.query_similar(
+            query_vector=query_vector,
+            n_results=n_results,
+            where=where,
+        )
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+
+        return _json_response(
+            {
+                "dataset_id": resolved_id,
+                "query_cell_index": cell_index,
+                "n_results": n_results,
+                "use_rep": actual_rep,
+                "elapsed_ms": elapsed_ms,
+                "results": results,
+            }
+        )
+    except (TypeError, ValueError, KeyError, IndexError) as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, 503)
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 500)
+
+
+@app.delete("/api/vectordb/collection")
+@admin_required
+def vectordb_delete_collection():
+    """清空指定数据集的 ChromaDB Collection（需要管理员权限）。
+
+    Query Params
+    -----------
+    dataset_id : str, optional
+    """
+    if not is_chroma_available():
+        return _json_response({"error": "chromadb 未安装"}, 501)
+    try:
+        payload = dict(request.args)
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        collection_name = _chroma_collection_name(resolved_id)
+        store = get_or_create_store(
+            collection_name=collection_name,
+            persist_dir=CHROMA_DIR,
+        )
+        store.delete_collection()
+        return _json_response(
+            {
+                "status": "deleted",
+                "collection_name": collection_name,
+            }
+        )
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
 
 
 @app.get("/api/benchmark/history")

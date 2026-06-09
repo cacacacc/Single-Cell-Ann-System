@@ -8,3 +8,5 @@ scanpy>=1.10
 faiss-cpu>=1.7.4; platform_system != "Windows"
 # 可选：启用 HNSWLIB（CPython）
 hnswlib>=0.8.0; platform_python_implementation == "CPython"
+# 任务 3.1 — 向量数据库（ChromaDB 轻量级持久化方案）
+chromadb>=0.5.0
