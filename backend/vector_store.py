@@ -195,7 +195,10 @@ class CellVectorStore:
             self._client.delete_collection(self._collection_name)
             self._collection = self._client.get_or_create_collection(
                 name=self._collection_name,
-                metadata={"hnsw:space": self._distance_metric},
+                metadata={
+                    "hnsw:space": self._distance_metric,
+                    "use_rep": str(use_rep or "X_pca"),
+                },
             )
 
         # ------ 确定向量表示 ------
@@ -222,7 +225,8 @@ class CellVectorStore:
         )
 
         total_written = 0
-        for batch_start in range(0, n_cells, batch_size):
+        n_batches = (n_cells + batch_size - 1) // batch_size
+        for batch_idx, batch_start in enumerate(range(0, n_cells, batch_size)):
             batch_end = min(batch_start + batch_size, n_cells)
             batch_vectors = vectors[batch_start:batch_end]
 
@@ -263,7 +267,6 @@ class CellVectorStore:
                     meta["top_genes"] = ""
 
                 # ChromaDB document 字段（可作为文本内容用于混合检索）
-                cell_type = cell_info.get("cell_type", "unknown")
                 doc_text = self._build_document_text(cell_info, meta.get("top_genes", ""))
 
                 ids.append(cell_id)
@@ -278,14 +281,17 @@ class CellVectorStore:
                 documents=documents,
             )
             total_written += len(ids)
-            logger.debug(
-                "  已写入 %d / %d 个细胞...", total_written, n_cells
+            pct = round(total_written / n_cells * 100)
+            logger.info(
+                "  批次 %d/%d — 已写入 %d / %d 个细胞（%d%%）",
+                batch_idx + 1, n_batches, total_written, n_cells, pct,
             )
 
         logger.info(
-            "写入完成：共 %d 个细胞写入 Collection '%s'",
+            "写入完成：共 %d 个细胞写入 Collection '%s'（use_rep=%s）",
             total_written,
             self._collection_name,
+            actual_rep,
         )
         return total_written
 
@@ -398,6 +404,13 @@ class CellVectorStore:
 
     def get_collection_info(self) -> Dict[str, Any]:
         """返回 Collection 的基础信息，用于状态接口。"""
+        # 尝试从 Collection 元数据中读取写入时记录的 use_rep
+        try:
+            col_meta = self._collection.metadata or {}
+            use_rep_recorded = col_meta.get("use_rep", "unknown")
+        except Exception:
+            use_rep_recorded = "unknown"
+
         return {
             "collection_name": self._collection_name,
             "persist_dir": str(self._persist_dir),
@@ -405,6 +418,7 @@ class CellVectorStore:
             "count": self.count(),
             "is_populated": self.is_populated(),
             "chroma_available": _CHROMA_AVAILABLE,
+            "use_rep": use_rep_recorded,
         }
 
     def delete_collection(self) -> None:

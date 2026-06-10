@@ -18,7 +18,7 @@ except ImportError:
     pass  # python-dotenv 未安装时跳过，不影响正常运行
 
 import numpy as np
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -1612,6 +1612,96 @@ def _chroma_collection_name(dataset_id: str) -> str:
     return name[:63]
 
 
+def _build_dataset_info(loader: Any, dataset_id: str, use_rep: str) -> str:
+    """构建注入 system prompt 的数据集背景信息字符串。
+
+    自动从 DataLoader 中提取基础统计（细胞数、基因数）以及细胞类型分布，
+    让 LLM 具备数据集全局视角，回答更准确。
+
+    Parameters
+    ----------
+    loader:
+        DataLoader 实例。
+    dataset_id:
+        数据集 ID（用于显示）。
+    use_rep:
+        当前使用的向量表示。
+
+    Returns
+    -------
+    str
+        可直接作为 ``extra_system_info`` 传给 PromptBuilder 的字符串。
+    """
+    lines = [
+        f"数据集 ID：{dataset_id}",
+        f"细胞总数：{loader.n_cells}",
+        f"基因数：{loader.n_genes}",
+        f"使用向量表示：{use_rep}",
+    ]
+
+    # 尝试提取细胞类型分布
+    try:
+        adata = loader.adata
+        ct_col = None
+        for candidate in ("cell_type", "celltype", "cell_ontology_class", "leiden", "louvain"):
+            if candidate in adata.obs.columns:
+                ct_col = candidate
+                break
+
+        if ct_col:
+            counts = adata.obs[ct_col].value_counts()
+            top_n = 8  # 只显示前 8 种，避免信息过长
+            parts = [f"{ct}（{n}个）" for ct, n in counts.head(top_n).items()]
+            if len(counts) > top_n:
+                parts.append(f"...等共 {len(counts)} 种")
+            lines.append(f"细胞类型分布（{ct_col}）：" + "、".join(parts))
+    except Exception:
+        pass  # 提取失败时静默跳过，不影响主流程
+
+    return "，".join(lines)
+
+
+def _resolve_query_vector(
+    payload: Dict[str, Any],
+    loader: Any,
+    use_rep: str,
+) -> Optional[List[float]]:
+    """从请求参数中解析查询向量。
+
+    优先级：cell_index > cell_id > None（由 RAG 引擎或调用方处理 None 情况）。
+
+    Parameters
+    ----------
+    payload:
+        请求参数字典（来自 JSON body 或 query string）。
+    loader:
+        DataLoader 实例，用于获取细胞向量。
+    use_rep:
+        向量表示键（如 "X_pca"）；若不可用则自动回退。
+
+    Returns
+    -------
+    List[float] | None
+        查询向量；未提供 cell_index/cell_id 时返回 None。
+    """
+    cell_index_value = payload.get("cell_index")
+    cell_id_value = payload.get("cell_id")
+
+    cell_index = None
+    if cell_index_value is not None and cell_index_value != "":
+        cell_index = int(cell_index_value)
+    elif cell_id_value is not None and str(cell_id_value).strip():
+        cell_index = loader.cell_index_from_id(str(cell_id_value))
+
+    if cell_index is None:
+        return None
+
+    actual_rep = use_rep if use_rep in loader.available_reps else "X_pca"
+    if actual_rep not in loader.available_reps:
+        actual_rep = "X"
+    return loader.get_vector(cell_index, use_rep=actual_rep).tolist()
+
+
 @app.post("/api/vectordb/init")
 @login_required
 def vectordb_init():
@@ -1784,21 +1874,10 @@ def vectordb_query():
 
         loader = _get_loader(resolved_id, dataset_path)
 
-        # 解析查询细胞
-        cell_index_value = payload.get("cell_index")
-        cell_id_value = payload.get("cell_id")
-        if cell_index_value is None or cell_index_value == "":
-            if cell_id_value is None or str(cell_id_value).strip() == "":
-                raise ValueError("cell_index 或 cell_id 必须提供其中之一")
-            cell_index = loader.cell_index_from_id(str(cell_id_value))
-        else:
-            cell_index = int(cell_index_value)
-
-        # 解析向量表示（需与写入时一致）
-        actual_rep = use_rep if use_rep in loader.available_reps else "X_pca"
-        if actual_rep not in loader.available_reps:
-            actual_rep = "X"
-        query_vector = loader.get_vector(cell_index, use_rep=actual_rep)
+        # 解析查询向量（cell_index / cell_id 必须提供其一）
+        query_vector = _resolve_query_vector(payload, loader, use_rep)
+        if query_vector is None:
+            raise ValueError("cell_index 或 cell_id 必须提供其中之一")
 
         t0 = time.perf_counter()
         results = store.query_similar(
@@ -1811,9 +1890,8 @@ def vectordb_query():
         return _json_response(
             {
                 "dataset_id": resolved_id,
-                "query_cell_index": cell_index,
                 "n_results": n_results,
-                "use_rep": actual_rep,
+                "use_rep": use_rep,
                 "elapsed_ms": elapsed_ms,
                 "results": results,
             }
@@ -1932,12 +2010,7 @@ def chat_api():
 
         # 构建数据集背景信息（注入 system prompt）
         loader = _get_loader(resolved_id, dataset_path)
-        dataset_info = (
-            f"数据集 ID：{resolved_id}，"
-            f"细胞总数：{loader.n_cells}，"
-            f"基因数：{loader.n_genes}，"
-            f"使用向量表示：{use_rep}"
-        )
+        dataset_info = _build_dataset_info(loader, resolved_id, use_rep)
 
         # 获取 RAG 引擎
         engine = get_or_create_engine(
@@ -1948,21 +2021,7 @@ def chat_api():
         )
 
         # 解析查询向量（可选，不提供则由引擎调用 Embedding API）
-        query_vector = None
-        cell_index_value = payload.get("cell_index")
-        cell_id_value = payload.get("cell_id")
-        if cell_index_value is not None and cell_index_value != "":
-            cell_index = int(cell_index_value)
-            actual_rep = use_rep if use_rep in loader.available_reps else "X_pca"
-            if actual_rep not in loader.available_reps:
-                actual_rep = "X"
-            query_vector = loader.get_vector(cell_index, use_rep=actual_rep).tolist()
-        elif cell_id_value is not None and str(cell_id_value).strip():
-            cell_index = loader.cell_index_from_id(str(cell_id_value))
-            actual_rep = use_rep if use_rep in loader.available_reps else "X_pca"
-            if actual_rep not in loader.available_reps:
-                actual_rep = "X"
-            query_vector = loader.get_vector(cell_index, use_rep=actual_rep).tolist()
+        query_vector = _resolve_query_vector(payload, loader, use_rep)
 
         # 执行 RAG
         result = engine.ask(
@@ -1974,6 +2033,130 @@ def chat_api():
         )
 
         return _json_response(result)
+
+    except ValueError as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, 503)
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 500)
+
+
+@app.post("/api/chat/stream")
+@login_required
+def chat_stream_api():
+    """RAG 问答流式接口（SSE）：逐字返回大模型回答，前端可实时显示。
+
+    与 /api/chat 参数相同，区别在于响应格式为 text/event-stream。
+    每个 SSE 事件格式：
+        data: <文本片段>\\n\\n
+    流结束时发送：
+        data: [DONE]\\n\\n
+
+    Request JSON
+    -----------
+    question : str         用户问题（必填）
+    dataset_id : str       数据集 ID（可选）
+    cell_index : int       查询细胞索引（可选）
+    cell_id : str          查询细胞 ID（可选）
+    use_rep : str          向量表示（默认 X_pca）
+    n_results : int        检索细胞数（默认 5）
+    session_id : str       会话 ID（可选，启用多轮对话）
+    where : dict           元数据过滤条件（可选）
+    """
+    if not is_chroma_available():
+        return _json_response({"error": "chromadb 未安装，向量数据库不可用"}, 501)
+
+    try:
+        payload = _request_payload()
+        question = str(payload.get("question") or "").strip()
+        if not question:
+            return _json_response({"error": "question 不能为空"}, 400)
+
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        use_rep = str(payload.get("use_rep") or "X_pca")
+        n_results = int(payload.get("n_results") or 5)
+        session_id = str(payload.get("session_id") or "").strip() or None
+        where = payload.get("where") or None
+
+        # 获取向量数据库
+        collection_name = _chroma_collection_name(resolved_id)
+        store = get_or_create_store(
+            collection_name=collection_name,
+            persist_dir=CHROMA_DIR,
+        )
+        if not store.is_populated():
+            return _json_response(
+                {
+                    "error": "向量数据库尚未初始化，请先调用 POST /api/vectordb/init",
+                    "action": "init_vectordb",
+                },
+                400,
+            )
+
+        # 解析查询向量
+        loader = _get_loader(resolved_id, dataset_path)
+        query_vector = _resolve_query_vector(payload, loader, use_rep)
+
+        # 构建 Prompt messages（复用 RAG 引擎的检索 + 组装逻辑）
+        engine = get_or_create_engine(
+            vector_store=store,
+            dataset_id=resolved_id,
+            dataset_info=_build_dataset_info(loader, resolved_id, use_rep),
+            n_results=n_results,
+        )
+
+        # 向量检索 + Prompt 组装
+
+        retrieved = store.query_similar(
+            query_vector=query_vector,
+            n_results=n_results,
+            where=where,
+        )
+        history = _CHAT_HISTORY.get(session_id) if session_id else None
+        builder = engine._builder  # type: ignore[attr-defined]
+        if history:
+            messages = builder.build_messages_with_history(
+                user_question=question,
+                retrieved_cells=retrieved,
+                history=history,
+                extra_system_info=engine._dataset_info,  # type: ignore[attr-defined]
+            )
+        else:
+            messages = builder.build_messages(
+                user_question=question,
+                retrieved_cells=retrieved,
+                extra_system_info=engine._dataset_info,  # type: ignore[attr-defined]
+            )
+
+        llm_client = get_llm_client()
+
+        # SSE 生成器
+        def generate():
+            full_text_parts = []
+            try:
+                for chunk in llm_client.stream_chat(messages=messages):
+                    full_text_parts.append(chunk)
+                    # SSE 格式：data: <内容>\n\n
+                    yield f"data: {chunk}\n\n"
+            except Exception as exc:
+                yield f"data: [ERROR] {exc}\n\n"
+                return
+            # 流结束后保存历史
+            if session_id and full_text_parts:
+                _CHAT_HISTORY.append(session_id, question, "".join(full_text_parts))
+            yield "data: [DONE]\n\n"
+
+        return Response(
+            stream_with_context(generate()),
+            content_type="text/event-stream; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲，确保实时推送
+            },
+        )
 
     except ValueError as exc:
         return _json_response({"error": str(exc)}, 400)

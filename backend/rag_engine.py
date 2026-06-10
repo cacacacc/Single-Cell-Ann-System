@@ -199,9 +199,12 @@ class RAGEngine:
 
         if query_vector is None:
             raise ValueError(
-                "未提供 query_vector，且 Embedding API 调用失败或未配置。"
-                "请传入 query_vector 参数（使用细胞向量作为查询），"
-                "或配置 ZHIPU_API_KEY / OPENAI_API_KEY 启用文本向量化。"
+                "未提供 query_vector，且 Embedding API 调用失败或未配置。\n"
+                "解决方案（二选一）：\n"
+                "  ① 在请求中传入 cell_index 或 cell_id 参数，用该细胞向量作为查询；\n"
+                "  ② 在 .env 中配置 ZHIPU_API_KEY（推荐：智谱 GLM embedding-3）"
+                "或 OPENAI_API_KEY，启用文本向量化。\n"
+                "参考文档：docs/后端-RAG开发/rag_module_usage.md"
             )
 
         # ── ② 向量检索 ───────────────────────────────────────

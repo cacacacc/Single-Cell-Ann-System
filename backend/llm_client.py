@@ -171,9 +171,8 @@ class LLMClient:
         model: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
-        stream: bool = False,
     ) -> str:
-        """调用 Chat Completion API，返回模型回复文本。
+        """调用 Chat Completion API，返回完整回复文本（非流式）。
 
         Parameters
         ----------
@@ -190,8 +189,6 @@ class LLMClient:
             覆盖默认最大生成 token 数。
         temperature:
             覆盖默认生成温度。
-        stream:
-            是否使用流式输出（当前返回完整文本，流式由上层处理）。
 
         Returns
         -------
@@ -217,25 +214,12 @@ class LLMClient:
 
         t0 = time.perf_counter()
         try:
-            if self._provider == "zhipu":
-                response = client.chat.completions.create(
-                    model=use_model,
-                    messages=messages,
-                    max_tokens=use_max_tokens,
-                    temperature=use_temperature,
-                    stream=stream,
-                )
-            else:
-                # OpenAI 兼容格式（DeepSeek / Qwen / 月之暗面等均支持）
-                kwargs: Dict[str, Any] = dict(
-                    model=use_model,
-                    messages=messages,
-                    max_tokens=use_max_tokens,
-                    temperature=use_temperature,
-                )
-                if stream:
-                    kwargs["stream"] = True
-                response = client.chat.completions.create(**kwargs)
+            response = client.chat.completions.create(
+                model=use_model,
+                messages=messages,
+                max_tokens=use_max_tokens,
+                temperature=use_temperature,
+            )
 
             elapsed = round((time.perf_counter() - t0) * 1000, 1)
             text = response.choices[0].message.content or ""
@@ -250,6 +234,71 @@ class LLMClient:
             elapsed = round((time.perf_counter() - t0) * 1000, 1)
             logger.error("LLM chat 失败 (%.0fms): %s", elapsed, exc)
             raise RuntimeError(f"大模型调用失败：{exc}") from exc
+
+    def stream_chat(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ):
+        """调用 Chat Completion API 流式版本，以生成器方式逐块 yield 文本片段。
+
+        前端使用 SSE（Server-Sent Events）接收时，逐字显示更流畅。
+
+        Parameters
+        ----------
+        messages:
+            OpenAI 格式的消息列表。
+        model / max_tokens / temperature:
+            同 ``chat()``，可覆盖默认值。
+
+        Yields
+        ------
+        str
+            每次 yield 一个文本片段（delta），空片段会被跳过。
+
+        Raises
+        ------
+        RuntimeError
+            SDK 未安装或流式调用失败时抛出。
+
+        Usage
+        -----
+            for chunk in client.stream_chat(messages):
+                print(chunk, end="", flush=True)
+        """
+        if not self.is_available:
+            raise RuntimeError(
+                f"SDK '{self._provider}' 未安装，请执行: "
+                + ("pip install zhipuai" if self._provider == "zhipu" else "pip install openai")
+            )
+
+        use_model = model or self._model
+        use_max_tokens = max_tokens or self._max_tokens
+        use_temperature = temperature if temperature is not None else self._temperature
+
+        client = self._get_client()
+
+        try:
+            response = client.chat.completions.create(
+                model=use_model,
+                messages=messages,
+                max_tokens=use_max_tokens,
+                temperature=use_temperature,
+                stream=True,
+            )
+            for chunk in response:
+                choices = getattr(chunk, "choices", None)
+                if not choices:
+                    continue
+                delta = choices[0].delta
+                text = getattr(delta, "content", None)
+                if text:
+                    yield text
+        except Exception as exc:
+            logger.error("LLM stream_chat 失败: %s", exc)
+            raise RuntimeError(f"大模型流式调用失败：{exc}") from exc
 
     # ------------------------------------------------------------------
     # 核心接口：文本 Embedding

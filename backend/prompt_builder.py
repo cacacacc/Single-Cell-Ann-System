@@ -204,6 +204,10 @@ class PromptBuilder:
         system_parts = [self._tmpl.system_prompt]
         if extra_system_info:
             system_parts.append(f"\n\n【数据集背景信息】\n{extra_system_info}")
+        # 在 system 消息中补充本次检索结果的细胞类型分布摘要
+        type_summary = self._cell_type_summary(retrieved_cells)
+        if type_summary:
+            system_parts.append(f"\n\n【检索结果细胞类型分布】\n{type_summary}")
         system_parts.append(f"\n\n{context}")
 
         return [
@@ -237,11 +241,11 @@ class PromptBuilder:
         List[Dict[str, str]]
         """
         base = self.build_messages(
-            user_question="",          # 占位，后面会替换
+            user_question="",          # 占位，后面替换
             retrieved_cells=retrieved_cells,
             extra_system_info=extra_system_info,
         )
-        system_msg = base[0]           # 取出 system 消息
+        system_msg = base[0]           # 取出 system 消息（已含细胞类型分布摘要）
 
         messages: List[Dict[str, str]] = [system_msg]
         if history:
@@ -354,6 +358,40 @@ class PromptBuilder:
         if not lines:
             return ""
         return "\n".join(lines) + "\n"
+
+    def _cell_type_summary(self, retrieved_cells: List[Dict[str, Any]]) -> str:
+        """统计检索结果中的细胞类型分布，生成简短摘要行。
+
+        例如：Hepatocyte × 3、T cell × 1、Kupffer cell × 1
+
+        Parameters
+        ----------
+        retrieved_cells:
+            ``CellVectorStore.query_similar()`` 返回值。
+
+        Returns
+        -------
+        str
+            细胞类型分布的逗号分隔摘要；若只有一种类型则省略（避免冗余）。
+        """
+        if not retrieved_cells:
+            return ""
+
+        counts: Dict[str, int] = {}
+        for cell in retrieved_cells:
+            ct = str(cell.get("cell_type") or "未知").strip()
+            counts[ct] = counts.get(ct, 0) + 1
+
+        # 只有一种细胞类型时不额外输出（上下文条目本身已含类型）
+        if len(counts) <= 1:
+            return ""
+
+        # 按数量降序排列
+        parts = [
+            f"{ct} × {n}"
+            for ct, n in sorted(counts.items(), key=lambda x: -x[1])
+        ]
+        return "、".join(parts)
 
     def _distance_to_similarity_str(self, distance: float) -> str:
         """将 ChromaDB 返回的距离值转为可读相似度百分比字符串。
