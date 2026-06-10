@@ -250,6 +250,50 @@ class FlaskAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("cell_index or cell_id is required", response.get_json()["error"])
 
+    def test_search_filters_results_by_metadata_field(self) -> None:
+        self.login_admin()
+
+        response = self.client.post(
+            "/api/search",
+            json={
+                "dataset_id": "tiny",
+                "cell_id": "cell-0",
+                "k": 2,
+                "index_backend": "numpy",
+                "index_type": "brute",
+                "filter_field": "cell_type",
+                "filter_value": "b",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["filtered"])
+        self.assertEqual(payload["filter_field"], "cell_type")
+        self.assertEqual(payload["filter_value"], "b")
+        self.assertEqual(len(payload["results"]), 1)
+        self.assertEqual(payload["results"][0]["cell_id"], "cell-2")
+        self.assertEqual(payload["results"][0]["cell_type"], "b")
+
+    def test_search_rejects_unknown_filter_field(self) -> None:
+        self.login_admin()
+
+        response = self.client.post(
+            "/api/search",
+            json={
+                "dataset_id": "tiny",
+                "cell_id": "cell-0",
+                "k": 2,
+                "index_backend": "numpy",
+                "index_type": "brute",
+                "filter_field": "missing_field",
+                "filter_value": "x",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("filter_field not found", response.get_json()["error"])
+
     def test_cells_endpoint_paginates_cell_ids(self) -> None:
         self.login_admin()
 

@@ -53,6 +53,7 @@ DEFAULT_DATA_PATH = "data/liver.h5ad"
 DEFAULT_USE_REP = "X_pca"
 DEFAULT_TOP_K = 10
 MAX_TOP_K = 100
+FILTER_SEARCH_MULTIPLIER = 10
 ALLOWED_EXTENSIONS = {".h5ad"}
 
 _DATASET_CACHE: Dict[str, DataLoader] = {}
@@ -173,6 +174,28 @@ def _index_config_from_payload(payload: Dict[str, Any]) -> IndexConfig:
     if not overrides:
         return config
     return config.update(**overrides)
+
+
+def _normalize_filter(payload: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    field = payload.get("filter_field") or payload.get("condition_field")
+    value = payload.get("filter_value") or payload.get("condition_value")
+    if field is None or str(field).strip() in {"", "all", "__none__"}:
+        return None, None
+    field_text = str(field).strip()
+    if "/" in field_text or "\\" in field_text:
+        raise ValueError("filter_field is invalid")
+    if value is None or str(value).strip() == "":
+        raise ValueError("filter_value is required when filter_field is set")
+    return field_text, str(value).strip()
+
+
+def _metadata_matches_filter(cell_info: Dict[str, Any], field: Optional[str], value: Optional[str]) -> bool:
+    if not field:
+        return True
+    actual = cell_info.get(field)
+    if actual is None:
+        return False
+    return str(actual).strip().lower() == str(value).strip().lower()
 
 
 def _index_dir(dataset_id: str) -> Path:
@@ -1293,8 +1316,11 @@ def search():
         cell_id_value = payload.get("cell_id")
         k = _parse_int(payload, "k", default=DEFAULT_TOP_K)
         include_self = _parse_bool(payload.get("include_self"), default=False)
+        filter_field, filter_value = _normalize_filter(payload)
 
         loader = _get_loader(resolved_id, dataset_path)
+        if filter_field and filter_field not in loader.obs_columns:
+            return _json_response({"error": f"filter_field not found: {filter_field}"}, 400)
         index_config = _normalize_pq_config_for_dim(
             index_config, loader.vector_dim(use_rep)
         )
@@ -1320,12 +1346,16 @@ def search():
             (time.perf_counter() - index_prepare_start_time) * 1000.0, 2
         )
         query_vector = loader.get_vector(cell_index, use_rep=use_rep)
-        search_k = min(k + 1 if not include_self else k, loader.n_cells)
+        if filter_field:
+            search_k = loader.n_cells
+        else:
+            search_k = min(k + 1 if not include_self else k, loader.n_cells)
         start_time = time.perf_counter()
         distances, indices = indexer.search(query_vector, search_k)
         elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
         results = []
+        scanned = 0
         metric = indexer.metric
         for idx, dist in zip(indices.tolist(), distances.tolist()):
             idx = int(idx)
@@ -1334,6 +1364,9 @@ def search():
                 continue
 
             cell_info = loader.get_cell_info(idx)
+            scanned += 1
+            if not _metadata_matches_filter(cell_info, filter_field, filter_value):
+                continue
             results.append(
                 {
                     "rank": len(results) + 1,
@@ -1358,6 +1391,10 @@ def search():
                 "cell_id": loader.get_cell_info(cell_index).get("cell_id"),
                 "k": k,
                 "include_self": include_self,
+                "filter_field": filter_field,
+                "filter_value": filter_value,
+                "filtered": bool(filter_field),
+                "candidate_count": scanned,
                 "use_rep": use_rep,
                 "index_name": index_name,
                 "index_backend": indexer.backend,

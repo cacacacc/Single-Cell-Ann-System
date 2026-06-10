@@ -2,7 +2,7 @@
 
 {% block content %}
 <style>
-    /* ================= 坚如磐石的 Flex 布局 ================= */
+    /* =================  Flex 布局 ================= */
     .search-layout {
         display: flex;
         gap: 24px;
@@ -321,13 +321,12 @@
                 </div>
 
                 <div class="mb-5">
-                    <label class="form-label">限定细胞类型 (可选过滤)</label>
-                    <select class="form-select dark-control">
-                        <option value="all">-- 不限类型 --</option>
-                        <option value="T_cell">T cell (免疫T细胞)</option>
-                        <option value="hepatocyte">Hepatocyte (肝细胞)</option>
-                        <option value="macrophage">Macrophage (巨噬细胞)</option>
+                    <label class="form-label">条件检索 (可选)</label>
+                    <select class="form-select dark-control mb-2" id="filterFieldSelect">
+                        <option value="">-- 不限条件 --</option>
                     </select>
+                    <input type="text" class="form-control dark-control" id="filterValueInput" placeholder="输入过滤值，例如 Hepatocyte / IFALD">
+                    <div class="form-text" style="color: #6f7c92;">仅返回指定元数据字段等于该值的 Top-K 细胞。</div>
                 </div>
 
                 <button type="button" class="btn btn-glow-purple w-100" id="startSearchBtn">
@@ -450,6 +449,8 @@
     const cellBrowserList = document.getElementById('cellBrowserList');
     const prevCellsBtn = document.getElementById('prevCellsBtn');
     const nextCellsBtn = document.getElementById('nextCellsBtn');
+    const filterFieldSelect = document.getElementById('filterFieldSelect');
+    const filterValueInput = document.getElementById('filterValueInput');
     let currentMetadata = null;
     let currentCellOffset = 0;
     let nextCellOffset = null;
@@ -498,6 +499,19 @@
         return current;
     }
 
+    function updateFilterFieldOptions(obsColumns) {
+        const previous = filterFieldSelect.value;
+        const columns = Array.isArray(obsColumns) ? obsColumns : [];
+        filterFieldSelect.innerHTML = '<option value="">-- 不限条件 --</option>' + columns
+            .map(col => `<option value="${col}">${col}</option>`)
+            .join('');
+        if (columns.includes(previous)) {
+            filterFieldSelect.value = previous;
+        } else if (columns.includes('cell_type')) {
+            filterFieldSelect.value = 'cell_type';
+        }
+    }
+
     async function refreshMetadata() {
         const datasetId = datasetSelect.value;
         if (!datasetId) return;
@@ -517,6 +531,7 @@
             if (indexTypeSelect.value === 'pq') {
                 normalizePqMInput();
             }
+            updateFilterFieldOptions(data.obs_columns);
             updateEffectiveConfigDisplay(data, {
                 index_backend: indexBackendSelect.value,
                 index_type: indexTypeSelect.value,
@@ -526,6 +541,7 @@
             });
         } catch (err) {
             currentMetadata = null;
+            updateFilterFieldOptions([]);
         }
     }
 
@@ -1144,6 +1160,8 @@
         const indexBackend = indexBackendSelect.value;
         const indexType = indexTypeSelect.value;
         const indexMetric = indexMetricSelect.value;
+        const filterField = filterFieldSelect.value;
+        const filterValue = filterValueInput.value.trim();
 
         if (!datasetId) {
             alert('请先选择数据集');
@@ -1151,6 +1169,10 @@
         }
         if (!cellId) {
             alert('请输入 Cell ID');
+            return;
+        }
+        if (filterField && !filterValue) {
+            alert('请输入条件检索的过滤值');
             return;
         }
 
@@ -1167,6 +1189,10 @@
                 cell_id: cellId,
                 k: topK,
             };
+            if (filterField) {
+                payload.filter_field = filterField;
+                payload.filter_value = filterValue;
+            }
 
             if (useSavedIndex) {
                 // Use pre-built index — just pass the index name
@@ -1288,6 +1314,8 @@
             rows.push(['索引后端', lastSearchPayload.index_backend || '-'].join(','));
             rows.push(['索引类型', lastSearchPayload.index_type || '-'].join(','));
             rows.push(['距离度量', lastSearchPayload.index_metric || '-'].join(','));
+            rows.push(['过滤字段', lastSearchPayload.filter_field || '-'].join(','));
+            rows.push(['过滤值', lastSearchPayload.filter_value || '-'].join(','));
             rows.push(['']);
         }
         if (lastSearchQueryId) {
