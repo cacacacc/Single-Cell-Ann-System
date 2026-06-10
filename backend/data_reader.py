@@ -9,8 +9,7 @@ from typing import Any, Dict, Iterator, List, Optional, Union
 
 import numpy as np
 import pandas as pd
-import scanpy as sc
-from anndata import AnnData
+from anndata import AnnData, read_h5ad
 
 
 class DataLoader:
@@ -37,7 +36,7 @@ class DataLoader:
         if path.suffix.lower() != ".h5ad":
             raise ValueError(f"文件格式不支持，需要 .h5ad 文件，得到：{path.suffix}")
 
-        self._adata: AnnData = sc.read_h5ad(str(path))
+        self._adata: AnnData = read_h5ad(str(path))
         self._file_path = path
         self._cell_id_to_index: Optional[Dict[str, int]] = None
 
@@ -642,7 +641,7 @@ def _validate_h5ad_file(path: Path) -> None:
         raise ValueError(f"文件内容为空：{path.name}")
     # 尝试用 scanpy 读取，确认内容合法
     try:
-        adata = sc.read_h5ad(str(path))
+        adata = read_h5ad(str(path))
     except Exception as exc:
         raise ValueError(f"文件内容校验失败，不是有效的 .h5ad 文件：{exc}") from exc
     if adata.n_obs == 0:
