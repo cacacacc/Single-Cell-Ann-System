@@ -48,8 +48,8 @@ backend/rag_engine.py      # RAG 完整流程引擎
 | 文件 | 职责 |
 |---|---|
 | `vector_store.py` | ChromaDB 客户端封装；将 DataLoader 中的细胞向量批量写入；提供向量相似检索接口 |
-| `prompt_builder.py` | 将检索到的细胞数据（类型/基因/元数据）格式化为可读文本；组装 OpenAI-compatible messages 列表 |
-| `llm_client.py` | 统一封装智谱 GLM SDK 和 OpenAI SDK；通过环境变量切换厂商；提供 `chat()` 和 `embed()` 接口 |
+| `prompt_builder.py` | 将检索到的细胞数据（类型/基因/元数据）格式化为可读文本；自动统计检索结果细胞类型分布；组装 OpenAI-compatible messages 列表 |
+| `llm_client.py` | 统一封装智谱 GLM SDK 和 OpenAI SDK；通过环境变量切换厂商；提供 `chat()`（阻塞）、`stream_chat()`（流式）和 `embed()` 接口 |
 | `rag_engine.py` | 串联以上三个模块；管理多轮对话历史（session_id）；对外暴露 `ask()` 单一接口 |
 
 ### 2.3 与其他后端模块的依赖关系
@@ -70,13 +70,14 @@ backend/vector_store.py (CellVectorStore)
         │    ← backend/rag_engine.py (RAGEngine.ask)
         │    ← app.py (/api/vectordb/query)
         │    ← app.py (/api/chat)
+        │    ← app.py (/api/chat/stream)
         ▼
 ChromaDB 持久化文件（chroma_db/ 目录）
 ```
 
 **与 `ann_indexer.py` 的关系**：两套检索路径并行独立，互不干扰：
 - ANN 索引（faiss/hnswlib）→ `/api/search`（原有功能）
-- ChromaDB 向量数据库 → `/api/chat`、`/api/vectordb/query`（本模块）
+- ChromaDB 向量数据库 → `/api/chat`、`/api/chat/stream`、`/api/vectordb/query`（本模块）
 
 ---
 
@@ -144,10 +145,11 @@ LLM_MODEL=deepseek-chat
 | 方法 | 路径 | 功能 | 权限 |
 |---|---|---|---|
 | POST | `/api/vectordb/init` | 将数据集细胞向量写入 ChromaDB | 登录用户 |
-| GET | `/api/vectordb/status` | 查询向量库状态（数量/是否就绪） | 登录用户 |
+| GET | `/api/vectordb/status` | 查询向量库状态（数量/是否就绪/use_rep） | 登录用户 |
 | POST | `/api/vectordb/query` | 直接向量检索（不经 LLM） | 登录用户 |
 | DELETE | `/api/vectordb/collection` | 清空向量库 | 管理员 |
-| **POST** | **`/api/chat`** | **RAG 问答核心接口** | 登录用户 |
+| **POST** | **`/api/chat`** | **RAG 问答核心接口（阻塞，返回完整 JSON）** | 登录用户 |
+| **POST** | **`/api/chat/stream`** | **RAG 问答流式接口（SSE，逐字返回）** | 登录用户 |
 | GET | `/api/chat/history` | 查询会话对话历史 | 登录用户 |
 | DELETE | `/api/chat/history` | 清空会话对话历史 | 登录用户 |
 | GET | `/api/llm/info` | 查看 LLM 配置信息 | 登录用户 |
@@ -230,7 +232,52 @@ curl -X POST http://localhost:5000/api/vectordb/init \
 }
 ```
 
-### 4.4 直接向量检索（不经 LLM）
+### 4.4 RAG 问答流式接口（SSE）
+
+**POST /api/chat/stream**
+
+与 `/api/chat` 请求参数完全相同，区别在于响应格式为 `text/event-stream`，大模型回答**逐字实时推送**，前端可实现打字机效果。
+
+**响应格式（SSE）**
+
+```
+data: 这批细胞高表达
+data:  ALB、APOA1
+data: ，为肝细胞...
+data: [DONE]
+```
+
+- 每个 `data:` 事件包含一个文本片段
+- 最后一个事件固定为 `data: [DONE]`，表示流结束
+- 若中途出错，发送 `data: [ERROR] 错误信息`
+
+**前端接入示例（fetch + ReadableStream）**
+
+```javascript
+const resp = await fetch('/api/chat/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ question: '这些细胞有什么功能？', cell_index: 0 }),
+});
+const reader = resp.body.getReader();
+const decoder = new TextDecoder();
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  for (const line of decoder.decode(value).split('\n')) {
+    if (!line.startsWith('data: ')) continue;
+    const chunk = line.slice(6);
+    if (chunk === '[DONE]') return;
+    document.getElementById('answer').innerText += chunk;
+  }
+}
+```
+
+> 流式接口同样支持 `session_id` 多轮对话，回答完成后自动写入历史记录。
+
+---
+
+### 4.5 直接向量检索（不经 LLM）
 
 **POST /api/vectordb/query**
 
@@ -244,12 +291,12 @@ curl -X POST http://localhost:5000/api/vectordb/init \
 
 返回与指定细胞最相似的 Top-K 个细胞，结构同 `retrieved_cells` 数组。
 
-### 4.5 其他辅助接口
+### 4.6 其他辅助接口
 
 ```bash
 # 查询向量库状态
 GET /api/vectordb/status
-# 返回：{ "is_populated": true, "count": 5000, "collection_name": "liver_xxx" }
+# 返回：{ "is_populated": true, "count": 5000, "collection_name": "liver_xxx", "use_rep": "X_pca" }
 
 # 测试 LLM API 是否可用
 POST /api/llm/ping
