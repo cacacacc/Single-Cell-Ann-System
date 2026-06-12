@@ -67,6 +67,49 @@ def row_to_user(row: sqlite3.Row) -> Dict[str, Any]:
     }
 
 
+def row_to_search_snapshot(row: sqlite3.Row) -> Dict[str, Any]:
+    filter_field = row["filter_field"] or ""
+    filter_value = row["filter_value"] or ""
+    index_name = row["index_name"] or ""
+    payload: Dict[str, Any] = {
+        "dataset_id": row["dataset_id"],
+        "cell_id": row["cell_id"],
+        "k": int(row["k"]),
+    }
+    if index_name:
+        payload["index_name"] = index_name
+    else:
+        if row["index_backend"]:
+            payload["index_backend"] = row["index_backend"]
+        if row["index_type"]:
+            payload["index_type"] = row["index_type"]
+        if row["index_metric"]:
+            payload["index_metric"] = row["index_metric"]
+    if filter_field:
+        payload["filter_field"] = filter_field
+        payload["filter_value"] = filter_value
+
+    return {
+        "id": int(row["id"]),
+        "user_id": int(row["user_id"]),
+        "dataset_id": row["dataset_id"],
+        "cell_id": row["cell_id"],
+        "k": int(row["k"]),
+        "use_rep": row["use_rep"] or "",
+        "index_name": index_name,
+        "index_backend": row["index_backend"] or "",
+        "index_type": row["index_type"] or "",
+        "index_metric": row["index_metric"] or "",
+        "filter_field": filter_field,
+        "filter_value": filter_value,
+        "elapsed_ms": row["elapsed_ms"],
+        "total_elapsed_ms": row["total_elapsed_ms"],
+        "result_count": int(row["result_count"]),
+        "created_at": row["created_at"],
+        "rerun_payload": payload,
+    }
+
+
 class UserStore:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
@@ -108,6 +151,35 @@ class UserStore:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS search_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    dataset_id TEXT NOT NULL,
+                    cell_id TEXT NOT NULL,
+                    k INTEGER NOT NULL,
+                    use_rep TEXT,
+                    index_name TEXT,
+                    index_backend TEXT,
+                    index_type TEXT,
+                    index_metric TEXT,
+                    filter_field TEXT,
+                    filter_value TEXT,
+                    elapsed_ms REAL,
+                    total_elapsed_ms REAL,
+                    result_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_search_snapshots_user_created
+                ON search_snapshots(user_id, created_at DESC)
+                """
+            )
 
             admin_username = normalize_username(default_admin_username)
             existing_admin = conn.execute(
@@ -307,6 +379,86 @@ class UserStore:
             if row["role"] == "admin":
                 self._ensure_other_active_admin(conn, user_id)
             conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+    def add_search_snapshot(
+        self,
+        user_id: int,
+        *,
+        dataset_id: str,
+        cell_id: str,
+        k: int,
+        use_rep: str = "",
+        index_name: str = "",
+        index_backend: str = "",
+        index_type: str = "",
+        index_metric: str = "",
+        filter_field: str = "",
+        filter_value: str = "",
+        elapsed_ms: Optional[float] = None,
+        total_elapsed_ms: Optional[float] = None,
+        result_count: int = 0,
+    ) -> Dict[str, Any]:
+        now = utc_now()
+        with self._connect() as conn:
+            user = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+            if user is None:
+                raise UserStoreError("用户不存在")
+            cursor = conn.execute(
+                """
+                INSERT INTO search_snapshots (
+                    user_id, dataset_id, cell_id, k, use_rep, index_name,
+                    index_backend, index_type, index_metric, filter_field,
+                    filter_value, elapsed_ms, total_elapsed_ms, result_count, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    dataset_id,
+                    cell_id,
+                    int(k),
+                    use_rep,
+                    index_name,
+                    index_backend,
+                    index_type,
+                    index_metric,
+                    filter_field,
+                    filter_value,
+                    elapsed_ms,
+                    total_elapsed_ms,
+                    int(result_count),
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM search_snapshots WHERE id = ?",
+                (int(cursor.lastrowid),),
+            ).fetchone()
+        assert row is not None
+        return row_to_search_snapshot(row)
+
+    def list_search_snapshots(self, user_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+        safe_limit = max(1, min(int(limit or 20), 100))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM search_snapshots
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (user_id, safe_limit),
+            ).fetchall()
+        return [row_to_search_snapshot(row) for row in rows]
+
+    def delete_search_snapshot(self, user_id: int, snapshot_id: int) -> None:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM search_snapshots WHERE id = ? AND user_id = ?",
+                (snapshot_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                raise UserStoreError("检索快照不存在")
 
     def _ensure_other_active_admin(self, conn: sqlite3.Connection, user_id: int) -> None:
         row = conn.execute(

@@ -455,6 +455,7 @@
     let currentCellOffset = 0;
     let nextCellOffset = null;
     let prevCellOffset = null;
+    const rerunParams = new URLSearchParams(window.location.search);
     const cellPageSize = 50;
     const indexTypeOptions = {
         auto: [
@@ -1051,8 +1052,13 @@
             datasetSelect.innerHTML = data.datasets
                 .map(ds => `<option value="${ds.id}">${ds.filename}</option>`)
                 .join('');
+            const rerunDataset = rerunParams.get('dataset_id');
+            if (rerunDataset && data.datasets.some(ds => ds.id === rerunDataset)) {
+                datasetSelect.value = rerunDataset;
+            }
             await checkExistingIndex(datasetSelect.value);
             await refreshMetadata();
+            applyRerunParams();
             await loadCells(0);
             await loadUmap();
         } catch (err) {
@@ -1114,6 +1120,11 @@
                 savedIndexHint.innerText = '前往数据管理页构建索引以加速后续检索。';
             }
             setManualControlsDisabled(false);
+            const rerunIndex = rerunParams.get('index_name');
+            if (rerunIndex && Array.from(savedIndexSelect.options).some(opt => opt.value === rerunIndex)) {
+                savedIndexSelect.value = rerunIndex;
+                savedIndexSelect.dispatchEvent(new Event('change'));
+            }
         } catch {
             indexStatusBadge.style.display = 'none';
             indexCountBadge.innerText = '获取失败';
@@ -1122,6 +1133,22 @@
             savedIndexHint.innerText = '无法获取已有索引列表，可继续手动配置。';
             setManualControlsDisabled(false);
         }
+    }
+
+    function applyRerunParams() {
+        const cellId = rerunParams.get('cell_id');
+        const k = parseInt(rerunParams.get('k') || '', 10);
+        const filterField = rerunParams.get('filter_field');
+        const filterValue = rerunParams.get('filter_value');
+        if (cellId) queryCellIdInput.value = cellId;
+        if (!Number.isNaN(k) && k >= Number(slider.min) && k <= Number(slider.max)) {
+            slider.value = String(k);
+            kValue.innerText = String(k);
+        }
+        if (filterField && Array.from(filterFieldSelect.options).some(opt => opt.value === filterField)) {
+            filterFieldSelect.value = filterField;
+        }
+        if (filterValue) filterValueInput.value = filterValue;
     }
 
     datasetSelect.addEventListener('change', async () => {

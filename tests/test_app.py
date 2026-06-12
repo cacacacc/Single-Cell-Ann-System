@@ -241,6 +241,42 @@ class FlaskAppTests(unittest.TestCase):
         self.assertEqual(search_payload["index_backend"], "numpy")
         self.assertEqual(len(search_payload["results"]), 2)
         self.assertEqual(search_payload["results"][0]["cell_id"], "cell-1")
+        self.assertIn("snapshot_id", search_payload)
+
+    def test_search_snapshot_is_saved_and_can_be_deleted(self) -> None:
+        self.login_admin()
+
+        search_response = self.client.post(
+            "/api/search",
+            json={
+                "dataset_id": "tiny",
+                "cell_id": "cell-0",
+                "k": 2,
+                "index_backend": "numpy",
+                "index_type": "brute",
+                "filter_field": "cell_type",
+                "filter_value": "b",
+            },
+        )
+        self.assertEqual(search_response.status_code, 200)
+        snapshot_id = search_response.get_json()["snapshot_id"]
+
+        list_response = self.client.get("/api/profile/search-snapshots")
+        self.assertEqual(list_response.status_code, 200)
+        snapshots = list_response.get_json()["snapshots"]
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(snapshots[0]["id"], snapshot_id)
+        self.assertEqual(snapshots[0]["dataset_id"], "tiny")
+        self.assertEqual(snapshots[0]["filter_field"], "cell_type")
+        self.assertEqual(snapshots[0]["filter_value"], "b")
+        self.assertEqual(snapshots[0]["rerun_payload"]["cell_id"], "cell-0")
+
+        delete_response = self.client.delete(f"/api/profile/search-snapshots/{snapshot_id}")
+        self.assertEqual(delete_response.status_code, 200)
+
+        empty_response = self.client.get("/api/profile/search-snapshots")
+        self.assertEqual(empty_response.status_code, 200)
+        self.assertEqual(empty_response.get_json()["snapshots"], [])
 
     def test_search_requires_cell_index_or_cell_id(self) -> None:
         self.login_admin()

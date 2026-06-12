@@ -18,6 +18,7 @@ except ImportError:
     pass  # python-dotenv 未安装时跳过，不影响正常运行
 
 import numpy as np
+from anndata import read_h5ad
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -456,15 +457,17 @@ def _dataset_payload(dataset_id: str, dataset_path: Path) -> Dict[str, Any]:
     }
 
     try:
-        loader = _get_loader(dataset_id, dataset_path)
+        adata = read_h5ad(dataset_path, backed="r")
         payload.update(
             {
-                "n_cells": loader.n_cells,
-                "n_genes": loader.n_genes,
-                "available_reps": loader.available_reps,
-                "obs_columns": loader.obs_columns,
+                "n_cells": int(adata.n_obs),
+                "n_genes": int(adata.n_vars),
+                "available_reps": list(adata.obsm.keys()),
+                "obs_columns": list(adata.obs.columns),
             }
         )
+        if getattr(adata, "file", None) is not None:
+            adata.file.close()
     except Exception as exc:
         payload["error"] = str(exc)
 
@@ -800,6 +803,28 @@ def change_password_api():
             str(payload.get("new_password") or ""),
         )
         return _json_response({"status": "password_changed"})
+    except UserStoreError as exc:
+        return _user_error_response(exc)
+
+
+@app.get("/api/profile/search-snapshots")
+@login_required
+def list_search_snapshots_api():
+    user = _current_user()
+    assert user is not None
+    limit = _parse_int(_request_payload(), "limit", default=20)
+    snapshots = _user_store().list_search_snapshots(user["id"], limit=limit)
+    return _json_response({"snapshots": snapshots, "total": len(snapshots)})
+
+
+@app.delete("/api/profile/search-snapshots/<int:snapshot_id>")
+@login_required
+def delete_search_snapshot_api(snapshot_id: int):
+    user = _current_user()
+    assert user is not None
+    try:
+        _user_store().delete_search_snapshot(user["id"], snapshot_id)
+        return _json_response({"status": "deleted", "snapshot_id": snapshot_id})
     except UserStoreError as exc:
         return _user_error_response(exc)
 
@@ -1384,32 +1409,53 @@ def search():
             if len(results) == k:
                 break
 
-        return _json_response(
-            {
-                "dataset_id": resolved_id,
-                "query_cell": cell_index,
-                "cell_id": loader.get_cell_info(cell_index).get("cell_id"),
-                "k": k,
-                "include_self": include_self,
-                "filter_field": filter_field,
-                "filter_value": filter_value,
-                "filtered": bool(filter_field),
-                "candidate_count": scanned,
-                "use_rep": use_rep,
-                "index_name": index_name,
-                "index_backend": indexer.backend,
-                "index_type": indexer.index_type,
-                "index_metric": metric,
-                "index_config": indexer.config_summary,
-                "elapsed_ms": elapsed_ms,
-                "search_elapsed_ms": elapsed_ms,
-                "index_prepare_ms": index_prepare_ms,
-                "total_elapsed_ms": round(
-                    (time.perf_counter() - total_start_time) * 1000.0, 2
-                ),
-                "results": results,
-            }
-        )
+        query_cell_id = loader.get_cell_info(cell_index).get("cell_id")
+        total_elapsed_ms = round((time.perf_counter() - total_start_time) * 1000.0, 2)
+        response_payload = {
+            "dataset_id": resolved_id,
+            "query_cell": cell_index,
+            "cell_id": query_cell_id,
+            "k": k,
+            "include_self": include_self,
+            "filter_field": filter_field,
+            "filter_value": filter_value,
+            "filtered": bool(filter_field),
+            "candidate_count": scanned,
+            "use_rep": use_rep,
+            "index_name": index_name,
+            "index_backend": indexer.backend,
+            "index_type": indexer.index_type,
+            "index_metric": metric,
+            "index_config": indexer.config_summary,
+            "elapsed_ms": elapsed_ms,
+            "search_elapsed_ms": elapsed_ms,
+            "index_prepare_ms": index_prepare_ms,
+            "total_elapsed_ms": total_elapsed_ms,
+            "results": results,
+        }
+        current_user = _current_user()
+        if current_user is not None:
+            try:
+                snapshot = _user_store().add_search_snapshot(
+                    current_user["id"],
+                    dataset_id=resolved_id,
+                    cell_id=str(query_cell_id or ""),
+                    k=k,
+                    use_rep=str(use_rep or ""),
+                    index_name=str(index_name or ""),
+                    index_backend=str(indexer.backend or ""),
+                    index_type=str(indexer.index_type or ""),
+                    index_metric=str(metric or ""),
+                    filter_field=str(filter_field or ""),
+                    filter_value=str(filter_value or ""),
+                    elapsed_ms=elapsed_ms,
+                    total_elapsed_ms=total_elapsed_ms,
+                    result_count=len(results),
+                )
+                response_payload["snapshot_id"] = snapshot["id"]
+            except Exception:
+                app.logger.exception("Failed to record search snapshot")
+        return _json_response(response_payload)
     except FileNotFoundError as exc:
         return _json_response(
             {

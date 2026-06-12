@@ -82,6 +82,30 @@
         border: 1px solid rgba(255, 71, 87, 0.35);
         color: #ffb8c0;
     }
+
+    .snapshot-list {
+        display: grid;
+        gap: 12px;
+    }
+
+    .snapshot-card {
+        background: rgba(0, 0, 0, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 8px;
+        padding: 14px;
+    }
+
+    .snapshot-meta {
+        color: #8A96A8;
+        font-size: 0.84rem;
+        line-height: 1.6;
+    }
+
+    .snapshot-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+    }
 </style>
 
 <div class="row">
@@ -161,6 +185,23 @@
             </form>
         </div>
     </div>
+
+    <div class="col-12">
+        <div class="dark-card">
+            <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4" style="border-color: rgba(255,255,255,0.05) !important;">
+                <div>
+                    <h5 class="fw-bold text-white mb-1">ANN 检索快照</h5>
+                    <div style="color: #8A96A8; font-size: 0.9rem;">保存最近相似检索参数，支持一键回到检索页复现实验。</div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-light" id="refresh-snapshots-btn">
+                    <i class="fa-solid fa-rotate-right me-1"></i>刷新
+                </button>
+            </div>
+            <div id="snapshot-list" class="snapshot-list">
+                <div style="color: #8A96A8;">正在加载检索快照...</div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -217,5 +258,82 @@
             showAlert('password-alert', error.message, 'error');
         }
     });
+
+    function buildSearchUrl(payload) {
+        const params = new URLSearchParams();
+        ['dataset_id', 'cell_id', 'k', 'index_name', 'filter_field', 'filter_value'].forEach(key => {
+            if (payload && payload[key] !== undefined && payload[key] !== null && String(payload[key]).trim() !== '') {
+                params.set(key, payload[key]);
+            }
+        });
+        return `/search?${params.toString()}`;
+    }
+
+    function snapshotLabel(snapshot) {
+        const filter = snapshot.filter_field
+            ? `${snapshot.filter_field} = ${snapshot.filter_value || '-'}`
+            : '无条件过滤';
+        const index = snapshot.index_name || `${snapshot.index_backend || '-'} / ${snapshot.index_type || '-'}`;
+        return { filter, index };
+    }
+
+    function renderSnapshots(snapshots) {
+        const container = document.getElementById('snapshot-list');
+        if (!snapshots || snapshots.length === 0) {
+            container.innerHTML = '<div style="color: #8A96A8;">暂无检索快照。完成一次相似检索后会自动记录在这里。</div>';
+            return;
+        }
+        container.innerHTML = snapshots.map(snapshot => {
+            const label = snapshotLabel(snapshot);
+            const rerunUrl = buildSearchUrl(snapshot.rerun_payload);
+            return `
+                <div class="snapshot-card" data-snapshot-id="${snapshot.id}">
+                    <div class="d-flex justify-content-between gap-3">
+                        <div>
+                            <div class="text-white fw-bold">${snapshot.dataset_id} · ${snapshot.cell_id}</div>
+                            <div class="snapshot-meta">
+                                Top-K ${snapshot.k} · ${label.filter}<br>
+                                索引：${label.index} · 距离：${snapshot.index_metric || '-'} · 结果 ${snapshot.result_count}<br>
+                                查询 ${snapshot.elapsed_ms ?? '-'} ms · 总耗时 ${snapshot.total_elapsed_ms ?? '-'} ms · ${snapshot.created_at}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="snapshot-actions">
+                        <a class="btn btn-sm btn-glow-purple" href="${rerunUrl}">
+                            <i class="fa-solid fa-rotate-right me-1"></i>一键重跑
+                        </a>
+                        <button type="button" class="btn btn-sm btn-outline-danger delete-snapshot-btn" data-snapshot-id="${snapshot.id}">
+                            删除
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        document.querySelectorAll('.delete-snapshot-btn').forEach(button => {
+            button.addEventListener('click', async () => {
+                const id = button.dataset.snapshotId;
+                if (!id || !confirm('删除这条检索快照？')) return;
+                try {
+                    await fetch(`/api/profile/search-snapshots/${id}`, { method: 'DELETE' });
+                    await loadSnapshots();
+                } catch (error) {
+                    alert('删除失败');
+                }
+            });
+        });
+    }
+
+    async function loadSnapshots() {
+        const response = await fetch('/api/profile/search-snapshots?limit=10');
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            document.getElementById('snapshot-list').innerHTML = `<div style="color: #ffb8c0;">${data.error || '检索快照加载失败'}</div>`;
+            return;
+        }
+        renderSnapshots(data.snapshots || []);
+    }
+
+    document.getElementById('refresh-snapshots-btn').addEventListener('click', loadSnapshots);
+    loadSnapshots();
 </script>
 {% endblock %}
