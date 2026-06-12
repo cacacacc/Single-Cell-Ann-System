@@ -225,3 +225,5 @@ data/
 
 # generated ANN indexes
 indexes/
+
+chroma_db/

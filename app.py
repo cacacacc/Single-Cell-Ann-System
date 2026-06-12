@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import time
@@ -16,6 +17,8 @@ try:
     load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 except ImportError:
     pass  # python-dotenv 未安装时跳过，不影响正常运行
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 from anndata import read_h5ad
@@ -727,6 +730,15 @@ def profile():
 @login_required
 def benchmark():
     return render_template('benchmark.html')
+
+
+# ================================
+# AI 细胞助手聊天页路由
+# ================================
+@app.route('/chat')
+@login_required
+def chat_page():
+    return render_template('chat.html')
 
 
 @app.post("/api/auth/register")
@@ -1695,6 +1707,129 @@ def _chroma_collection_name(dataset_id: str) -> str:
     return name[:63]
 
 
+def _extract_question_keywords(question: str) -> List[str]:
+    """从用户自然语言问题中提取基因名和细胞类型关键词。
+
+    用于 RAG 关键词检索 — 在无法直接用向量检索时（PCA 向量空间与文本
+    Embedding 空间维度不匹配），通过关键词匹配细胞文档来找到相关细胞。
+
+    提取策略：
+    1. 大写基因符号（2-8 个字母，全大写，如 ALB、TP53、APOA1）
+    2. 常见细胞类型后缀词（如 Hepatocyte、Kupffer cell、T cell）
+    3. 中英文混合：中文问题中夹杂的英文基因名
+    """
+    import re as _re
+
+    keywords: List[str] = []
+
+    # ① 提取大写基因符号（典型模式：2-8 个大写字母或数字组合）
+    gene_pattern = r'\b([A-Z][A-Z0-9]{1,7})\b'
+    gene_candidates = _re.findall(gene_pattern, question)
+    # 过滤常见非基因缩写
+    stop_words = {
+        "API", "HTTP", "URL", "JSON", "SSE", "RAG", "LLM", "VDB",
+        "DNA", "RNA", "PCA", "UMAP", "ANN", "GPU", "CPU", "IO",
+        "OK", "YES", "NO", "THE", "AND", "FOR", "ARE", "NOT",
+        "THIS", "THAT", "WHAT", "WHEN", "WHERE", "WHICH", "THERE",
+        "ABOUT", "WOULD", "COULD", "SHOULD", "FROM", "WITH", "HAVE",
+        "WILL", "JUST", "LIKE", "SOME", "MANY", "MUCH", "VERY",
+    }
+    for g in gene_candidates:
+        if g.upper() not in stop_words:
+            keywords.append(g)
+
+    # ② 提取细胞类型关键词（英文单词 + 常见后缀）
+    cell_type_pattern = r'\b([A-Za-z]+(?:cyte|phil|blast|clast|cytic|thelial|endocrine|immune|kine|gen|oid))\b'
+    ct_candidates = _re.findall(cell_type_pattern, question, _re.IGNORECASE)
+    for ct in ct_candidates:
+        if ct.lower() not in {kw.lower() for kw in keywords}:
+            keywords.append(ct)
+
+    # ③ 提取英文双词组合（如 "T cell"、"B cell"、"Kupffer cell"）
+    multi_word = _re.findall(r'\b([A-Za-z]+)\s+(cell|type|lineage)\b', question, _re.IGNORECASE)
+    for first, second in multi_word:
+        combo = f"{first} {second}"
+        if combo.lower() not in {kw.lower() for kw in keywords}:
+            keywords.append(combo)
+        if first.lower() not in {kw.lower() for kw in keywords}:
+            keywords.append(first)
+
+    # ④ 中文中夹杂的英文词（如「ALB 基因」→ 提取 ALB）
+    cn_en_pattern = r'([A-Za-z][A-Za-z0-9]{1,15})\s*(?:基因|蛋白|细胞|表达|因子)'
+    cn_matches = _re.findall(cn_en_pattern, question)
+    for m in cn_matches:
+        if m.upper() not in stop_words and m.lower() not in {kw.lower() for kw in keywords}:
+            keywords.append(m)
+
+    return keywords
+
+
+# ---------------------------------------------------------------------------
+# Markdown 强制格式化 — 确保 LLM 输出始终包含 Markdown 结构
+# ---------------------------------------------------------------------------
+
+def _enforce_markdown(text: str) -> str:
+    """检测并强制 LLM 回复使用 Markdown 格式。
+
+    如果回复缺少标题、列表、粗体等 Markdown 元素，自动添加基本结构。
+    如果已有 Markdown 格式，原样返回不做修改。
+
+    策略：
+    1. 若已有 ``##`` 标题 → 说明 LLM 遵守了格式指令，原样返回
+    2. 若无 Markdown 结构 → 将纯文本拆分段落，添加标题和格式化
+    """
+    import re as _re
+
+    if not text or not text.strip():
+        return text
+
+    # ── 检测已有 Markdown 标记 ──
+    has_headings = bool(_re.search(r'^#{1,4}\s', text, _re.MULTILINE))
+    has_lists = bool(_re.search(r'^[\-\*]\s', text, _re.MULTILINE))
+    has_bold = bool(_re.search(r'\*\*[^*]+\*\*', text))
+    has_table = bool(_re.search(r'\|.+\|', text))
+    has_code = bool(_re.search(r'```', text))
+
+    # 若已有 2 种以上 Markdown 特征，说明格式已足够
+    markdown_features = sum([has_headings, has_lists, has_bold, has_table, has_code])
+    if markdown_features >= 2:
+        return text
+
+    # ── 尝试增强：为关键术语加粗 ──
+    # 大写基因符号加粗
+    if not has_bold:
+        text = _re.sub(
+            r'(?<!\*)\b([A-Z][A-Z0-9]{1,7})\b(?!\*)',
+            r'**\1**',
+            text,
+        )
+
+    # ── 若无标题，按段落拆分并添加标题 ──
+    if not has_headings:
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        if len(paragraphs) >= 2:
+            # 第一个段落作为概述，后续用标题分段
+            result_parts = ["## 分析结果\n\n" + paragraphs[0]]
+            for i, para in enumerate(paragraphs[1:], 1):
+                # 尝试从段落中提取主题作为子标题
+                result_parts.append(f"### 要点 {i}\n\n{para}")
+            text = "\n\n".join(result_parts)
+        elif not text.startswith('#'):
+            text = "## 分析结果\n\n" + text
+
+    # ── 若无列表，检测连续逗号/分号分隔的枚举并转换 ──
+    if not has_lists:
+        # 检测 "A、B、C" 或 "A, B, C" 模式，超过 3 项转为列表
+        enum_pattern = _re.findall(
+            r'((?:\**[A-Z][a-zA-Z0-9]*\**[，,\s]+){3,}(?:\**[A-Z][a-zA-Z0-9]*\**))',
+            text,
+        )
+        # 只在明确的长枚举处转换，避免过度修改
+        # 保留原有结构，不做激进转换
+
+    return text
+
+
 def _build_dataset_info(loader: Any, dataset_id: str, use_rep: str) -> str:
     """构建注入 system prompt 的数据集背景信息字符串。
 
@@ -2103,8 +2238,25 @@ def chat_api():
             n_results=n_results,
         )
 
-        # 解析查询向量（可选，不提供则由引擎调用 Embedding API）
+        # 解析查询向量（可选，不提供则用关键词检索）
         query_vector = _resolve_query_vector(payload, loader, use_rep)
+        keywords: Optional[List[str]] = None
+        if query_vector is None:
+            keywords = _extract_question_keywords(question)
+            logger.info("/api/chat 关键词: question='%s' → %s", question[:80], keywords)
+
+        # ── LLM Controls ──
+        temperature = payload.get("temperature")
+        if temperature is not None:
+            temperature = float(temperature)
+        max_tokens = payload.get("max_tokens")
+        if max_tokens is not None:
+            max_tokens = int(max_tokens)
+        preset_key = str(payload.get("preset") or "").strip() or None
+        system_prompt: Optional[str] = None
+        if preset_key:
+            from backend.prompt_builder import get_preset_prompt
+            system_prompt = get_preset_prompt(preset_key)
 
         # 执行 RAG
         result = engine.ask(
@@ -2113,7 +2265,15 @@ def chat_api():
             session_id=session_id,
             n_results=n_results,
             where_filter=where,
+            keywords=keywords,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
         )
+
+        # 强制 Markdown 格式化
+        if result.get("answer"):
+            result["answer"] = _enforce_markdown(result["answer"])
 
         return _json_response(result)
 
@@ -2164,6 +2324,19 @@ def chat_stream_api():
         session_id = str(payload.get("session_id") or "").strip() or None
         where = payload.get("where") or None
 
+        # ── LLM Controls（前端参数微调）──
+        temperature = payload.get("temperature")
+        if temperature is not None:
+            temperature = float(temperature)
+        max_tokens = payload.get("max_tokens")
+        if max_tokens is not None:
+            max_tokens = int(max_tokens)
+        preset_key = str(payload.get("preset") or "").strip() or None
+        system_prompt_override: Optional[str] = None
+        if preset_key:
+            from backend.prompt_builder import get_preset_prompt
+            system_prompt_override = get_preset_prompt(preset_key)
+
         # 获取向量数据库
         collection_name = _chroma_collection_name(resolved_id)
         store = get_or_create_store(
@@ -2191,13 +2364,20 @@ def chat_stream_api():
             n_results=n_results,
         )
 
-        # 向量检索 + Prompt 组装
-
-        retrieved = store.query_similar(
-            query_vector=query_vector,
-            n_results=n_results,
-            where=where,
-        )
+        # ── 向量化 / 关键词检索 ──
+        if query_vector is not None:
+            retrieved = store.query_similar(
+                query_vector=query_vector,
+                n_results=n_results,
+                where=where,
+            )
+        else:
+            keywords = _extract_question_keywords(question)
+            logger.info("RAG 关键词提取: question='%s' → keywords=%s", question[:80], keywords)
+            retrieved = store.query_by_keywords(keywords=keywords, n_results=n_results)
+            if not retrieved:
+                logger.warning("关键词无匹配，回退到全库采样 %d 条细胞", n_results)
+                retrieved = store.query_by_metadata(where={}, limit=n_results)
         history = _CHAT_HISTORY.get(session_id) if session_id else None
         builder = engine._builder  # type: ignore[attr-defined]
         if history:
@@ -2206,12 +2386,14 @@ def chat_stream_api():
                 retrieved_cells=retrieved,
                 history=history,
                 extra_system_info=engine._dataset_info,  # type: ignore[attr-defined]
+                system_prompt=system_prompt_override,
             )
         else:
             messages = builder.build_messages(
                 user_question=question,
                 retrieved_cells=retrieved,
                 extra_system_info=engine._dataset_info,  # type: ignore[attr-defined]
+                system_prompt=system_prompt_override,
             )
 
         llm_client = get_llm_client()
@@ -2220,16 +2402,26 @@ def chat_stream_api():
         def generate():
             full_text_parts = []
             try:
-                for chunk in llm_client.stream_chat(messages=messages):
+                for chunk in llm_client.stream_chat(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                ):
                     full_text_parts.append(chunk)
                     # SSE 格式：data: <内容>\n\n
                     yield f"data: {chunk}\n\n"
             except Exception as exc:
                 yield f"data: [ERROR] {exc}\n\n"
                 return
-            # 流结束后保存历史
-            if session_id and full_text_parts:
-                _CHAT_HISTORY.append(session_id, question, "".join(full_text_parts))
+            # 流结束后：强制 Markdown 格式化 + 保存历史
+            raw_text = "".join(full_text_parts)
+            formatted_text = _enforce_markdown(raw_text)
+            if session_id and formatted_text:
+                _CHAT_HISTORY.append(session_id, question, formatted_text)
+            # 发送格式化后的完整文本（前端用它替换流式内容）
+            yield f"data: [FORMATTED] {formatted_text}\n\n"
+            # 发送检索来源数据（供前端展示 RAG 溯源）
+            yield f"data: [SOURCES] {json.dumps(retrieved, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
 
         return Response(

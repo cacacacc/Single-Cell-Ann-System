@@ -1,0 +1,1551 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* ================= Chat Layout ================= */
+    .chat-container {
+        display: flex;
+        height: calc(100vh - 130px);
+        gap: 0;
+        position: relative;
+    }
+    .chat-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        transition: margin-right 0.35s ease, margin-left 0.35s ease;
+    }
+    .chat-main.llm-sidebar-open {
+        margin-right: 300px;
+    }
+
+    /* ================= Chat Header ================= */
+    .chat-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 0 12px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        margin-bottom: 6px;
+        flex-shrink: 0;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .chat-header-left {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+    .chat-header-left .ai-icon {
+        width: 42px; height: 42px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #4A90E2, #6F2656);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.3rem;
+    }
+    .chat-title {
+        font-size: 1.15rem; font-weight: 700;
+    }
+    .chat-subtitle {
+        font-size: 0.78rem; color: #8A96A8;
+    }
+    .chat-header-right {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .btn-chat-action {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        color: #8A96A8;
+        padding: 7px 14px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex; align-items: center; gap: 6px;
+    }
+    .btn-chat-action:hover {
+        background: rgba(255,255,255,0.1);
+        color: #fff;
+    }
+    .btn-chat-action.active {
+        background: rgba(74, 144, 226, 0.2);
+        border-color: #4A90E2;
+        color: #4A90E2;
+    }
+    .btn-chat-action.btn-primary-action {
+        background: #4A90E2; color: #fff; border-color: #4A90E2;
+    }
+    .btn-chat-action.btn-primary-action:hover {
+        background: #5BA0F2;
+    }
+
+    /* ---- Dataset Selector ---- */
+    .dataset-selector {
+        display: flex; align-items: center; gap: 6px;
+    }
+    .dataset-selector label {
+        font-size: 0.75rem; color: #8A96A8; white-space: nowrap; margin: 0;
+    }
+    .dataset-selector select {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        color: #fff; border-radius: 6px;
+        padding: 4px 8px; font-size: 0.8rem;
+        max-width: 200px;
+    }
+    .dataset-selector select:focus {
+        outline: none; border-color: #4A90E2;
+    }
+    .dataset-selector select option {
+        background: #141A30; color: #fff;
+    }
+
+    /* ================= Messages Area ================= */
+    .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px 6px 16px 0;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        scroll-behavior: smooth;
+    }
+    .chat-messages::-webkit-scrollbar {
+        width: 5px;
+    }
+    .chat-messages::-webkit-scrollbar-thumb {
+        background: rgba(255,255,255,0.08); border-radius: 10px;
+    }
+
+    /* ================= Welcome Screen ================= */
+    .chat-welcome {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        gap: 16px;
+        color: #8A96A8;
+    }
+    .chat-welcome .welcome-icon {
+        width: 72px; height: 72px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, rgba(74,144,226,0.2), rgba(111,38,86,0.2));
+        display: flex; align-items: center; justify-content: center;
+        font-size: 2rem;
+        margin-bottom: 8px;
+    }
+    .chat-welcome h3 { color: #fff; font-weight: 600; }
+    .chat-welcome .suggestions {
+        display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+        margin-top: 12px; max-width: 620px;
+    }
+    .chat-welcome .suggestion-chip {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.08);
+        color: #A0AABF;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .chat-welcome .suggestion-chip:hover {
+        background: rgba(74,144,226,0.15);
+        border-color: #4A90E2;
+        color: #fff;
+    }
+
+    /* ================= Message Bubbles ================= */
+    .message-row {
+        display: flex;
+        gap: 14px;
+        max-width: 85%;
+        animation: msgIn 0.3s ease;
+    }
+    @keyframes msgIn {
+        from { opacity: 0; transform: translateY(12px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    .message-row.user {
+        align-self: flex-end;
+        flex-direction: row-reverse;
+    }
+    .message-row.assistant {
+        align-self: flex-start;
+    }
+    .message-row.system-msg {
+        align-self: center;
+        max-width: 90%;
+    }
+
+    .msg-avatar {
+        width: 36px; height: 36px;
+        border-radius: 8px;
+        flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.9rem;
+    }
+    .message-row.user .msg-avatar {
+        background: #6F2656;
+    }
+    .message-row.assistant .msg-avatar {
+        background: linear-gradient(135deg, #4A90E2, #3A7BD5);
+    }
+    .message-row.system-msg .msg-avatar {
+        background: rgba(245,166,35,0.2);
+    }
+
+    .msg-bubble {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 14px;
+        padding: 14px 18px;
+        color: #E0E0E0;
+        font-size: 0.93rem;
+        line-height: 1.65;
+        position: relative;
+    }
+    .message-row.user .msg-bubble {
+        background: rgba(111, 38, 86, 0.2);
+        border-color: rgba(111, 38, 86, 0.3);
+    }
+    .message-row.system-msg .msg-bubble {
+        background: rgba(245,166,35,0.06);
+        border-color: rgba(245,166,35,0.15);
+        color: #F5A623;
+        font-size: 0.85rem;
+        text-align: center;
+    }
+    .msg-bubble.msg-error {
+        background: rgba(231,76,60,0.08);
+        border-color: rgba(231,76,60,0.2);
+        color: #E74C3C;
+    }
+
+    .msg-bubble p { margin: 0 0 8px 0; }
+    .msg-bubble p:last-child { margin-bottom: 0; }
+    .msg-bubble ul, .msg-bubble ol { margin: 6px 0; padding-left: 20px; }
+    .msg-bubble li { margin-bottom: 4px; }
+    .msg-bubble code {
+        background: rgba(0,0,0,0.3); padding: 2px 6px;
+        border-radius: 4px; font-size: 0.85em;
+    }
+    .msg-bubble pre {
+        background: rgba(0,0,0,0.4); padding: 14px;
+        border-radius: 8px; overflow-x: auto;
+        font-size: 0.85em; margin: 10px 0;
+        border: 1px solid rgba(255,255,255,0.06);
+        position: relative;
+    }
+    .msg-bubble pre .code-lang-label {
+        position: absolute; top: 6px; right: 10px;
+        font-size: 0.7rem; color: #5A6478;
+        text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .msg-bubble strong { color: #fff; }
+    .msg-bubble em { color: #b0b8cc; }
+    .msg-bubble h1, .msg-bubble h2, .msg-bubble h3, .msg-bubble h4 {
+        color: #fff; margin: 14px 0 6px 0;
+    }
+    .msg-bubble h1 { font-size: 1.35rem; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px; }
+    .msg-bubble h2 { font-size: 1.2rem; }
+    .msg-bubble h3 { font-size: 1.05rem; }
+    .msg-bubble h4 { font-size: 0.95rem; color: #A0AABF; }
+    .msg-bubble hr {
+        border: none; border-top: 1px solid rgba(255,255,255,0.08);
+        margin: 14px 0;
+    }
+    .msg-bubble blockquote {
+        border-left: 3px solid #4A90E2;
+        padding: 6px 14px; margin: 10px 0;
+        background: rgba(74,144,226,0.06);
+        border-radius: 0 6px 6px 0;
+        color: #A0AABF;
+    }
+    .msg-bubble table {
+        width: 100%; border-collapse: collapse;
+        margin: 10px 0; font-size: 0.85rem;
+    }
+    .msg-bubble table td, .msg-bubble table th {
+        border: 1px solid rgba(255,255,255,0.08);
+        padding: 6px 12px; text-align: left;
+    }
+    .msg-bubble table tr:first-child td {
+        background: rgba(74,144,226,0.1);
+        font-weight: 600; color: #fff;
+    }
+
+    .msg-meta {
+        display: flex; align-items: center; gap: 10px;
+        margin-top: 8px; font-size: 0.75rem; color: #6f7c92;
+    }
+    .msg-meta .btn-source-toggle, .msg-meta .btn-retry {
+        background: transparent; border: 1px solid rgba(255,255,255,0.1);
+        color: #4A90E2; font-size: 0.75rem; padding: 3px 10px;
+        border-radius: 12px; cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex; align-items: center; gap: 4px;
+    }
+    .msg-meta .btn-retry { color: #F5A623; }
+    .msg-meta .btn-source-toggle:hover, .msg-meta .btn-retry:hover {
+        background: rgba(74,144,226,0.15); border-color: #4A90E2;
+    }
+    .msg-meta .btn-retry:hover {
+        background: rgba(245,166,35,0.15); border-color: #F5A623;
+    }
+    .msg-meta .btn-source-toggle.active {
+        background: rgba(74,144,226,0.25); border-color: #4A90E2; color: #fff;
+    }
+
+    /* ================= Inline Source Cards ================= */
+    .inline-sources {
+        margin-top: 14px;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        padding-top: 12px;
+    }
+    .inline-sources-header {
+        font-size: 0.82rem; font-weight: 600; color: #4A90E2;
+        margin-bottom: 10px;
+        display: flex; align-items: center; gap: 6px;
+    }
+    .inline-source-card {
+        background: rgba(0,0,0,0.2);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin-bottom: 8px;
+        font-size: 0.82rem;
+    }
+    .inline-source-card:last-child { margin-bottom: 0; }
+    .inline-source-rank {
+        font-weight: 700; color: #4A90E2; margin-right: 6px;
+    }
+    .inline-source-type {
+        display: inline-block;
+        background: #E83E8C; color: #fff;
+        padding: 2px 10px; border-radius: 10px;
+        font-size: 0.75rem; margin-left: 6px;
+    }
+    .inline-source-genes {
+        color: #A0AABF; margin-top: 4px;
+        font-size: 0.78rem;
+        word-break: break-all;
+    }
+    .inline-source-meta {
+        color: #6f7c92; font-size: 0.75rem; margin-top: 3px;
+        display: flex; gap: 14px; flex-wrap: wrap;
+    }
+
+    /* ================= Input Area ================= */
+    .chat-input-area {
+        flex-shrink: 0;
+        padding: 14px 0 10px 0;
+        border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .chat-input-row {
+        display: flex; gap: 10px; align-items: flex-end;
+    }
+    .chat-input-wrapper {
+        flex: 1;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 14px;
+        padding: 8px 14px;
+        display: flex; align-items: flex-end;
+        transition: border-color 0.2s;
+    }
+    .chat-input-wrapper:focus-within {
+        border-color: #4A90E2;
+        box-shadow: 0 0 0 3px rgba(74,144,226,0.1);
+    }
+    .chat-input-wrapper textarea {
+        flex: 1;
+        background: transparent; border: none;
+        color: #fff; outline: none; resize: none;
+        font-size: 0.93rem; line-height: 1.5;
+        max-height: 120px; min-height: 24px;
+        padding: 4px 0;
+        font-family: inherit;
+    }
+    .chat-input-wrapper textarea::placeholder {
+        color: #5A6478;
+    }
+    .chat-input-wrapper textarea:disabled {
+        color: #5A6478;
+    }
+    .btn-send {
+        width: 40px; height: 40px;
+        border-radius: 12px;
+        background: #4A90E2;
+        border: none; color: #fff;
+        font-size: 1rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+    }
+    .btn-send:hover {
+        background: #5BA0F2;
+        box-shadow: 0 0 16px rgba(74,144,226,0.4);
+    }
+    .btn-send:disabled {
+        background: rgba(255,255,255,0.08); color: #5A6478;
+        cursor: not-allowed; box-shadow: none;
+    }
+    .btn-stop {
+        width: 40px; height: 40px;
+        border-radius: 12px;
+        background: #E74C3C;
+        border: none; color: #fff;
+        font-size: 0.9rem;
+        cursor: pointer;
+        flex-shrink: 0;
+        display: none;
+        align-items: center; justify-content: center;
+    }
+    .chat-input-hint {
+        text-align: center; font-size: 0.72rem; color: #5A6478;
+        margin-top: 6px;
+    }
+
+    /* ================= Typing Indicator ================= */
+    .typing-indicator {
+        display: flex; align-items: center; gap: 6px;
+        padding: 4px 0;
+    }
+    .typing-dot {
+        width: 7px; height: 7px;
+        background: #8A96A8;
+        border-radius: 50%;
+        animation: typingBounce 1.4s ease-in-out infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typingBounce {
+        0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
+        30% { transform: translateY(-8px); opacity: 1; }
+    }
+
+    /* ================= Status Banner ================= */
+    .chat-status-banner {
+        background: rgba(231, 76, 60, 0.12);
+        border: 1px solid rgba(231, 76, 60, 0.25);
+        color: #E74C3C; padding: 10px 16px;
+        border-radius: 8px; font-size: 0.85rem;
+        margin-bottom: 10px; display: none;
+        line-height: 1.5;
+    }
+    .chat-status-banner.show { display: block; }
+    .chat-status-banner.info {
+        background: rgba(74, 144, 226, 0.08);
+        border-color: rgba(74, 144, 226, 0.2);
+        color: #4A90E2;
+    }
+    .chat-status-banner.warn {
+        background: rgba(245,166,35,0.08);
+        border-color: rgba(245,166,35,0.2);
+        color: #F5A623;
+    }
+
+    /* ================= LLM Settings Sidebar (right) ================= */
+    .llm-sidebar {
+        position: absolute;
+        right: 0; top: 0; bottom: 0;
+        width: 300px;
+        background: #111827;
+        border-left: 1px solid rgba(255,255,255,0.08);
+        display: flex; flex-direction: column;
+        transform: translateX(100%);
+        transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        z-index: 25;
+        border-radius: 16px 0 0 16px;
+    }
+    .llm-sidebar.open { transform: translateX(0); }
+    .llm-sidebar-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 16px 18px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        flex-shrink: 0;
+    }
+    .llm-sidebar-title {
+        font-weight: 700; font-size: 0.95rem;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .llm-sidebar-title i { color: #4A90E2; }
+    .llm-sidebar-body {
+        flex: 1; overflow-y: auto; padding: 18px;
+        display: flex; flex-direction: column; gap: 20px;
+    }
+    .llm-sidebar-body::-webkit-scrollbar { width: 4px; }
+    .llm-sidebar-body::-webkit-scrollbar-thumb {
+        background: rgba(255,255,255,0.08); border-radius: 10px;
+    }
+
+    /* ── Sidebar control groups ── */
+    .llm-control-group {
+        display: flex; flex-direction: column; gap: 8px;
+    }
+    .llm-control-group-label {
+        color: #8A96A8; font-size: 0.72rem;
+        text-transform: uppercase; letter-spacing: 0.5px;
+        display: flex; align-items: center; gap: 6px;
+        font-weight: 600;
+    }
+    .llm-control-group-label i { font-size: 0.75rem; color: #5A6478; width: 14px; text-align: center; }
+    .llm-control-group-desc {
+        font-size: 0.7rem; color: #5A6478; line-height: 1.4;
+    }
+
+    /* Temperature */
+    .llm-temp-row {
+        display: flex; align-items: center; gap: 10px;
+    }
+    .llm-temp-slider {
+        -webkit-appearance: none; appearance: none;
+        flex: 1; height: 5px;
+        border-radius: 10px;
+        background: linear-gradient(90deg, #4A90E2, #E83E8C);
+        outline: none; cursor: pointer;
+    }
+    .llm-temp-slider::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        width: 18px; height: 18px;
+        border-radius: 50%;
+        background: #fff; border: 2px solid #4A90E2;
+        cursor: pointer; box-shadow: 0 0 8px rgba(74,144,226,0.3);
+    }
+    .llm-temp-value {
+        font-weight: 700; font-size: 0.95rem; color: #fff;
+        min-width: 36px; text-align: center;
+    }
+    .llm-temp-presets {
+        display: flex; gap: 6px; flex-wrap: wrap;
+    }
+    .llm-temp-preset-chip {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.08);
+        color: #8A96A8; font-size: 0.7rem;
+        padding: 3px 10px; border-radius: 12px;
+        cursor: pointer; transition: all 0.2s;
+    }
+    .llm-temp-preset-chip:hover {
+        background: rgba(74,144,226,0.15);
+        border-color: #4A90E2; color: #fff;
+    }
+
+    /* Selects */
+    .llm-select {
+        width: 100%;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        color: #fff; border-radius: 8px;
+        padding: 8px 12px; font-size: 0.82rem;
+        cursor: pointer; transition: border-color 0.2s;
+    }
+    .llm-select:focus { outline: none; border-color: #4A90E2; }
+    .llm-select option { background: #141A30; color: #fff; }
+
+    /* ================= Responsive ================= */
+    @media (max-width: 900px) {
+        .llm-sidebar { width: 280px; }
+        .chat-main.llm-sidebar-open { margin-right: 280px; }
+        .message-row { max-width: 95%; }
+    }
+    @media (max-width: 680px) {
+        .llm-sidebar { width: 100%; border-radius: 0; }
+        .chat-main.llm-sidebar-open { margin-right: 0; }
+        .message-row { max-width: 100%; }
+    }
+</style>
+
+<!-- ==================== Chat Layout ==================== -->
+<div class="chat-container" id="chatContainer">
+    <div class="chat-main" id="chatMain">
+        <!-- ========== Chat Header ========== -->
+        <div class="chat-header">
+            <div class="chat-header-left">
+                <div class="ai-icon"><i class="fa-solid fa-dna" style="color: #fff;"></i></div>
+                <div>
+                    <div class="chat-title">AI 细胞助手 <span style="font-size:0.7rem;color:#6f7c92;font-weight:400;">RAG 智能问答</span></div>
+                    <div class="chat-subtitle" id="modelInfo">正在检查系统状态...</div>
+                </div>
+            </div>
+            <div class="chat-header-right">
+                <div class="dataset-selector">
+                    <label>📦 数据集</label>
+                    <select id="datasetSelect" onchange="onDatasetChange()">
+                        <option value="">加载中...</option>
+                    </select>
+                </div>
+                <button class="btn-chat-action" id="btnClearHistory" onclick="clearHistory()" title="清空对话历史" style="display:none;">
+                    <i class="fa-solid fa-eraser"></i> 清空历史
+                </button>
+                <button class="btn-chat-action" id="btnNewChat" onclick="newChat()" title="开始新对话">
+                    <i class="fa-solid fa-plus"></i> 新对话
+                </button>
+                <button class="btn-chat-action" id="btnLLMSettings" onclick="toggleLLMControls()" title="大模型参数设置">
+                    <i class="fa-solid fa-sliders"></i> 参数
+                </button>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="chat-welcome" id="chatWelcome">
+                <div class="welcome-icon"><i class="fa-solid fa-robot"></i></div>
+                <h3>你好，我是 AI 细胞助手</h3>
+                <p style="max-width:480px;">
+                    我可以根据单细胞数据库中的细胞类型、高表达基因和元数据信息，
+                    回答关于细胞功能、分型和生物学意义的问题。
+                </p>
+                <div class="suggestions" id="welcomeSuggestions">
+                    <span class="suggestion-chip" onclick="askSuggestion(this)">帮我分析一下包含 ALB 基因的高表达细胞主要属于什么类型？</span>
+                    <span class="suggestion-chip" onclick="askSuggestion(this)">Hepatocyte 和 Kupffer cell 在基因表达上有什么主要差异？</span>
+                    <span class="suggestion-chip" onclick="askSuggestion(this)">这些相似细胞主要分布在哪些组织或器官中？</span>
+                    <span class="suggestion-chip" onclick="askSuggestion(this)">检索结果中最常见的细胞类型有什么生物学功能？</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== Input Area ========== -->
+        <div class="chat-input-area">
+            <div class="chat-status-banner" id="chatStatusBanner"></div>
+            <div class="chat-input-row">
+                <div class="chat-input-wrapper">
+                    <textarea
+                        id="chatInput"
+                        rows="1"
+                        placeholder="输入你的问题... (Enter 发送, Shift+Enter 换行)"
+                        onkeydown="handleInputKey(event)"
+                        oninput="autoResizeInput()"
+                    ></textarea>
+                </div>
+                <button class="btn-send" id="btnSend" onclick="sendMessage()" title="发送">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+                <button class="btn-stop" id="btnStop" onclick="stopStreaming()" title="停止生成">
+                    <i class="fa-solid fa-stop"></i>
+                </button>
+            </div>
+            <div class="chat-input-hint" id="chatInputHint">
+                AI 细胞助手基于 RAG 技术检索单细胞数据库后生成回答，请核对关键信息。
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== LLM Settings Sidebar (right) ==================== -->
+    <div class="llm-sidebar" id="llmSidebar">
+        <div class="llm-sidebar-header">
+            <div class="llm-sidebar-title">
+                <i class="fa-solid fa-sliders"></i>
+                大模型参数设置
+            </div>
+            <button class="btn-chat-action" onclick="toggleLLMControls()" title="关闭" style="padding:4px 10px;">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="llm-sidebar-body">
+
+            <!-- 角色设定 -->
+            <div class="llm-control-group">
+                <div class="llm-control-group-label">
+                    <i class="fa-solid fa-user-tie"></i> AI 角色设定
+                </div>
+                <div class="llm-control-group-desc">
+                    切换 AI 的回答风格与侧重点
+                </div>
+                <select class="llm-select" id="llmPreset">
+                    <option value="bioinfo_expert" selected>🧬 生信分析专家 — 专业全面</option>
+                    <option value="strict_analyst">📊 严谨统计员 — 只陈述数据</option>
+                    <option value="science_communicator">📖 科普助手 — 通俗易懂</option>
+                </select>
+            </div>
+
+            <!-- Temperature -->
+            <div class="llm-control-group">
+                <div class="llm-control-group-label">
+                    <i class="fa-solid fa-temperature-half"></i> Temperature 温度
+                </div>
+                <div class="llm-control-group-desc">
+                    控制回答随机性：0 = 严谨死板，1 = 更有创造力
+                </div>
+                <div class="llm-temp-row">
+                    <input type="range" class="llm-temp-slider" id="llmTemperature"
+                           min="0" max="1" step="0.05" value="0.7"
+                           oninput="updateTempDisplay()">
+                    <span class="llm-temp-value" id="llmTempValue">0.70</span>
+                </div>
+                <div class="llm-temp-presets">
+                    <span class="llm-temp-preset-chip" onclick="setTemp(0)">❄ 0.0 极严谨</span>
+                    <span class="llm-temp-preset-chip" onclick="setTemp(0.3)">⚖ 0.3 偏严谨</span>
+                    <span class="llm-temp-preset-chip" onclick="setTemp(0.7)">🎯 0.7 均衡</span>
+                    <span class="llm-temp-preset-chip" onclick="setTemp(1.0)">🔥 1.0 灵活</span>
+                </div>
+            </div>
+
+            <!-- Max Tokens -->
+            <div class="llm-control-group">
+                <div class="llm-control-group-label">
+                    <i class="fa-solid fa-text-width"></i> Max Tokens 最大长度
+                </div>
+                <div class="llm-control-group-desc">
+                    控制 AI 回答的最大输出长度
+                </div>
+                <select class="llm-select" id="llmMaxTokens">
+                    <option value="256">256 — 简短回复</option>
+                    <option value="512">512 — 适中回复</option>
+                    <option value="1024" selected>1024 — 标准回复</option>
+                    <option value="2048">2048 — 详细回复</option>
+                    <option value="4096">4096 — 完整回复</option>
+                </select>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // ==================== State ====================
+    let sessionId = generateSessionId();
+    let currentAbortController = null;
+    let currentSources = [];
+    let isStreaming = false;
+
+    // System state (populated by init)
+    let sysVDB = { available: false, populated: false, count: 0, collection: '' };
+    let sysLLM = { configured: false, provider: '', model: '' };
+    let sysDataset = { id: '', filename: '', nCells: 0 };
+    let datasets = [];
+
+    // DOM refs
+    const chatMessages  = document.getElementById('chatMessages');
+    const chatWelcome   = document.getElementById('chatWelcome');
+    const chatInput     = document.getElementById('chatInput');
+    const btnSend       = document.getElementById('btnSend');
+    const btnStop       = document.getElementById('btnStop');
+    const statusBanner  = document.getElementById('chatStatusBanner');
+    const datasetSelect = document.getElementById('datasetSelect');
+    const modelInfo     = document.getElementById('modelInfo');
+    const chatInputHint = document.getElementById('chatInputHint');
+    const chatMain      = document.getElementById('chatMain');
+
+    function generateSessionId() {
+        return 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+    }
+
+    // ===================================================================
+    //  INIT — check all backend systems
+    // ===================================================================
+    async function initChat() {
+        // 1) Load datasets
+        await loadDatasets();
+
+        // 2) Check LLM
+        await checkLLM();
+
+        // 3) Check Vector DB for selected dataset
+        await checkVectorDB();
+
+        // 4) Update UI state
+        updateInputState();
+    }
+
+    async function loadDatasets() {
+        try {
+            const res = await fetch('/api/datasets');
+            const data = await res.json();
+            datasets = data.datasets || [];
+            datasetSelect.innerHTML = datasets.length
+                ? datasets.map(d => `<option value="${d.id}">${d.filename} (${d.n_cells || '?'} 细胞)</option>`).join('')
+                : '<option value="">无可用数据集</option>';
+
+            if (datasets.length > 0) {
+                sysDataset.id = datasets[0].id;
+                sysDataset.filename = datasets[0].filename;
+                sysDataset.nCells = datasets[0].n_cells || 0;
+                datasetSelect.value = sysDataset.id;
+            }
+        } catch (err) {
+            datasets = [];
+            datasetSelect.innerHTML = '<option value="">加载失败</option>';
+        }
+    }
+
+    async function checkLLM() {
+        try {
+            const res = await fetch('/api/llm/info');
+            const data = await res.json();
+            sysLLM.configured = data.api_key_set === true;
+            sysLLM.provider = data.provider || '?';
+            sysLLM.model = data.model || '?';
+
+            if (sysLLM.configured) {
+                modelInfo.textContent = `模型：${sysLLM.provider} / ${sysLLM.model} · 就绪`;
+                modelInfo.style.color = '#2ecc71';
+            } else {
+                modelInfo.textContent = '⚠ 大模型未配置，请在 .env 中设置 API Key';
+                modelInfo.style.color = '#F5A623';
+            }
+        } catch (err) {
+            sysLLM.configured = false;
+            modelInfo.textContent = '⚠ LLM 状态检测失败';
+            modelInfo.style.color = '#E74C3C';
+        }
+    }
+
+    async function checkVectorDB() {
+        const dsId = datasetSelect.value;
+        if (!dsId) {
+            sysVDB.available = false;
+            sysVDB.populated = false;
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/vectordb/status?dataset_id=${encodeURIComponent(dsId)}`);
+            const data = await res.json();
+
+            if (data.chroma_available === false) {
+                sysVDB.available = false;
+                sysVDB.populated = false;
+                return;
+            }
+
+            sysVDB.available = true;
+            sysVDB.populated = data.is_populated === true;
+            sysVDB.count = data.count || 0;
+            sysVDB.collection = data.collection_name || '';
+        } catch (err) {
+            sysVDB.available = false;
+            sysVDB.populated = false;
+        }
+    }
+
+    function updateInputState() {
+        const canSend = sysVDB.populated && sysDataset.id;
+        chatInput.disabled = !canSend;
+        btnSend.disabled = !canSend;
+
+        if (!sysVDB.populated && sysVDB.available) {
+            chatInputHint.innerHTML = '⚠️ 向量数据库未初始化，请前往数据管理页初始化。';
+        } else if (!sysLLM.configured) {
+            chatInputHint.innerHTML = '💡 LLM 未配置，但您仍可提问 — 系统将回退到向量检索展示结果（不含 AI 生成回答）。';
+        } else {
+            chatInputHint.innerHTML = 'AI 细胞助手基于 RAG 技术检索单细胞数据库后生成回答，请核对关键信息。';
+        }
+
+        // Also update suggestion chips
+        if (!sysVDB.populated || !sysDataset.id) {
+            document.getElementById('welcomeSuggestions').style.opacity = '0.4';
+            document.getElementById('welcomeSuggestions').style.pointerEvents = 'none';
+        } else {
+            document.getElementById('welcomeSuggestions').style.opacity = '1';
+            document.getElementById('welcomeSuggestions').style.pointerEvents = 'auto';
+        }
+    }
+
+    // ===================================================================
+    //  Vector DB Init (one-click)
+    // ===================================================================
+    async function initVectorDB() {
+        const dsId = datasetSelect.value;
+        if (!dsId) return;
+
+        showStatus('正在将细胞向量数据写入 ChromaDB，请稍候...', 'info');
+
+        try {
+            const res = await fetch('/api/vectordb/init', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dataset_id: dsId,
+                    use_rep: 'X_pca',
+                    distance_metric: 'cosine',
+                    force: false,
+                }),
+            });
+            const data = await res.json();
+
+            if (!res.ok) throw new Error(data.error || '初始化失败');
+
+            if (data.status === 'skipped') {
+                showStatus('向量数据库已存在数据（跳过重复写入）', 'info');
+            } else {
+                showStatus(`✅ 向量数据库初始化完成！写入 ${data.count} 条细胞向量，耗时 ${data.elapsed_ms}ms`, 'info');
+            }
+
+            // Refresh status
+            await checkVectorDB();
+            updateInputState();
+        } catch (err) {
+            showStatus('❌ 向量数据库初始化失败：' + err.message, 'error');
+        }
+    }
+
+    // ===================================================================
+    //  Dataset change
+    // ===================================================================
+    async function onDatasetChange() {
+        const dsId = datasetSelect.value;
+        const ds = datasets.find(d => d.id === dsId);
+        if (ds) {
+            sysDataset.id = ds.id;
+            sysDataset.filename = ds.filename;
+            sysDataset.nCells = ds.n_cells || 0;
+        }
+
+        if (sessionId) {
+            try { await fetch(`/api/chat/history?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' }); } catch (e) {}
+        }
+        sessionId = generateSessionId();
+        chatMessages.innerHTML = '';
+        chatMessages.appendChild(chatWelcome);
+        chatWelcome.style.display = 'flex';
+        currentSources = [];
+        document.getElementById('btnClearHistory').style.display = 'none';
+
+        await checkVectorDB();
+        updateInputState();
+    }
+
+    // ===================================================================
+    //  Status Banner
+    // ===================================================================
+    function showStatus(msg, type) {
+        statusBanner.innerHTML = msg;
+        statusBanner.className = 'chat-status-banner show ' + (type || '');
+    }
+    function hideStatus() {
+        statusBanner.className = 'chat-status-banner';
+    }
+
+    // ===================================================================
+    //  Input Handling
+    // ===================================================================
+    function autoResizeInput() {
+        chatInput.style.height = 'auto';
+        chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+    }
+    function handleInputKey(event) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessage();
+        }
+    }
+
+    // ===================================================================
+    //  SEND — main entry point
+    // ===================================================================
+    async function sendMessage() {
+        if (isStreaming) return;
+        const question = chatInput.value.trim();
+        if (!question) return;
+
+        // Pre-flight checks
+        if (!sysVDB.populated) {
+            showStatus('❌ 向量数据库未初始化，请先点击上方「一键初始化」按钮。', 'error');
+            return;
+        }
+        if (!sysDataset.id) {
+            showStatus('❌ 没有可用数据集，请先上传 .h5ad 数据集。', 'error');
+            return;
+        }
+
+        hideStatus();
+        chatWelcome.style.display = 'none';
+        document.getElementById('btnClearHistory').style.display = 'flex';
+
+        appendMessage('user', question);
+        chatInput.value = '';
+        chatInput.style.height = 'auto';
+
+        const typingMsg = appendTypingIndicator();
+
+        isStreaming = true;
+        btnSend.disabled = true;
+        btnStop.style.display = 'flex';
+        currentAbortController = new AbortController();
+        currentSources = [];
+
+        try {
+            if (sysLLM.configured) {
+                await streamChat(question, typingMsg);
+            } else {
+                await fallbackNonStream(question, typingMsg);
+            }
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                removeTypingIndicator(typingMsg);
+                appendErrorMessage(err);
+            }
+        } finally {
+            isStreaming = false;
+            btnSend.disabled = false;
+            btnStop.style.display = 'none';
+            currentAbortController = null;
+        }
+
+        scrollToBottom();
+    }
+
+    function stopStreaming() {
+        if (currentAbortController) {
+            currentAbortController.abort();
+        }
+        isStreaming = false;
+        btnSend.disabled = false;
+        btnStop.style.display = 'none';
+    }
+
+    // ===================================================================
+    //  SSE Streaming (LLM configured)
+    // ===================================================================
+    async function streamChat(question, typingMsg) {
+        const controls = getLLMControls();
+        const res = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: question,
+                dataset_id: sysDataset.id || undefined,
+                n_results: 5,
+                session_id: sessionId,
+                temperature: controls.temperature,
+                max_tokens: controls.max_tokens,
+                preset: controls.preset,
+            }),
+            signal: currentAbortController.signal,
+        });
+
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            // Detect specific errors
+            if (res.status === 501) {
+                throw new Error('CHROMADB_NOT_INSTALLED');
+            }
+            if (errData.action === 'init_vectordb') {
+                throw new Error('VDB_NOT_INIT');
+            }
+            throw new Error(errData.error || `服务器错误 (HTTP ${res.status})`);
+        }
+
+        removeTypingIndicator(typingMsg);
+        const { bubble, contentEl } = appendStreamingBubble();
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullText = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6).trim();
+
+                if (data === '[DONE]') {
+                    finalizeAssistantBubble(bubble, fullText);
+                    return;
+                }
+
+                if (data.startsWith('[FORMATTED]')) {
+                    fullText = data.slice(12);
+                    contentEl.innerHTML = renderMarkdown(fullText);
+                    continue;
+                }
+
+                if (data.startsWith('[SOURCES]')) {
+                    try {
+                        currentSources = JSON.parse(data.slice(10));
+                    } catch (e) { /* ignore parse errors */ }
+                    continue;
+                }
+
+                if (data.startsWith('[ERROR]')) {
+                    throw new Error(data.slice(8));
+                }
+
+                fullText += data;
+                contentEl.innerHTML = renderMarkdown(fullText);
+                scrollToBottom();
+            }
+        }
+
+        finalizeAssistantBubble(bubble, fullText);
+    }
+
+    // ===================================================================
+    //  Fallback: non-streaming /api/chat (LLM not configured or as backup)
+    // ===================================================================
+    async function fallbackNonStream(question, typingMsg) {
+        const controls = getLLMControls();
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: question,
+                dataset_id: sysDataset.id || undefined,
+                n_results: 5,
+                session_id: sessionId,
+                temperature: controls.temperature,
+                max_tokens: controls.max_tokens,
+                preset: controls.preset,
+            }),
+            signal: currentAbortController.signal,
+        });
+
+        const data = await res.json();
+        removeTypingIndicator(typingMsg);
+
+        if (!res.ok) {
+            if (res.status === 501) throw new Error('CHROMADB_NOT_INSTALLED');
+            if (data.action === 'init_vectordb') throw new Error('VDB_NOT_INIT');
+
+            // Embedding error → LLM not configured
+            if (data.error && (data.error.includes('Embedding') || data.error.includes('embed'))) {
+                appendMessage('assistant',
+                    '⚠️ **无法将问题转为查询向量**\n\n'
+                    + '当前未配置 Embedding API，系统无法将自然语言问题转化为向量进行检索。\n\n'
+                    + '**解决方案（任选其一）：**\n'
+                    + '1. 在 `.env` 中配置 `ZHIPU_API_KEY`（推荐智谱 GLM）或 `OPENAI_API_KEY`\n'
+                    + '2. 前往「相似检索」页面，使用细胞 ID 进行基于向量的检索\n\n'
+                    + `> 技术细节：${data.error}`
+                );
+                return;
+            }
+
+            throw new Error(data.error || '请求失败');
+        }
+
+        if (data.answer) {
+            appendMessage('assistant', data.answer);
+        }
+        if (data.retrieved_cells && data.retrieved_cells.length > 0) {
+            currentSources = data.retrieved_cells;
+        }
+    }
+
+    // ===================================================================
+    //  Error message rendering
+    // ===================================================================
+    function appendErrorMessage(err) {
+        let msg = '';
+        switch (err.message) {
+            case 'CHROMADB_NOT_INSTALLED':
+                msg = '❌ **ChromaDB 未安装**\n\n请在服务器上执行：\n```\npip install chromadb\n```\n然后刷新页面。';
+                break;
+            case 'VDB_NOT_INIT':
+                msg = '❌ **向量数据库未初始化**\n\n请点击上方状态栏中的「一键初始化」按钮，将细胞数据写入 ChromaDB。';
+                break;
+            default:
+                msg = `❌ **请求失败**\n\n${err.message || '未知错误'}\n\n请检查后端日志或稍后重试。`;
+                break;
+        }
+        appendMessage('assistant', msg, true);
+    }
+
+    // ===================================================================
+    //  Message Rendering
+    // ===================================================================
+    function appendMessage(role, content, isError) {
+        const row = document.createElement('div');
+        row.className = `message-row ${role}`;
+
+        const avatarIcon = role === 'user'
+            ? '<i class="fa-solid fa-user"></i>'
+            : '<i class="fa-solid fa-dna"></i>';
+
+        const bubbleClass = isError ? ' msg-error' : '';
+
+        row.innerHTML = `
+            <div class="msg-avatar">${avatarIcon}</div>
+            <div>
+                <div class="msg-bubble${bubbleClass}">${renderMarkdown(content)}</div>
+                <div class="msg-meta">
+                    <span>${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                    ${role === 'assistant' && !isError ? `
+                        <button class="btn-source-toggle" onclick="showSourcesForMessage(this, event)" title="查看检索来源">
+                            <i class="fa-solid fa-database"></i> 查看来源
+                        </button>
+                    ` : ''}
+                    ${isError ? `
+                        <button class="btn-retry" onclick="retryLastMessage()" title="重试">
+                            <i class="fa-solid fa-rotate-right"></i> 重试
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+
+        chatMessages.appendChild(row);
+        scrollToBottom();
+        return row;
+    }
+
+    function appendTypingIndicator() {
+        const row = document.createElement('div');
+        row.className = 'message-row assistant';
+        row.id = 'typingIndicator';
+        row.innerHTML = `
+            <div class="msg-avatar" style="background: linear-gradient(135deg, #4A90E2, #3A7BD5);">
+                <i class="fa-solid fa-dna"></i>
+            </div>
+            <div>
+                <div class="msg-bubble">
+                    <div class="typing-indicator">
+                        <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        chatMessages.appendChild(row);
+        scrollToBottom();
+        return row;
+    }
+
+    function removeTypingIndicator(row) {
+        if (row && row.parentNode) row.remove();
+    }
+
+    function appendStreamingBubble() {
+        const row = document.createElement('div');
+        row.className = 'message-row assistant';
+        row.id = 'streamingBubble';
+
+        const contentEl = document.createElement('div');
+        contentEl.className = 'msg-bubble streaming-content';
+
+        row.innerHTML = `
+            <div class="msg-avatar" style="background: linear-gradient(135deg, #4A90E2, #3A7BD5);">
+                <i class="fa-solid fa-dna"></i>
+            </div>
+        `;
+        const wrapper = document.createElement('div');
+        wrapper.appendChild(contentEl);
+        row.appendChild(wrapper);
+
+        chatMessages.appendChild(row);
+        scrollToBottom();
+        return { bubble: row, contentEl };
+    }
+
+    function finalizeAssistantBubble(bubble, fullText) {
+        bubble.id = '';
+        const contentEl = bubble.querySelector('.streaming-content');
+        if (contentEl) contentEl.classList.remove('streaming-content');
+
+        const wrapper = bubble.querySelector('div:last-child');
+        if (wrapper) {
+            const meta = document.createElement('div');
+            meta.className = 'msg-meta';
+            meta.innerHTML = `
+                <span>${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                <button class="btn-source-toggle" onclick="showSourcesForMessage(this, event)" title="查看检索来源">
+                    <i class="fa-solid fa-database"></i> 查看来源
+                </button>
+            `;
+            wrapper.appendChild(meta);
+        }
+    }
+
+    function retryLastMessage() {
+        // Find the last user message and re-send
+        const userRows = chatMessages.querySelectorAll('.message-row.user');
+        if (userRows.length === 0) return;
+        const lastUserBubble = userRows[userRows.length - 1].querySelector('.msg-bubble');
+        if (lastUserBubble) {
+            const text = lastUserBubble.textContent || '';
+            chatInput.value = text;
+            sendMessage();
+        }
+    }
+
+    // ===================================================================
+    //  Markdown → HTML  (supports code blocks, tables, lists, etc.)
+    // ===================================================================
+    function renderMarkdown(text) {
+        if (!text) return '';
+
+        // ── Phase 0: Protect code blocks ─────────────────────
+        const codeBlocks = [];
+        let html = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+            const idx = codeBlocks.length;
+            codeBlocks.push({ lang: lang || '', code: code.replace(/\n$/, '') });
+            return `\x00CODEBLOCK${idx}\x00`;
+        });
+
+        // ── Phase 1: Inline code (protect from escaping) ─────
+        const inlineCodes = [];
+        html = html.replace(/`([^`]+)`/g, (_, code) => {
+            const idx = inlineCodes.length;
+            inlineCodes.push(code);
+            return `\x00INLINECODE${idx}\x00`;
+        });
+
+        // ── Phase 2: Escape HTML ────────────────────────────
+        html = html
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        // ── Phase 3: Block-level elements ───────────────────
+        // Headings (before paragraphs)
+        html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+        // Horizontal rule
+        html = html.replace(/^---$/gm, '<hr>');
+
+        // Blockquote (> prefix)
+        html = html.replace(/^&gt; ?(.+)$/gm, '<blockquote>$1</blockquote>');
+        // Merge consecutive blockquotes
+        html = html.replace(/<\/blockquote>\n<blockquote>/g, '<br>');
+
+        // Tables: | col1 | col2 | → simple table
+        html = html.replace(/^\|(.+)\|$/gm, (line) => {
+            const cells = line.split('|').filter(c => c.trim() !== '');
+            const isSep = cells.every(c => /^[-: ]+$/.test(c.trim()));
+            if (isSep) return '\x00TBSEP\x00';  // separator row marker
+            const td = cells.map(c => `<td>${c.trim()}</td>`).join('');
+            return `<tr>${td}</tr>`;
+        });
+        // Wrap table rows
+        html = html.replace(/((?:\x00TBSEP\x00)?(?:<tr>.*?<\/tr>\n?)+)/g, (m) => {
+            let tableHtml = m.replace(/\x00TBSEP\x00\n?/g, '');
+            // First row after sep becomes thead
+            return `<table>${tableHtml}</table>`;
+        });
+
+        // Unordered lists
+        html = html.replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
+        // Ordered lists
+        html = html.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+
+        // Wrap consecutive <li> in <ul> or <ol>
+        html = html.replace(/((?:<li>.*?<\/li>\n?)+)/g, '<ul>$1</ul>');
+
+        // ── Phase 4: Inline formatting ──────────────────────
+        html = html
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+        // ── Phase 5: Paragraphs ─────────────────────────────
+        // Split by blank lines, wrap non-block segments in <p>
+        const blocks = html.split(/\n\n+/);
+        html = blocks.map(block => {
+            block = block.trim();
+            if (!block) return '';
+            // Don't wrap block elements in <p>
+            if (/^(<h[1-4]>|<hr>|<table>|<ul>|<ol>|<blockquote>|<pre>)/.test(block)) {
+                return block;
+            }
+            // Replace single newlines with <br> inside paragraphs
+            block = block.replace(/\n/g, '<br>');
+            return `<p>${block}</p>`;
+        }).join('\n');
+
+        // ── Phase 6: Cleanup ────────────────────────────────
+        html = html.replace(/<p><\/p>/g, '');
+        html = html.replace(/<li><p>(.*?)<\/p><\/li>/g, '<li>$1</li>');
+
+        // ── Phase 7: Restore code blocks ────────────────────
+        html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, idx) => {
+            const { lang, code } = codeBlocks[idx] || {};
+            const langAttr = lang ? ` class="code-lang" data-lang="${escapeAttr(lang)}"` : '';
+            const langLabel = lang ? `<div class="code-lang-label">${escapeHtml(lang)}</div>` : '';
+            return `${langLabel}<pre${langAttr}><code>${escapeHtml(code)}</code></pre>`;
+        });
+
+        // ── Phase 8: Restore inline code ────────────────────
+        html = html.replace(/\x00INLINECODE(\d+)\x00/g, (_, idx) => {
+            return `<code>${escapeHtml(inlineCodes[idx] || '')}</code>`;
+        });
+
+        return html;
+    }
+
+    function escapeAttr(str) {
+        return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // ===================================================================
+    //  LLM Controls (left sidebar panel)
+    // ===================================================================
+    let llmSidebarOpen = false;
+
+    function toggleLLMControls() {
+        llmSidebarOpen = !llmSidebarOpen;
+        const sidebar = document.getElementById('llmSidebar');
+        const main = document.getElementById('chatMain');
+        const btn = document.getElementById('btnLLMSettings');
+        sidebar.classList.toggle('open', llmSidebarOpen);
+        main.classList.toggle('llm-sidebar-open', llmSidebarOpen);
+        btn.classList.toggle('active', llmSidebarOpen);
+    }
+
+    function updateTempDisplay() {
+        const slider = document.getElementById('llmTemperature');
+        const val = parseFloat(slider.value);
+        document.getElementById('llmTempValue').textContent = val.toFixed(2);
+    }
+
+    function setTemp(val) {
+        document.getElementById('llmTemperature').value = val;
+        updateTempDisplay();
+    }
+
+    function getLLMControls() {
+        return {
+            temperature: parseFloat(document.getElementById('llmTemperature').value),
+            max_tokens: parseInt(document.getElementById('llmMaxTokens').value),
+            preset: document.getElementById('llmPreset').value,
+        };
+    }
+
+    // ===================================================================
+    //  Inline Sources (below AI message)
+    // ===================================================================
+    function renderInlineSources(sources) {
+        if (!sources || sources.length === 0) return '';
+        let html = '<div class="inline-sources">';
+        html += `<div class="inline-sources-header"><i class="fa-solid fa-microscope"></i> RAG 检索到的 Top ${sources.length} 相似细胞</div>`;
+
+        sources.forEach((cell, idx) => {
+            const sim = formatSimilarity(cell.distance);
+            const genes = formatGenes(cell.top_genes);
+            const ct = cell.cell_type || 'unknown';
+            const meta = cell.metadata || {};
+
+            html += `<div class="inline-source-card">
+                <div>
+                    <span class="inline-source-rank">#${idx + 1}</span>
+                    <span>${escapeHtml(cell.cell_id || '-')}</span>
+                    <span class="inline-source-type">${escapeHtml(ct)}</span>
+                    <span style="color:#2ecc71;font-size:0.8rem;margin-left:6px;">${sim}</span>
+                </div>
+                <div class="inline-source-genes">🧬 ${escapeHtml(genes)}</div>
+                <div class="inline-source-meta">${renderMetaTags(meta)}</div>
+            </div>`;
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    function formatSimilarity(distance) {
+        if (distance == null) return 'N/A';
+        const sim = Math.max(0, Math.min(1, 1 - distance / 2));
+        return (sim * 100).toFixed(1) + '%';
+    }
+
+    function formatGenes(rawGenes) {
+        if (!rawGenes) return '暂无基因数据';
+        const genes = rawGenes.split(',').map(g => g.trim()).filter(Boolean);
+        if (genes.length <= 10) return genes.join('、');
+        return genes.slice(0, 10).join('、') + ` ...（共 ${genes.length} 个）`;
+    }
+
+    function renderMetaTags(metadata) {
+        if (!metadata) return '';
+        const keys = ['tissue', 'organ', 'sample', 'donor', 'condition', 'leiden', 'louvain'];
+        return keys
+            .filter(k => metadata[k] != null && String(metadata[k]).trim() !== '')
+            .map(k => `<span>${k}：${escapeHtml(String(metadata[k]))}</span>`)
+            .join('');
+    }
+
+    // ===================================================================
+    //  Inline Source Toggle (within message bubbles)
+    // ===================================================================
+    function showSourcesForMessage(btn, event) {
+        event.stopPropagation();
+        const bubble = btn.closest('.message-row').querySelector('.msg-bubble');
+        const existing = bubble.querySelector('.inline-sources');
+
+        if (existing) {
+            existing.remove();
+            btn.classList.remove('active');
+            btn.innerHTML = '<i class="fa-solid fa-database"></i> 查看来源';
+        } else {
+            document.querySelectorAll('.inline-sources').forEach(el => el.remove());
+            document.querySelectorAll('.btn-source-toggle.active').forEach(b => {
+                b.classList.remove('active');
+                b.innerHTML = '<i class="fa-solid fa-database"></i> 查看来源';
+            });
+            bubble.insertAdjacentHTML('beforeend', renderInlineSources(currentSources));
+            btn.classList.add('active');
+            btn.innerHTML = '<i class="fa-solid fa-database"></i> 隐藏来源';
+        }
+        scrollToBottom();
+    }
+
+    // ===================================================================
+    //  Session Management
+    // ===================================================================
+    function newChat() {
+        sessionId = generateSessionId();
+        chatMessages.innerHTML = '';
+        const welcome = document.createElement('div');
+        welcome.className = 'chat-welcome';
+        welcome.id = 'chatWelcome';
+        welcome.innerHTML = `
+            <div class="welcome-icon"><i class="fa-solid fa-robot"></i></div>
+            <h3>你好，我是 AI 细胞助手</h3>
+            <p style="max-width:480px;">我可以根据单细胞数据库中的细胞类型、高表达基因和元数据信息，回答关于细胞功能、分型和生物学意义的问题。</p>
+            <div class="suggestions" id="welcomeSuggestions">
+                <span class="suggestion-chip" onclick="askSuggestion(this)">帮我分析一下包含 ALB 基因的高表达细胞主要属于什么类型？</span>
+                <span class="suggestion-chip" onclick="askSuggestion(this)">Hepatocyte 和 Kupffer cell 在基因表达上有什么主要差异？</span>
+                <span class="suggestion-chip" onclick="askSuggestion(this)">这些相似细胞主要分布在哪些组织或器官中？</span>
+                <span class="suggestion-chip" onclick="askSuggestion(this)">检索结果中最常见的细胞类型有什么生物学功能？</span>
+            </div>`;
+        chatMessages.appendChild(welcome);
+        currentSources = [];
+        document.getElementById('btnClearHistory').style.display = 'none';
+        hideStatus();
+        updateInputState();
+    }
+
+    async function clearHistory() {
+        try {
+            await fetch(`/api/chat/history?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+        } catch (e) { /* non-critical */ }
+        newChat();
+        showStatus('对话历史已清空', 'info');
+    }
+
+    function askSuggestion(chip) {
+        chatInput.value = chip.textContent.trim();
+        sendMessage();
+    }
+
+    // ===================================================================
+    //  Helpers
+    // ===================================================================
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function scrollToBottom() {
+        requestAnimationFrame(() => {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
+    }
+
+    // ===================================================================
+    //  Bootstrap
+    // ===================================================================
+    initChat();
+</script>
+{% endblock %}

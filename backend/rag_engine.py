@@ -154,6 +154,10 @@ class RAGEngine:
         session_id: Optional[str] = None,
         n_results: Optional[int] = None,
         where_filter: Optional[Dict[str, Any]] = None,
+        keywords: Optional[List[str]] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        system_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """执行完整 RAG 流程，返回结构化问答结果。
 
@@ -163,30 +167,20 @@ class RAGEngine:
             用户的自然语言问题。
         query_vector:
             查询向量（float 列表或 numpy 数组）。
-            若提供则直接用于向量检索；
-            若不提供则尝试调用 LLM Embedding API 将问题转为向量。
         session_id:
-            会话 ID，提供时启用多轮对话（历史上下文注入 Prompt）。
+            会话 ID，提供时启用多轮对话。
         n_results:
-            本次检索数量，覆盖构造时的默认值。
+            本次检索数量。
         where_filter:
-            ChromaDB 元数据过滤条件，例如
-            ``{"cell_type": {"$eq": "Hepatocyte"}}``。
-
-        Returns
-        -------
-        dict
-            包含以下字段：
-
-            - ``answer`` (str)：大模型生成的回答文本
-            - ``retrieved_cells`` (list)：检索到的细胞列表
-            - ``context_used`` (str)：实际喂给大模型的上下文段落
-            - ``query_vectorized`` (bool)：问题是否经过 Embedding 转向量
-            - ``elapsed_ms`` (float)：本次调用总耗时（毫秒）
-            - ``retrieve_ms`` (float)：向量检索耗时
-            - ``llm_ms`` (float)：LLM 生成耗时
-            - ``session_id`` (str | None)：当前会话 ID
-            - ``model`` (str)：使用的大模型名称
+            ChromaDB 元数据过滤条件。
+        keywords:
+            可选关键词列表，用于向量检索不可用时的关键词回退检索。
+        temperature:
+            LLM 生成温度（0~1），None 使用默认值。
+        max_tokens:
+            最大生成 token 数，None 使用默认值。
+        system_prompt:
+            自定义系统 Prompt，None 使用模板默认值。
         """
         t_total = time.perf_counter()
         k = n_results or self._n_results
@@ -197,23 +191,23 @@ class RAGEngine:
             query_vector = self._try_embed_question(question)
             query_vectorized = query_vector is not None
 
-        if query_vector is None:
-            raise ValueError(
-                "未提供 query_vector，且 Embedding API 调用失败或未配置。\n"
-                "解决方案（二选一）：\n"
-                "  ① 在请求中传入 cell_index 或 cell_id 参数，用该细胞向量作为查询；\n"
-                "  ② 在 .env 中配置 ZHIPU_API_KEY（推荐：智谱 GLM embedding-3）"
-                "或 OPENAI_API_KEY，启用文本向量化。\n"
-                "参考文档：docs/后端-RAG开发/rag_module_usage.md"
-            )
-
-        # ── ② 向量检索 ───────────────────────────────────────
+        # ── ② 向量检索（或关键词回退）──────────────────────
         t_retrieve = time.perf_counter()
-        retrieved = self._store.query_similar(
-            query_vector=query_vector,
-            n_results=k,
-            where=where_filter,
-        )
+        if query_vector is not None:
+            retrieved = self._store.query_similar(
+                query_vector=query_vector,
+                n_results=k,
+                where=where_filter,
+            )
+        elif keywords:
+            logger.info("向量不可用，使用关键词检索: %s", keywords)
+            retrieved = self._store.query_by_keywords(
+                keywords=keywords, n_results=k,
+            )
+            if not retrieved:
+                retrieved = self._store.query_by_metadata(where={}, limit=k)
+        else:
+            retrieved = self._store.query_by_metadata(where={}, limit=k)
         retrieve_ms = round((time.perf_counter() - t_retrieve) * 1000, 1)
 
         # ── ③ Prompt 组装 ────────────────────────────────────
@@ -224,12 +218,14 @@ class RAGEngine:
                 retrieved_cells=retrieved,
                 history=history,
                 extra_system_info=self._dataset_info,
+                system_prompt=system_prompt,
             )
         else:
             messages = self._builder.build_messages(
                 user_question=question,
                 retrieved_cells=retrieved,
                 extra_system_info=self._dataset_info,
+                system_prompt=system_prompt,
             )
 
         # 提取上下文段落（system 消息中检索上下文之后的部分）
@@ -237,7 +233,11 @@ class RAGEngine:
 
         # ── ④ LLM 生成 ───────────────────────────────────────
         t_llm = time.perf_counter()
-        answer = self._llm.chat(messages=messages)
+        answer = self._llm.chat(
+            messages=messages,
+            temperature=temperature if temperature is not None else None,
+            max_tokens=max_tokens if max_tokens is not None else None,
+        )
         llm_ms = round((time.perf_counter() - t_llm) * 1000, 1)
 
         # ── ⑤ 保存对话历史 ───────────────────────────────────

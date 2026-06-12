@@ -207,7 +207,7 @@ class LLMClient:
             )
 
         use_model = model or self._model
-        use_max_tokens = max_tokens or self._max_tokens
+        use_max_tokens = max_tokens if max_tokens is not None else self._max_tokens
         use_temperature = temperature if temperature is not None else self._temperature
 
         client = self._get_client()
@@ -275,7 +275,7 @@ class LLMClient:
             )
 
         use_model = model or self._model
-        use_max_tokens = max_tokens or self._max_tokens
+        use_max_tokens = max_tokens if max_tokens is not None else self._max_tokens
         use_temperature = temperature if temperature is not None else self._temperature
 
         client = self._get_client()

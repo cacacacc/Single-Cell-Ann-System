@@ -379,11 +379,13 @@ class CellVectorStore:
         -------
         list of dict
         """
-        raw = self._collection.get(
-            where=where,
-            limit=limit,
-            include=["metadatas", "documents"],
-        )
+        get_kwargs: Dict[str, Any] = {
+            "limit": limit,
+            "include": ["metadatas", "documents"],
+        }
+        if where:  # ChromaDB 不接受空 where={}
+            get_kwargs["where"] = where
+        raw = self._collection.get(**get_kwargs)
         ids_list = raw.get("ids", [])
         metadatas_list = raw.get("metadatas", [])
         documents_list = raw.get("documents", [])
@@ -395,6 +397,83 @@ class CellVectorStore:
                     "cell_id": chroma_id,
                     "cell_index": meta.get("cell_index", -1),
                     "cell_type": meta.get("cell_type", "unknown"),
+                    "top_genes": meta.get("top_genes", ""),
+                    "document": doc,
+                    "metadata": meta,
+                }
+            )
+        return results
+
+    def query_by_keywords(
+        self,
+        keywords: List[str],
+        n_results: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """基于关键词搜索细胞（用于 RAG 自然语言问题）。
+
+        在 ChromaDB documents 字段和 top_genes 元数据中匹配关键词，
+        按命中数降序排列后返回 top-N。
+
+        Parameters
+        ----------
+        keywords:
+            待匹配的关键词列表（如基因名、细胞类型等）。
+        n_results:
+            最多返回的细胞数量。
+
+        Returns
+        -------
+        list of dict
+            与 ``query_similar()`` 返回格式一致。
+        """
+        if not keywords:
+            return []
+
+        if self.count() == 0:
+            return []
+
+        # 获取所有细胞的 documents 和 metadatas（ChromaDB get 可批量拉取）
+        total = self.count()
+        # 分批获取全部数据（ChromaDB get 默认 limit 可能较小）
+        batch_size = 1000
+        all_ids: List[str] = []
+        all_metas: List[Dict[str, Any]] = []
+        all_docs: List[str] = []
+
+        for offset in range(0, total, batch_size):
+            raw = self._collection.get(
+                offset=offset,
+                limit=min(batch_size, total - offset),
+                include=["metadatas", "documents"],
+            )
+            all_ids.extend(raw.get("ids", []))
+            all_metas.extend(raw.get("metadatas", []))
+            all_docs.extend(raw.get("documents", []))
+
+        # 对每个细胞计算关键词命中数
+        keywords_lower = [k.lower() for k in keywords]
+        scored: List[tuple] = []  # (score, cell_id, meta, doc)
+        for cid, meta, doc in zip(all_ids, all_metas, all_docs):
+            search_text = (
+                (doc or "").lower() + " " + (meta.get("top_genes", "") or "").lower()
+            )
+            score = sum(1 for kw in keywords_lower if kw in search_text)
+            if score > 0:
+                scored.append((score, cid, meta, doc))
+
+        # 按命中数降序
+        scored.sort(key=lambda x: -x[0])
+        top = scored[:n_results]
+
+        results: List[Dict[str, Any]] = []
+        for rank, (score, cid, meta, doc) in enumerate(top, start=1):
+            results.append(
+                {
+                    "rank": rank,
+                    "cell_id": cid,
+                    "cell_index": meta.get("cell_index", -1),
+                    "cell_type": meta.get("cell_type", "unknown"),
+                    "distance": float(1.0 - score / max(len(keywords), 1)),
                     "top_genes": meta.get("top_genes", ""),
                     "document": doc,
                     "metadata": meta,
