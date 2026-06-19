@@ -1,16 +1,7 @@
-Flask>=3.0
-flask-cors>=4.0
-python-dotenv>=1.0       # 从 .env 文件自动加载环境变量（Windows/Mac/Linux 通用）
-numpy>=1.24
-pandas>=2.0
-anndata>=0.10
-scanpy>=1.10
-# 可选：启用 FAISS 加速（Windows 会自动跳过）
-faiss-cpu>=1.7.4; platform_system != "Windows"
-# 可选：启用 HNSWLIB（CPython）
-hnswlib>=0.8.0; platform_python_implementation == "CPython"
-# 任务 3.1 — 向量数据库（ChromaDB 轻量级持久化方案）
-chromadb>=0.5.0
-# 任务 3.3 — 大模型 API（二选一安装，推荐智谱 GLM）
-zhipuai>=2.1.0          # 智谱 GLM（推荐，国内访问稳定，有免费额度）
+# 向量数据库（ChromaDB 持久化方案）
+# 注意：1.0 起 API 有重大变更，必须 >=1.0
+chromadb>=1.0.0
+
+# 大模型 API（二选一，推荐智谱 GLM）
+zhipuai>=2.1.0          # 智谱 GLM（国内访问稳定，有免费额度）
 openai>=1.0.0           # OpenAI / DeepSeek / 阿里通义等兼容接口

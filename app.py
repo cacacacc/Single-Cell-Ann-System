@@ -1,9 +1,25 @@
 from __future__ import annotations
 
+import os
+
+# ── macOS 并行库冲突防护（仅 macOS 生效）────────────────────────────────────
+# macOS 上 FAISS(OpenMP) + NumPy(OpenBLAS) 会同时向系统注册多线程运行时，
+# 互相争夺 pthread 资源，导致随机 Segmentation Fault。
+# 以下变量必须在 numpy / faiss 等任何科学计算库导入之前设置。
+# 使用 sys.platform 判断，Windows / Linux 不受影响，保留多核并行性能。
+import sys as _sys
+if _sys.platform == "darwin":
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")   # 允许多份 OpenMP 共存
+    os.environ.setdefault("OMP_NUM_THREADS", "1")            # 限制 OpenMP 只用单线程
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")       # 限制 OpenBLAS 只用单线程
+    os.environ.setdefault("MKL_NUM_THREADS", "1")            # 限制 MKL 只用单线程
+    os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")     # 限制 macOS Accelerate 框架
+    os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")        # 限制 numexpr
+# ─────────────────────────────────────────────────────────────────────────────
+
 import json
 import logging
 import math
-import os
 import time
 from datetime import timedelta
 from functools import wraps
@@ -378,11 +394,17 @@ def _get_indexer(
         _INDEX_CACHE[cache_key] = (indexer, config_key)
         return indexer
 
-    # --- unnamed (on-the-fly) path — don't persist ---
+    # --- unnamed (on-the-fly) path — don't persist, but cache in memory ---
+    config_key = _config_cache_key(index_config)
+    anon_cache_key = (dataset_id, use_rep, config_key)
+    cached_anon = _BENCHMARK_INDEX_CACHE.get(anon_cache_key)
+    if cached_anon is not None:
+        return cached_anon
     loader = _get_loader(dataset_id)
     indexer = ANNIndexer(dim=loader.vector_dim(use_rep), config=index_config)
     vectors = loader.get_vectors(use_rep)
     indexer.build_index(vectors)
+    _BENCHMARK_INDEX_CACHE[anon_cache_key] = indexer
     return indexer
 
 
@@ -460,17 +482,29 @@ def _dataset_payload(dataset_id: str, dataset_path: Path) -> Dict[str, Any]:
     }
 
     try:
-        adata = read_h5ad(dataset_path, backed="r")
-        payload.update(
-            {
-                "n_cells": int(adata.n_obs),
-                "n_genes": int(adata.n_vars),
-                "available_reps": list(adata.obsm.keys()),
-                "obs_columns": list(adata.obs.columns),
-            }
-        )
-        if getattr(adata, "file", None) is not None:
-            adata.file.close()
+        # 优先复用已缓存的 DataLoader，避免重复打开 h5ad 文件（磁盘 IO）
+        if dataset_id in _DATASET_CACHE:
+            loader = _DATASET_CACHE[dataset_id]
+            payload.update(
+                {
+                    "n_cells": int(loader.n_cells),
+                    "n_genes": int(loader.adata.n_vars),
+                    "available_reps": list(loader.adata.obsm.keys()),
+                    "obs_columns": list(loader.adata.obs.columns),
+                }
+            )
+        else:
+            adata = read_h5ad(dataset_path, backed="r")
+            payload.update(
+                {
+                    "n_cells": int(adata.n_obs),
+                    "n_genes": int(adata.n_vars),
+                    "available_reps": list(adata.obsm.keys()),
+                    "obs_columns": list(adata.obs.columns),
+                }
+            )
+            if getattr(adata, "file", None) is not None:
+                adata.file.close()
     except Exception as exc:
         payload["error"] = str(exc)
 
@@ -2323,6 +2357,8 @@ def chat_stream_api():
         n_results = int(payload.get("n_results") or 5)
         session_id = str(payload.get("session_id") or "").strip() or None
         where = payload.get("where") or None
+        _cur_user = _current_user()
+        _cur_user_id = int(_cur_user["id"]) if _cur_user else None
 
         # ── LLM Controls（前端参数微调）──
         temperature = payload.get("temperature")
@@ -2379,20 +2415,20 @@ def chat_stream_api():
                 logger.warning("关键词无匹配，回退到全库采样 %d 条细胞", n_results)
                 retrieved = store.query_by_metadata(where={}, limit=n_results)
         history = _CHAT_HISTORY.get(session_id) if session_id else None
-        builder = engine._builder  # type: ignore[attr-defined]
+        builder = engine.prompt_builder
         if history:
             messages = builder.build_messages_with_history(
                 user_question=question,
                 retrieved_cells=retrieved,
                 history=history,
-                extra_system_info=engine._dataset_info,  # type: ignore[attr-defined]
+                extra_system_info=engine.dataset_info,
                 system_prompt=system_prompt_override,
             )
         else:
             messages = builder.build_messages(
                 user_question=question,
                 retrieved_cells=retrieved,
-                extra_system_info=engine._dataset_info,  # type: ignore[attr-defined]
+                extra_system_info=engine.dataset_info,
                 system_prompt=system_prompt_override,
             )
 
@@ -2408,8 +2444,9 @@ def chat_stream_api():
                     max_tokens=max_tokens,
                 ):
                     full_text_parts.append(chunk)
-                    # SSE 格式：data: <内容>\n\n
-                    yield f"data: {chunk}\n\n"
+                    # SSE 规范：单条 data 行内不能含换行符，用 \\n 转义
+                    safe_chunk = chunk.replace("\\", "\\\\").replace("\n", "\\n")
+                    yield f"data: {safe_chunk}\n\n"
             except Exception as exc:
                 yield f"data: [ERROR] {exc}\n\n"
                 return
@@ -2418,8 +2455,17 @@ def chat_stream_api():
             formatted_text = _enforce_markdown(raw_text)
             if session_id and formatted_text:
                 _CHAT_HISTORY.append(session_id, question, formatted_text)
-            # 发送格式化后的完整文本（前端用它替换流式内容）
-            yield f"data: [FORMATTED] {formatted_text}\n\n"
+                # 同步持久化到 SQLite（用户可跨会话查看历史）
+                if _cur_user_id is not None:
+                    try:
+                        store_inst = _user_store()
+                        store_inst.append_chat_message(session_id, _cur_user_id, "user", question)
+                        store_inst.append_chat_message(session_id, _cur_user_id, "assistant", formatted_text)
+                    except Exception:
+                        pass  # 持久化失败不影响正常回复
+            # 发送格式化后的完整文本（换行符同样需要转义）
+            safe_formatted = formatted_text.replace("\\", "\\\\").replace("\n", "\\n")
+            yield f"data: [FORMATTED] {safe_formatted}\n\n"
             # 发送检索来源数据（供前端展示 RAG 溯源）
             yield f"data: [SOURCES] {json.dumps(retrieved, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
@@ -2444,7 +2490,7 @@ def chat_stream_api():
 @app.get("/api/chat/history")
 @login_required
 def chat_history_api():
-    """获取指定会话的对话历史。
+    """获取指定会话的对话历史（优先从 SQLite 读取，回退到内存）。
 
     Query Params
     -----------
@@ -2453,6 +2499,14 @@ def chat_history_api():
     session_id = request.args.get("session_id", "").strip()
     if not session_id:
         return _json_response({"error": "session_id 不能为空"}, 400)
+    user = _current_user()
+    if user:
+        try:
+            msgs = _user_store().get_chat_messages(session_id, int(user["id"]))
+            if msgs:
+                return _json_response({"session_id": session_id, "history": msgs, "rounds": len(msgs) // 2})
+        except Exception:
+            pass
     history = _CHAT_HISTORY.get(session_id)
     return _json_response({"session_id": session_id, "history": history, "rounds": len(history) // 2})
 
@@ -2460,7 +2514,7 @@ def chat_history_api():
 @app.delete("/api/chat/history")
 @login_required
 def clear_chat_history_api():
-    """清空指定会话的对话历史。
+    """清空指定会话的对话历史（内存 + SQLite）。
 
     Query Params
     -----------
@@ -2470,7 +2524,112 @@ def clear_chat_history_api():
     if not session_id:
         return _json_response({"error": "session_id 不能为空"}, 400)
     _CHAT_HISTORY.clear(session_id)
+    user = _current_user()
+    if user:
+        try:
+            _user_store().delete_chat_session(session_id, int(user["id"]))
+        except Exception:
+            pass
     return _json_response({"status": "cleared", "session_id": session_id})
+
+
+# ── 对话历史管理 API ────────────────────────────────────────────────────────
+
+@app.get("/api/chat/sessions")
+@login_required
+def list_chat_sessions_api():
+    """列出当前用户的所有历史对话（SQLite 持久化 + 内存会话合并，按最近更新倒序）。"""
+    user = _current_user()
+    if not user:
+        return _json_response({"error": "未登录"}, 401)
+    try:
+        limit = int(request.args.get("limit", 50))
+        # 1. 从 SQLite 读取持久化会话
+        try:
+            db_sessions = _user_store().list_chat_sessions(int(user["id"]), limit=limit)
+        except Exception:
+            db_sessions = []
+
+        # 2. 将内存中尚未持久化的会话也补入（key: session_id）
+        db_ids = {s["id"] for s in db_sessions}
+        mem_sessions = []
+        for sid in _CHAT_HISTORY.list_sessions():
+            if sid not in db_ids:
+                msgs = _CHAT_HISTORY.get(sid)
+                if not msgs:
+                    continue
+                # 取第一条 user 消息作为标题
+                first_user = next((m["content"] for m in msgs if m["role"] == "user"), "新对话")
+                mem_sessions.append({
+                    "id": sid,
+                    "title": first_user[:30].strip().replace("\n", " ") or "新对话",
+                    "dataset_id": None,
+                    "message_count": len(msgs),
+                    "created_at": "",
+                    "updated_at": "",
+                })
+
+        sessions = mem_sessions + db_sessions
+        sessions = sessions[:limit]
+        return _json_response({"sessions": sessions})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
+@app.get("/api/chat/sessions/<session_id>")
+@login_required
+def get_chat_session_api(session_id: str):
+    """获取指定对话的全部消息（优先 SQLite，回退到内存）。"""
+    user = _current_user()
+    if not user:
+        return _json_response({"error": "未登录"}, 401)
+    try:
+        # 优先从 SQLite 读取
+        try:
+            msgs = _user_store().get_chat_messages(session_id, int(user["id"]))
+        except Exception:
+            msgs = []
+        # 若 SQLite 无数据，从内存 ChatHistory 回退
+        if not msgs:
+            mem = _CHAT_HISTORY.get(session_id)
+            if mem:
+                msgs = [{"role": m["role"], "content": m["content"], "created_at": ""} for m in mem]
+        return _json_response({"session_id": session_id, "messages": msgs})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
+@app.delete("/api/chat/sessions/<session_id>")
+@login_required
+def delete_chat_session_api(session_id: str):
+    """删除指定对话（消息一并删除）。"""
+    user = _current_user()
+    if not user:
+        return _json_response({"error": "未登录"}, 401)
+    try:
+        _user_store().delete_chat_session(session_id, int(user["id"]))
+        _CHAT_HISTORY.clear(session_id)
+        return _json_response({"status": "deleted", "session_id": session_id})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
+@app.patch("/api/chat/sessions/<session_id>")
+@login_required
+def rename_chat_session_api(session_id: str):
+    """重命名对话标题。Request JSON: {title: str}"""
+    user = _current_user()
+    if not user:
+        return _json_response({"error": "未登录"}, 401)
+    try:
+        payload = _request_payload()
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            return _json_response({"error": "title 不能为空"}, 400)
+        _user_store().rename_chat_session(session_id, int(user["id"]), title)
+        return _json_response({"status": "renamed", "session_id": session_id, "title": title})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
 
 
 @app.get("/api/llm/info")
@@ -2594,8 +2753,14 @@ def _similarity_from_distance(distance: float, metric: str) -> float:
 
 
 def main() -> None:
+    import sys
     port = int(os.getenv("PORT", "5000"))
-    app.run(debug=True, port=port)
+    # macOS: FAISS(OpenMP) 在多线程模式下不安全，强制 threaded=False + use_reloader=False
+    # Windows/Linux: 保持默认多线程，提升并发响应能力
+    if sys.platform == "darwin":
+        app.run(debug=False, port=port, use_reloader=False, threaded=False)
+    else:
+        app.run(debug=False, port=port, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":

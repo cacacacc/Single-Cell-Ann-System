@@ -12,6 +12,43 @@ import pandas as pd
 from anndata import AnnData, read_h5ad
 
 
+class _LightAnnDataProxy:
+    """AnnData 的轻量代理，仅保存 obsm 和 obs，不持有原始基因表达矩阵。
+
+    对外暴露与 AnnData 兼容的属性（obsm、obs、obs_names、n_obs、n_vars），
+    供 DataLoader 及下游代码使用，同时将内存占用从 GB 级降到 MB 级。
+    """
+
+    def __init__(
+        self,
+        obsm: Dict[str, np.ndarray],
+        obs: "pd.DataFrame",
+        obs_names: List[str],
+        n_obs: int,
+        n_vars: int,
+    ) -> None:
+        self.obsm = obsm
+        self.obs = obs
+        self.obs_names = obs_names
+        self.n_obs = n_obs
+        self.n_vars = n_vars
+        # X 访问时抛出友好提示（原始基因表达矩阵已被丢弃以节省内存）
+        self._X_warning_printed = False
+
+    @property
+    def X(self):
+        if not self._X_warning_printed:
+            import warnings
+            warnings.warn(
+                "DataLoader 使用懒加载模式，原始基因表达矩阵 X 未加载到内存。"
+                "如需使用 X，请直接用 read_h5ad() 加载完整文件。",
+                UserWarning,
+                stacklevel=2,
+            )
+            self._X_warning_printed = True
+        return None
+
+
 class DataLoader:
     """从 .h5ad 单细胞数据文件中加载向量矩阵与细胞元数据。
 
@@ -36,9 +73,40 @@ class DataLoader:
         if path.suffix.lower() != ".h5ad":
             raise ValueError(f"文件格式不支持，需要 .h5ad 文件，得到：{path.suffix}")
 
-        self._adata: AnnData = read_h5ad(str(path))
         self._file_path = path
         self._cell_id_to_index: Optional[Dict[str, int]] = None
+
+        # 用 backed="r" 懒加载，避免把 1+ GB 的基因表达矩阵整体读入内存。
+        # 立即把体积小的 obsm（PCA/UMAP 等降维结果）和 obs 元数据提取为普通
+        # numpy/DataFrame，然后关闭文件句柄，释放对原始 HDF5 文件的占用。
+        _tmp = read_h5ad(str(path), backed="r")
+        # 提取 obsm（各降维结果，如 X_pca=30维、X_umap=2维，总计 << 100 MB）
+        self._obsm: Dict[str, np.ndarray] = {
+            k: np.asarray(_tmp.obsm[k], dtype=np.float32)
+            for k in _tmp.obsm.keys()
+        }
+        # 提取 obs 元数据（cell 类型标注等，几 MB 级别）
+        import pandas as pd
+        self._obs: pd.DataFrame = _tmp.obs.copy()
+        self._obs_names = list(_tmp.obs_names)
+        self._n_obs: int = int(_tmp.n_obs)
+        self._n_vars: int = int(_tmp.n_vars)
+        # 关闭文件句柄，不再持有对 HDF5 的引用
+        if hasattr(_tmp, "file") and _tmp.file is not None:
+            try:
+                _tmp.file.close()
+            except Exception:
+                pass
+        del _tmp
+
+        # 构造一个轻量级的 adata 代理对象，保持对外接口兼容
+        self._adata = _LightAnnDataProxy(
+            obsm=self._obsm,
+            obs=self._obs,
+            obs_names=self._obs_names,
+            n_obs=self._n_obs,
+            n_vars=self._n_vars,
+        )
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -61,6 +129,11 @@ class DataLoader:
         """
         if use_rep is None or use_rep == "X":
             raw = self._adata.X
+            if raw is None:
+                raise ValueError(
+                    "原始基因表达矩阵 X 未加载（DataLoader 使用懒加载模式以节省内存）。"
+                    "请改用降维表示，如 use_rep='X_pca'。"
+                )
             # X 可能是稀疏矩阵，统一转为稠密数组
             if hasattr(raw, "toarray"):
                 arr = raw.toarray()
@@ -102,6 +175,11 @@ class DataLoader:
         # 直接按行切片，避免对整个矩阵做全量转换
         if use_rep is None or use_rep == "X":
             raw = self._adata.X
+            if raw is None:
+                raise ValueError(
+                    "原始基因表达矩阵 X 未加载（DataLoader 使用懒加载模式以节省内存）。"
+                    "请改用降维表示，如 use_rep='X_pca'。"
+                )
             if hasattr(raw, "getrow"):
                 # 稀疏矩阵：取单行后转稠密
                 row_arr = raw.getrow(cell_index).toarray().flatten()

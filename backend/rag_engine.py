@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.llm_client import LLMClient, get_llm_client
 from backend.prompt_builder import PromptBuilder, PromptTemplate
@@ -55,6 +55,9 @@ MAX_HISTORY_ROUNDS = 5
 # 默认检索数量
 DEFAULT_N_RESULTS = 5
 
+# 会话最长闲置时间（秒），超过此时间未使用的会话将被自动清理
+SESSION_TTL_SECONDS = 3600  # 1 小时
+
 
 # ---------------------------------------------------------------------------
 # 对话历史管理
@@ -67,19 +70,38 @@ class ChatHistory:
     ----------
     max_rounds:
         最多保留的历史轮次，超出后自动丢弃最旧的一轮。
+    ttl_seconds:
+        会话的最长闲置时间（秒）。超过此时间未使用的会话在下次
+        ``append`` 或 ``get`` 时会被自动清理，防止内存无限增长。
     """
 
-    def __init__(self, max_rounds: int = MAX_HISTORY_ROUNDS) -> None:
+    def __init__(
+        self,
+        max_rounds: int = MAX_HISTORY_ROUNDS,
+        ttl_seconds: float = SESSION_TTL_SECONDS,
+    ) -> None:
         self._max_rounds = max_rounds
+        self._ttl = ttl_seconds
         # {session_id: [(user_msg, assistant_msg), ...]}
         self._sessions: Dict[str, List[Dict[str, str]]] = {}
+        # {session_id: last_active_timestamp}
+        self._last_active: Dict[str, float] = {}
+
+    # ------------------------------------------------------------------
+    # 公开接口
+    # ------------------------------------------------------------------
 
     def get(self, session_id: str) -> List[Dict[str, str]]:
         """返回会话历史（仅含 user/assistant 消息，不含 system）。"""
-        return list(self._sessions.get(session_id, []))
+        self._evict_expired()
+        if session_id not in self._sessions:
+            return []
+        self._last_active[session_id] = time.monotonic()
+        return list(self._sessions[session_id])
 
     def append(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
-        """追加一轮对话，超出 max_rounds 时自动裁剪。"""
+        """追加一轮对话，超出 max_rounds 时自动裁剪，并刷新活跃时间戳。"""
+        self._evict_expired()
         if session_id not in self._sessions:
             self._sessions[session_id] = []
         # 每轮存为两条独立消息
@@ -89,13 +111,35 @@ class ChatHistory:
         max_msgs = self._max_rounds * 2
         if len(self._sessions[session_id]) > max_msgs:
             self._sessions[session_id] = self._sessions[session_id][-max_msgs:]
+        self._last_active[session_id] = time.monotonic()
 
     def clear(self, session_id: str) -> None:
         """清空指定会话的历史。"""
         self._sessions.pop(session_id, None)
+        self._last_active.pop(session_id, None)
 
     def list_sessions(self) -> List[str]:
         return list(self._sessions.keys())
+
+    # ------------------------------------------------------------------
+    # 内部清理
+    # ------------------------------------------------------------------
+
+    def _evict_expired(self) -> None:
+        """清除所有超过 TTL 未活跃的会话，防止内存无限增长。"""
+        if self._ttl <= 0:
+            return
+        now = time.monotonic()
+        expired: List[str] = [
+            sid
+            for sid, last in self._last_active.items()
+            if now - last > self._ttl
+        ]
+        for sid in expired:
+            self._sessions.pop(sid, None)
+            self._last_active.pop(sid, None)
+        if expired:
+            logger.debug("ChatHistory: 清理了 %d 个过期会话", len(expired))
 
 
 # 全局单例
@@ -142,6 +186,20 @@ class RAGEngine:
         self._builder = PromptBuilder(
             template=PromptTemplate(max_genes_in_prompt=max_genes)
         )
+
+    # ------------------------------------------------------------------
+    # 公开属性
+    # ------------------------------------------------------------------
+
+    @property
+    def dataset_info(self) -> Optional[str]:
+        """注入 system prompt 的数据集背景说明。"""
+        return self._dataset_info
+
+    @property
+    def prompt_builder(self) -> PromptBuilder:
+        """内部 PromptBuilder 实例（供流式接口直接复用）。"""
+        return self._builder
 
     # ------------------------------------------------------------------
     # 核心问答接口
@@ -286,7 +344,8 @@ class RAGEngine:
 # 全局引擎注册表（供 Flask app 复用，避免每次请求重新初始化）
 # ---------------------------------------------------------------------------
 
-_ENGINE_REGISTRY: Dict[str, RAGEngine] = {}
+# {dataset_id: (RAGEngine, dataset_info, n_results)}
+_ENGINE_REGISTRY: Dict[str, Tuple[RAGEngine, Optional[str], int]] = {}
 
 
 def get_or_create_engine(
@@ -297,6 +356,9 @@ def get_or_create_engine(
     n_results: int = DEFAULT_N_RESULTS,
 ) -> RAGEngine:
     """获取或创建指定数据集的 RAGEngine 单例。
+
+    若 ``dataset_info`` 或 ``n_results`` 与缓存的值不同，
+    会自动重建引擎以确保配置生效，不会复用过时的旧实例。
 
     Parameters
     ----------
@@ -311,14 +373,24 @@ def get_or_create_engine(
     n_results:
         默认检索数量。
     """
-    if dataset_id not in _ENGINE_REGISTRY:
-        _ENGINE_REGISTRY[dataset_id] = RAGEngine(
-            vector_store=vector_store,
-            llm_client=llm_client,
-            dataset_info=dataset_info,
-            n_results=n_results,
+    cached = _ENGINE_REGISTRY.get(dataset_id)
+    if cached is not None:
+        cached_engine, cached_info, cached_n = cached
+        # 若关键配置未变化则直接复用
+        if cached_info == dataset_info and cached_n == n_results:
+            return cached_engine
+        logger.debug(
+            "RAGEngine 配置变更，重建引擎: dataset_id=%s", dataset_id
         )
-    return _ENGINE_REGISTRY[dataset_id]
+
+    engine = RAGEngine(
+        vector_store=vector_store,
+        llm_client=llm_client,
+        dataset_info=dataset_info,
+        n_results=n_results,
+    )
+    _ENGINE_REGISTRY[dataset_id] = (engine, dataset_info, n_results)
+    return engine
 
 
 def clear_engine_registry() -> None:

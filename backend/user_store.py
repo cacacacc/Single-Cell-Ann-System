@@ -180,6 +180,45 @@ class UserStore:
                 ON search_snapshots(user_id, created_at DESC)
                 """
             )
+            # ── 对话历史持久化 ────────────────────────────────────────────────
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    id       TEXT PRIMARY KEY,
+                    user_id  INTEGER NOT NULL,
+                    title    TEXT NOT NULL DEFAULT '新对话',
+                    dataset_id TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_updated
+                ON chat_sessions(user_id, updated_at DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    role       TEXT NOT NULL CHECK(role IN ('user','assistant')),
+                    content    TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+                ON chat_messages(session_id, id ASC)
+                """
+            )
+            # ─────────────────────────────────────────────────────────────────
 
             admin_username = normalize_username(default_admin_username)
             existing_admin = conn.execute(
@@ -197,7 +236,7 @@ class UserStore:
                     """,
                     (
                         admin_username,
-                        generate_password_hash(default_admin_password),
+                        generate_password_hash(default_admin_password, method="pbkdf2:sha256"),
                         default_admin_name,
                         default_admin_email,
                         now,
@@ -284,7 +323,7 @@ class UserStore:
                     """,
                     (
                         normalized,
-                        generate_password_hash(password),
+                        generate_password_hash(password, method="pbkdf2:sha256"),
                         full_name.strip(),
                         email.strip(),
                         cleaned_role,
@@ -357,7 +396,7 @@ class UserStore:
                 raise AuthenticationError("原密码错误")
             conn.execute(
                 "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
-                (generate_password_hash(new_password), utc_now(), user_id),
+                (generate_password_hash(new_password, method="pbkdf2:sha256"), utc_now(), user_id),
             )
 
     def set_password(self, user_id: int, new_password: str) -> None:
@@ -368,7 +407,7 @@ class UserStore:
                 raise UserStoreError("用户不存在")
             conn.execute(
                 "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
-                (generate_password_hash(new_password), utc_now(), user_id),
+                (generate_password_hash(new_password, method="pbkdf2:sha256"), utc_now(), user_id),
             )
 
     def delete_user(self, user_id: int) -> None:
@@ -459,6 +498,132 @@ class UserStore:
             )
             if cursor.rowcount == 0:
                 raise UserStoreError("检索快照不存在")
+
+    # ── 对话历史 ──────────────────────────────────────────────────────────────
+
+    def create_chat_session(
+        self,
+        session_id: str,
+        user_id: int,
+        title: str = "新对话",
+        dataset_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        now = utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO chat_sessions
+                    (id, user_id, title, dataset_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (session_id, user_id, title, dataset_id, now, now),
+            )
+            row = conn.execute(
+                "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        return dict(row) if row else {}
+
+    def list_chat_sessions(self, user_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        safe_limit = max(1, min(int(limit or 50), 200))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT s.id, s.title, s.dataset_id, s.created_at, s.updated_at,
+                       COUNT(m.id) AS message_count
+                FROM chat_sessions s
+                LEFT JOIN chat_messages m ON m.session_id = s.id
+                WHERE s.user_id = ?
+                GROUP BY s.id
+                ORDER BY s.updated_at DESC
+                LIMIT ?
+                """,
+                (user_id, safe_limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_chat_messages(self, session_id: str, user_id: int) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            # 验证 session 属于该用户
+            row = conn.execute(
+                "SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?",
+                (session_id, user_id),
+            ).fetchone()
+            if row is None:
+                return []
+            rows = conn.execute(
+                "SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id ASC",
+                (session_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def append_chat_message(
+        self,
+        session_id: str,
+        user_id: int,
+        role: str,
+        content: str,
+        title_from_first_user: bool = True,
+    ) -> None:
+        now = utc_now()
+        with self._connect() as conn:
+            # 若 session 不存在则自动创建
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO chat_sessions
+                    (id, user_id, title, created_at, updated_at)
+                VALUES (?, ?, '新对话', ?, ?)
+                """,
+                (session_id, user_id, now, now),
+            )
+            conn.execute(
+                "INSERT INTO chat_messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                (session_id, role, content, now),
+            )
+            # 用第一条 user 消息的前 30 个字作为标题
+            if title_from_first_user and role == "user":
+                count = conn.execute(
+                    "SELECT COUNT(*) AS c FROM chat_messages WHERE session_id = ? AND role = 'user'",
+                    (session_id,),
+                ).fetchone()["c"]
+                if count == 1:
+                    title = content[:30].strip().replace("\n", " ") or "新对话"
+                    conn.execute(
+                        "UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?",
+                        (title, now, session_id),
+                    )
+                    return
+            conn.execute(
+                "UPDATE chat_sessions SET updated_at = ? WHERE id = ?",
+                (now, session_id),
+            )
+
+    def rename_chat_session(self, session_id: str, user_id: int, title: str) -> None:
+        title = (title or "").strip()[:50] or "新对话"
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                (title, utc_now(), session_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                raise UserStoreError("对话不存在")
+
+    def delete_chat_session(self, session_id: str, user_id: int) -> None:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM chat_sessions WHERE id = ? AND user_id = ?",
+                (session_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                raise UserStoreError("对话不存在")
+
+    def clear_all_chat_sessions(self, user_id: int) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM chat_sessions WHERE user_id = ?", (user_id,)
+            )
+        return cursor.rowcount
+
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _ensure_other_active_admin(self, conn: sqlite3.Connection, user_id: int) -> None:
         row = conn.execute(

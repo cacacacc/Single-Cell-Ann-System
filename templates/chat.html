@@ -19,6 +19,144 @@
     .chat-main.llm-sidebar-open {
         margin-right: 300px;
     }
+    .chat-main.history-sidebar-open {
+        margin-left: 260px;    /* 主内容区右移，避免被历史侧边栏遮盖 */
+    }
+
+    /* ================= History Sidebar (left) ================= */
+    .history-sidebar {
+        position: absolute;
+        top: 0;
+        left: -270px;          /* 隐藏时在 chat-container 左侧外面 */
+        width: 260px;
+        height: 100%;
+        background: #0f1628;
+        border-right: 1px solid rgba(255,255,255,0.07);
+        display: flex;
+        flex-direction: column;
+        transition: left 0.3s ease;
+        z-index: 10;           /* 在 chat-container 内叠层即可 */
+        overflow: hidden;
+    }
+    .history-sidebar.open {
+        left: 0;               /* 展开时贴着 chat-container 左边 */
+    }
+    .history-sidebar-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.07);
+        flex-shrink: 0;
+    }
+    .history-sidebar-title {
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: #c8d0e0;
+        display: flex; align-items: center; gap: 7px;
+    }
+    .history-sidebar-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px 0;
+    }
+    .history-sidebar-body::-webkit-scrollbar { width: 4px; }
+    .history-sidebar-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+
+    .history-new-btn {
+        margin: 8px 10px 4px;
+        background: rgba(74,144,226,0.12);
+        border: 1px dashed rgba(74,144,226,0.4);
+        color: #4A90E2;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 0.82rem;
+        cursor: pointer;
+        width: calc(100% - 20px);
+        text-align: left;
+        display: flex; align-items: center; gap: 7px;
+        transition: background 0.2s;
+    }
+    .history-new-btn:hover { background: rgba(74,144,226,0.22); }
+
+    .history-section-label {
+        font-size: 0.7rem;
+        color: #4a5568;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 10px 14px 4px;
+    }
+
+    .history-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px 8px 14px;
+        cursor: pointer;
+        border-radius: 7px;
+        margin: 1px 6px;
+        transition: background 0.15s;
+        position: relative;
+    }
+    .history-item:hover { background: rgba(255,255,255,0.05); }
+    .history-item.active { background: rgba(74,144,226,0.15); }
+    .history-item-icon {
+        flex-shrink: 0;
+        color: #4a5568;
+        font-size: 0.78rem;
+    }
+    .history-item.active .history-item-icon { color: #4A90E2; }
+    .history-item-title {
+        flex: 1;
+        font-size: 0.82rem;
+        color: #a0aabf;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+    }
+    .history-item.active .history-item-title { color: #e0e7f0; }
+    .history-item-actions {
+        display: none;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    .history-item:hover .history-item-actions { display: flex; }
+    .history-item-btn {
+        background: none;
+        border: none;
+        color: #4a5568;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        transition: color 0.15s, background 0.15s;
+    }
+    .history-item-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+    .history-item-btn.del:hover { color: #ff6b6b; background: rgba(255,107,107,0.1); }
+
+    .history-empty {
+        text-align: center;
+        color: #4a5568;
+        font-size: 0.8rem;
+        padding: 30px 16px;
+    }
+
+    /* 汉堡按钮 */
+    .btn-toggle-history {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        color: #8A96A8;
+        width: 34px; height: 34px;
+        border-radius: 8px;
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: all 0.2s;
+        font-size: 0.9rem;
+        flex-shrink: 0;
+    }
+    .btn-toggle-history:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .btn-toggle-history.active { background: rgba(74,144,226,0.2); border-color: #4A90E2; color: #4A90E2; }
 
     /* ================= Chat Header ================= */
     .chat-header {
@@ -563,10 +701,34 @@
 
 <!-- ==================== Chat Layout ==================== -->
 <div class="chat-container" id="chatContainer">
+
+    <!-- ========== History Sidebar (inside chat-container) ========== -->
+    <div class="history-sidebar" id="historySidebar">
+        <div class="history-sidebar-header">
+            <div class="history-sidebar-title">
+                <i class="fa-solid fa-clock-rotate-left"></i> 历史对话
+            </div>
+            <button class="btn-toggle-history" onclick="toggleHistorySidebar()" title="关闭">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="history-sidebar-body" id="historySidebarBody">
+            <button class="history-new-btn" onclick="newChatFromSidebar()">
+                <i class="fa-solid fa-plus"></i> 新建对话
+            </button>
+            <div id="historyList">
+                <div class="history-empty">加载中...</div>
+            </div>
+        </div>
+    </div>
+
     <div class="chat-main" id="chatMain">
         <!-- ========== Chat Header ========== -->
         <div class="chat-header">
             <div class="chat-header-left">
+                <button class="btn-toggle-history" id="btnToggleHistory" onclick="toggleHistorySidebar()" title="历史对话">
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+                </button>
                 <div class="ai-icon"><i class="fa-solid fa-dna" style="color: #fff;"></i></div>
                 <div>
                     <div class="chat-title">AI 细胞助手 <span style="font-size:0.7rem;color:#6f7c92;font-weight:400;">RAG 智能问答</span></div>
@@ -580,6 +742,9 @@
                         <option value="">加载中...</option>
                     </select>
                 </div>
+                <button class="btn-chat-action" id="btnInitVDB" onclick="initVectorDB()" title="将数据集向量写入 ChromaDB，完成后即可使用 AI 问答" style="display:none; background: rgba(74,144,226,0.15); border-color: #4A90E2; color: #4A90E2;">
+                    <i class="fa-solid fa-database"></i> 初始化向量数据库
+                </button>
                 <button class="btn-chat-action" id="btnClearHistory" onclick="clearHistory()" title="清空对话历史" style="display:none;">
                     <i class="fa-solid fa-eraser"></i> 清空历史
                 </button>
@@ -831,12 +996,23 @@
         chatInput.disabled = !canSend;
         btnSend.disabled = !canSend;
 
-        if (!sysVDB.populated && sysVDB.available) {
-            chatInputHint.innerHTML = '⚠️ 向量数据库未初始化，请前往数据管理页初始化。';
-        } else if (!sysLLM.configured) {
-            chatInputHint.innerHTML = '💡 LLM 未配置，但您仍可提问 — 系统将回退到向量检索展示结果（不含 AI 生成回答）。';
+        const btnInitVDB = document.getElementById('btnInitVDB');
+
+        if (!sysVDB.available && !sysVDB.populated) {
+            // ChromaDB 未安装或无数据集
+            btnInitVDB.style.display = 'none';
+            chatInputHint.innerHTML = '⚠️ 向量数据库不可用，请确认已安装 chromadb（pip install chromadb）。';
+        } else if (!sysVDB.populated) {
+            // 已安装但未初始化 — 显示一键初始化按钮
+            btnInitVDB.style.display = 'flex';
+            chatInputHint.innerHTML = '⚠️ 向量数据库未初始化，点击右上角 <strong>初始化向量数据库</strong> 按钮即可完成（约需 1-2 分钟）。';
         } else {
-            chatInputHint.innerHTML = 'AI 细胞助手基于 RAG 技术检索单细胞数据库后生成回答，请核对关键信息。';
+            btnInitVDB.style.display = 'none';
+            if (!sysLLM.configured) {
+                chatInputHint.innerHTML = '💡 LLM 未配置，但您仍可提问 — 系统将回退到向量检索展示结果（不含 AI 生成回答）。';
+            } else {
+                chatInputHint.innerHTML = 'AI 细胞助手基于 RAG 技术检索单细胞数据库后生成回答，请核对关键信息。';
+            }
         }
 
         // Also update suggestion chips
@@ -856,7 +1032,12 @@
         const dsId = datasetSelect.value;
         if (!dsId) return;
 
-        showStatus('正在将细胞向量数据写入 ChromaDB，请稍候...', 'info');
+        const btnInitVDB = document.getElementById('btnInitVDB');
+        const origHTML = btnInitVDB.innerHTML;
+        btnInitVDB.disabled = true;
+        btnInitVDB.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 初始化中...';
+
+        showStatus('正在将细胞向量数据写入 ChromaDB，数据量较大请耐心等待（约需 1-2 分钟）...', 'info');
 
         try {
             const res = await fetch('/api/vectordb/init', {
@@ -874,15 +1055,17 @@
             if (!res.ok) throw new Error(data.error || '初始化失败');
 
             if (data.status === 'skipped') {
-                showStatus('向量数据库已存在数据（跳过重复写入）', 'info');
+                showStatus('✅ 向量数据库已有数据，可直接使用！', 'info');
             } else {
-                showStatus(`✅ 向量数据库初始化完成！写入 ${data.count} 条细胞向量，耗时 ${data.elapsed_ms}ms`, 'info');
+                showStatus(`✅ 初始化完成！已写入 ${data.count} 条细胞向量，耗时 ${(data.elapsed_ms/1000).toFixed(1)}s`, 'info');
             }
 
             // Refresh status
             await checkVectorDB();
             updateInputState();
         } catch (err) {
+            btnInitVDB.disabled = false;
+            btnInitVDB.innerHTML = origHTML;
             showStatus('❌ 向量数据库初始化失败：' + err.message, 'error');
         }
     }
@@ -1060,7 +1243,8 @@
                 }
 
                 if (data.startsWith('[FORMATTED]')) {
-                    fullText = data.slice(12);
+                    // 后端对换行符做了转义（\n → \\n），这里还原
+                    fullText = data.slice(12).replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
                     contentEl.innerHTML = renderMarkdown(fullText);
                     continue;
                 }
@@ -1076,7 +1260,9 @@
                     throw new Error(data.slice(8));
                 }
 
-                fullText += data;
+                // 后端对换行符做了转义（\n → \\n），这里还原后再拼接
+                const decodedChunk = data.replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
+                fullText += decodedChunk;
                 contentEl.innerHTML = renderMarkdown(fullText);
                 scrollToBottom();
             }
@@ -1380,6 +1566,139 @@
     }
 
     // ===================================================================
+    //  History Sidebar
+    // ===================================================================
+    let historySidebarOpen = false;
+    let historySessionId = null; // 当前激活的历史对话 ID
+
+    function toggleHistorySidebar() {
+        historySidebarOpen = !historySidebarOpen;
+        const sidebar = document.getElementById('historySidebar');
+        const main = document.getElementById('chatMain');
+        const btn = document.getElementById('btnToggleHistory');
+        sidebar.classList.toggle('open', historySidebarOpen);
+        main.classList.toggle('history-sidebar-open', historySidebarOpen);
+        if (btn) btn.classList.toggle('active', historySidebarOpen);
+        if (historySidebarOpen) loadHistorySessions();
+    }
+
+    async function loadHistorySessions() {
+        const listEl = document.getElementById('historyList');
+        listEl.innerHTML = '<div class="history-empty">加载中...</div>';
+        let html = '';
+        try {
+            const res = await fetch('/api/chat/sessions?limit=50', { cache: 'no-store' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                listEl.innerHTML = '<div class="history-empty" style="color:#ff6b6b;">' + (err.error || '加载失败(' + res.status + ')') + '</div>';
+                return;
+            }
+            const data = await res.json();
+            const sessions = data.sessions || [];
+            if (sessions.length === 0) {
+                listEl.innerHTML = '<div class="history-empty"><i class="fa-solid fa-comment-slash" style="font-size:1.4rem;display:block;margin-bottom:8px;"></i>暂无历史对话</div>';
+                return;
+            }
+            sessions.forEach(function(s) {
+                var isActive = s.id === sessionId ? 'active' : '';
+                var title = escapeHtml(s.title || '新对话');
+                var sid = escapeAttr(s.id);
+                html += '<div class="history-item ' + isActive + '" data-sid="' + sid + '" onclick="loadHistorySession(\'' + sid + '\')">'
+                      + '<i class="fa-solid fa-comment history-item-icon"></i>'
+                      + '<span class="history-item-title" title="' + title + '">' + title + '</span>'
+                      + '<div class="history-item-actions">'
+                      + '<button class="history-item-btn" title="重命名" onclick="renameHistorySession(event,\'' + sid + '\',\'' + title + '\')"><i class="fa-solid fa-pencil"></i></button>'
+                      + '<button class="history-item-btn del" title="删除" onclick="deleteHistorySession(event,\'' + sid + '\')"><i class="fa-solid fa-trash"></i></button>'
+                      + '</div></div>';
+            });
+            listEl.innerHTML = html;
+        } catch (e) {
+            listEl.innerHTML = '<div class="history-empty" style="color:#ff6b6b;">加载出错：' + e.message + '</div>';
+        }
+    }
+
+    async function loadHistorySession(sid) {
+        if (sid === sessionId) {
+            // 已是当前会话，只关闭侧边栏
+            toggleHistorySidebar();
+            return;
+        }
+        try {
+            const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sid)}`);
+            const data = await res.json();
+            const messages = data.messages || [];
+            if (messages.length === 0) {
+                showStatus('该对话暂无消息', 'info');
+                return;
+            }
+            // 切换到该会话
+            sessionId = sid;
+            currentSources = [];
+            const messagesEl = document.getElementById('chatMessages');
+            const welcomeEl = document.getElementById('chatWelcome');
+            welcomeEl.style.display = 'none';
+            // 清空并重新渲染历史消息
+            // 移除所有消息节点（保留 welcome）
+            [...messagesEl.children].forEach(c => { if (c !== welcomeEl) c.remove(); });
+            messages.forEach(msg => {
+                const role = msg.role === 'user' ? 'user' : 'assistant';
+                const div = document.createElement('div');
+                div.className = `message-row ${role}`;
+                if (role === 'user') {
+                    div.innerHTML = `<div class="message user-message">${escapeHtml(msg.content)}</div>`;
+                } else {
+                    div.innerHTML = `<div class="message assistant-message markdown-body">${renderMarkdown(msg.content)}</div>`;
+                }
+                messagesEl.appendChild(div);
+            });
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+            document.getElementById('btnClearHistory').style.display = 'flex';
+            // 更新侧边栏高亮
+            document.querySelectorAll('.history-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.sid === sid);
+            });
+            toggleHistorySidebar();
+            showStatus(`已加载对话（共 ${messages.length / 2} 轮）`, 'info');
+        } catch (e) {
+            showStatus('加载失败：' + e.message, 'error');
+        }
+    }
+
+    async function deleteHistorySession(e, sid) {
+        e.stopPropagation();
+        if (!confirm('确定删除这条对话记录吗？')) return;
+        try {
+            await fetch(`/api/chat/sessions/${encodeURIComponent(sid)}`, { method: 'DELETE' });
+            // 如果删除的是当前会话，开启新对话
+            if (sid === sessionId) newChat();
+            loadHistorySessions();
+        } catch (err) {
+            showStatus('删除失败', 'error');
+        }
+    }
+
+    async function renameHistorySession(e, sid, oldTitle) {
+        e.stopPropagation();
+        const newTitle = prompt('请输入新的对话名称：', oldTitle);
+        if (!newTitle || newTitle.trim() === oldTitle) return;
+        try {
+            await fetch(`/api/chat/sessions/${encodeURIComponent(sid)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: newTitle.trim() }),
+            });
+            loadHistorySessions();
+        } catch (err) {
+            showStatus('重命名失败', 'error');
+        }
+    }
+
+    function newChatFromSidebar() {
+        newChat();
+        toggleHistorySidebar();
+    }
+
+    // ===================================================================
     //  LLM Controls (left sidebar panel)
     // ===================================================================
     let llmSidebarOpen = false;
@@ -1514,6 +1833,8 @@
         document.getElementById('btnClearHistory').style.display = 'none';
         hideStatus();
         updateInputState();
+        // 清除侧边栏高亮（新对话不属于任何历史条目）
+        document.querySelectorAll('.history-item').forEach(el => el.classList.remove('active'));
     }
 
     async function clearHistory() {
