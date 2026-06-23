@@ -151,6 +151,29 @@ dim = loader.vector_dim("X_pca")    # 30（使用 X_pca）
 | `loader.available_reps` | `list[str]` | obsm 中可用的降维键名 |
 
 
+### 3.7 `cell_index_from_id(cell_id)` — 细胞 ID 反查索引
+
+```python
+idx = loader.cell_index_from_id("AAACCTGAGCAGGTCA-1_2")
+# 返回整数索引，如 1234
+```
+
+- 根据细胞 ID 字符串（`obs_names`）反查其在矩阵中的整数行号
+- 首次调用时懒加载构建 ID → 索引映射字典，后续查询为 O(1)
+- 细胞 ID 不存在会抛出 `KeyError`
+
+### 3.8 内部加载机制
+
+`DataLoader` 使用 `_LightAnnDataProxy` 轻量代理代替完整 AnnData 对象。加载策略：
+
+1. 使用 `read_h5ad(path, backed="r")` 延迟读取 HDF5 文件
+2. 仅将 `obsm`（降维向量，通常 < 100MB）和 `obs`（元数据，几 MB）加载到内存
+3. 不展开完整基因表达矩阵 `X`（可能数 GB），大幅降低内存占用
+4. 读取完毕后关闭 HDF5 文件句柄
+
+当需要访问原始表达矩阵时，可通过 `loader.get_vector(cell_index)` 按需读取单行，避免全量加载。
+
+
 ---
 
 ## 4. DatasetManager 接口说明

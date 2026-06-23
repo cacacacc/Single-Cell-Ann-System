@@ -47,7 +47,60 @@ PQ 参数说明：
 - `pq_nbits`：每个子空间编码位数（常用 8）
 
 
-## 4. 输入要求
+## 4. 索引保存与加载
+
+```python
+# 保存索引到文件
+indexer.save_index("indexes/my_index.index", use_rep="X_pca")
+
+# 从文件加载索引
+indexer = ANNIndexer(dim=50)
+indexer.load_index("indexes/my_index.index")
+
+# 加载后可直接检索
+distances, indices = indexer.search(query_vector, k=10)
+```
+
+索引保存时会同时生成 `.npz` 归档文件（包含向量数据和完整配置 JSON），加载时优先从 `.npz` 读取，保证跨平台兼容性。
+
+## 5. 从环境变量构建配置
+
+```python
+# 从环境变量读取索引配置（前缀 CELL_INDEX_）
+config = IndexConfig.from_env()
+
+# 等价于读取以下环境变量：
+# CELL_INDEX_BACKEND=auto
+# CELL_INDEX_TYPE=flat
+# CELL_INDEX_METRIC=l2
+# CELL_INDEX_NLIST=100
+# CELL_INDEX_NPROBE=10
+# CELL_INDEX_M=16
+# CELL_INDEX_EF_CONSTRUCTION=200
+# CELL_INDEX_EF_SEARCH=50
+# CELL_INDEX_PQ_M=8
+# CELL_INDEX_PQ_NBITS=8
+```
+
+也可以在 API 请求参数中动态传入覆盖默认值。
+
+## 6. 配置摘要属性
+
+```python
+print(indexer.config_summary)
+# {
+#   "backend": "faiss",
+#   "index_type": "hnsw",
+#   "metric": "l2",
+#   "m": 16,
+#   "ef_construction": 200,
+#   "ef_search": 50
+# }
+```
+
+`config_summary` 返回当前索引的实际配置（包括构建时确定的后端和参数），常用于 API 响应中展示索引信息。
+
+## 7. 输入要求
 
 传入的向量矩阵必须满足：
 
@@ -64,7 +117,7 @@ len(vectors.shape) == 2
 - 第二维表示向量维度
     
 
-## 5. 输出说明
+## 8. 输出说明
 
 `search()` 方法返回两个结果：
 
@@ -86,7 +139,7 @@ distances, indices
 - `ip`：$-\langle q, v \rangle$（越小越相似）
     
 
-## 6. 与 API 模块的对接方式
+## 9. 与 API 模块的对接方式
 
 API 开发人员可以在 `app.py` 中这样调用：
 

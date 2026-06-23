@@ -199,6 +199,110 @@ GET /api/benchmark/history
 
 `POST /api/benchmark` 会比较暴力精确检索、FAISS-HNSW、HNSWLIB、FAISS-IVF、FAISS-PQ 的平均耗时和 recall 曲线，并将结果写入 `data/benchmark_history.json`。
 
+### 6.9 数据集索引列表
+
+```http
+GET /api/datasets/<dataset_id>/indices
+```
+
+返回指定数据集的所有已构建索引，包括每个索引的名称、配置信息和就绪状态。
+
+```json
+{
+  "indices": [
+    {
+      "name": "X_pca_flat_l2",
+      "config": {
+        "backend": "faiss",
+        "index_type": "flat",
+        "metric": "l2"
+      },
+      "ready": true
+    }
+  ],
+  "ready": true
+}
+```
+
+### 6.10 删除索引
+
+```http
+DELETE /api/index/<dataset_id>/<index_name>
+```
+
+删除指定数据集的单个命名索引。需要管理员权限。
+
+### 6.11 搜索快照
+
+```http
+GET /api/profile/search-snapshots?limit=20
+DELETE /api/profile/search-snapshots/<snapshot_id>
+```
+
+每次执行 `/api/search` 时会自动保存搜索快照（含参数、耗时、结果数），用户可在个人中心查看和一键重跑。`GET` 返回快照列表，`DELETE` 删除指定快照。
+
+### 6.12 向量数据库（ChromaDB）
+
+```http
+POST /api/vectordb/init
+GET /api/vectordb/status
+POST /api/vectordb/query
+DELETE /api/vectordb/collection
+```
+
+`POST /api/vectordb/init` 将数据集细胞向量写入 ChromaDB，首次使用 AI 助手前需调用。初始化后数据持久化在 `chroma_db/` 目录，重启服务不需要重新初始化。
+
+`GET /api/vectordb/status` 返回 Collection 状态（数量、是否就绪、use_rep）。
+
+`POST /api/vectordb/query` 直接执行向量检索，不经 LLM。
+
+`DELETE /api/vectordb/collection` 清空向量库，需要管理员权限。
+
+### 6.13 RAG AI 问答
+
+```http
+POST /api/chat
+POST /api/chat/stream
+```
+
+`/api/chat` 为阻塞式 RAG 问答，返回完整 JSON 结果（answer、retrieved_cells、耗时等）。
+
+`/api/chat/stream` 为 SSE 流式问答，逐字返回大模型回答。流结束后发送 `[FORMATTED]`（Markdown 格式化全文）、`[SOURCES]`（检索来源）和 `[DONE]` 事件。
+
+两个接口均支持以下可选参数：`preset`（角色预设）、`temperature`、`max_tokens`、`session_id`（多轮对话）。
+
+### 6.14 对话会话管理
+
+```http
+GET /api/chat/sessions
+GET /api/chat/sessions/<session_id>
+DELETE /api/chat/sessions/<session_id>
+PATCH /api/chat/sessions/<session_id>
+GET /api/chat/history?session_id=xxx
+DELETE /api/chat/history?session_id=xxx
+```
+
+`GET /api/chat/sessions` 列出当前用户的所有对话会话（SQLite 持久化 + 内存会话合并）。
+
+`GET /api/chat/sessions/<id>` 获取指定对话的全部消息。
+
+`DELETE /api/chat/sessions/<id>` 删除指定对话（消息一并删除）。
+
+`PATCH /api/chat/sessions/<id>` 重命名对话标题（请求体 `{"title": "新标题"}`）。
+
+`GET /api/chat/history` 和 `DELETE /api/chat/history` 用于查询和清空内存对话历史。
+
+### 6.15 LLM 辅助接口
+
+```http
+GET /api/llm/info
+POST /api/llm/ping
+```
+
+`/api/llm/info` 返回当前 LLM 配置信息（不含 API Key 明文）。
+
+`/api/llm/ping` 向大模型发送测试请求，验证 API Key 和网络连通性。
+
 ## 7. 常见异常
 
 | 状态码 | 场景 |
@@ -216,7 +320,17 @@ GET /api/benchmark/history
    v
 app.py
    |
-   +-- backend/data_reader.py   读取 .h5ad 数据和细胞元数据
+   +-- backend/data_reader.py       读取 .h5ad 数据和细胞元数据
    |
-   +-- backend/ann_indexer.py   构建 ANN 索引并执行 Top-K 检索
+   +-- backend/ann_indexer.py       构建 ANN 索引并执行 Top-K 检索
+   |
+   +-- backend/vector_store.py      ChromaDB 向量数据库（AI 问答检索路径）
+   |
+   +-- backend/rag_engine.py        RAG 流程编排（检索 + Prompt + LLM）
+   |
+   +-- backend/llm_client.py        大模型 API 调用（智谱 GLM / OpenAI）
+   |
+   +-- backend/prompt_builder.py    Prompt 工程与上下文组装
+   |
+   +-- backend/user_store.py        用户认证、快照和对话消息持久化
 ```
