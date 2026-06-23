@@ -152,6 +152,10 @@ LLM_MODEL=deepseek-chat
 | **POST** | **`/api/chat/stream`** | **RAG 问答流式接口（SSE，逐字返回）** | 登录用户 |
 | GET | `/api/chat/history` | 查询会话对话历史 | 登录用户 |
 | DELETE | `/api/chat/history` | 清空会话对话历史 | 登录用户 |
+| GET | `/api/chat/sessions` | 列出所有对话会话（SQLite + 内存合并） | 登录用户 |
+| GET | `/api/chat/sessions/<id>` | 获取指定对话的全部消息 | 登录用户 |
+| DELETE | `/api/chat/sessions/<id>` | 删除指定对话（消息一并删除） | 登录用户 |
+| PATCH | `/api/chat/sessions/<id>` | 重命名对话标题 | 登录用户 |
 | GET | `/api/llm/info` | 查看 LLM 配置信息 | 登录用户 |
 | POST | `/api/llm/ping` | 测试 LLM API 连通性 | 登录用户 |
 
@@ -200,6 +204,9 @@ curl -X POST http://localhost:5000/api/vectordb/init \
 | `n_results` | int | — | 检索细胞数，默认 `5` |
 | `session_id` | string | — | 会话 ID，提供时保留多轮对话历史 |
 | `where` | object | — | ChromaDB 元数据过滤，如 `{"cell_type": {"$eq": "Hepatocyte"}}` |
+| `preset` | string | — | LLM 角色预设：`bioinfo_expert`（生信分析专家）、`strict_analyst`（严谨数据统计员）、`science_communicator`（通俗科普助手） |
+| `temperature` | float | — | 覆盖默认生成温度（0~1） |
+| `max_tokens` | int | — | 覆盖默认最大生成 token 数 |
 
 > `cell_index` / `cell_id` 与 `question` 的关系：
 > - 提供 `cell_index` 或 `cell_id`：用该细胞的向量做相似检索，问题直接喂给 LLM
@@ -244,10 +251,14 @@ curl -X POST http://localhost:5000/api/vectordb/init \
 data: 这批细胞高表达
 data:  ALB、APOA1
 data: ，为肝细胞...
+data: [FORMATTED] ## 分析结果\n\n这批细胞高表达 **ALB**...
+data: [SOURCES] [{"rank":1,"cell_id":"ACGT-1","cell_type":"Hepatocyte",...}]
 data: [DONE]
 ```
 
 - 每个 `data:` 事件包含一个文本片段
+- `[FORMATTED]` 事件：流结束后发送 Markdown 格式化后的完整文本（含基因名加粗、标题分段等增强）
+- `[SOURCES]` 事件：发送检索到的相似细胞 JSON 数组，前端可渲染为溯源卡片
 - 最后一个事件固定为 `data: [DONE]`，表示流结束
 - 若中途出错，发送 `data: [ERROR] 错误信息`
 
@@ -291,23 +302,42 @@ while (true) {
 
 返回与指定细胞最相似的 Top-K 个细胞，结构同 `retrieved_cells` 数组。
 
-### 4.6 其他辅助接口
+### 4.6 对话会话管理
 
 ```bash
-# 查询向量库状态
-GET /api/vectordb/status
-# 返回：{ "is_populated": true, "count": 5000, "collection_name": "liver_xxx", "use_rep": "X_pca" }
+# 列出所有对话会话（SQLite + 内存合并，按最近更新倒序）
+GET /api/chat/sessions
+# 返回：{ "sessions": [{ "id": "xxx", "title": "肝细胞功能", "message_count": 6, ... }] }
 
-# 测试 LLM API 是否可用
-POST /api/llm/ping
-# 返回：{ "ok": true, "model": "glm-4-flash", "elapsed_ms": 430 }
+# 获取指定对话的全部消息
+GET /api/chat/sessions/<session_id>
+# 返回：{ "session_id": "xxx", "messages": [{ "role": "user", "content": "...", "created_at": "..." }] }
 
-# 查看当前 LLM 配置
-GET /api/llm/info
+# 删除指定对话（消息一并删除）
+DELETE /api/chat/sessions/<session_id>
 
-# 查询/清空多轮对话历史
+# 重命名对话标题
+curl -X PATCH http://localhost:5000/api/chat/sessions/<session_id> \
+  -H "Content-Type: application/json" \
+  -d '{"title": "肝细胞基因表达分析"}'
+
+# 查询内存对话历史（回退到内存 ChatHistory）
 GET /api/chat/history?session_id=xxx
+
+# 清空内存对话历史
 DELETE /api/chat/history?session_id=xxx
+```
+
+### 4.7 LLM 辅助接口
+
+```bash
+# 查看当前 LLM 配置（不含 API Key 明文）
+GET /api/llm/info
+# 返回：{ "provider": "zhipu", "model": "glm-4-flash", "is_available": true, "api_key_preview": "xxx...xxx" }
+
+# 测试 LLM API 连通性
+POST /api/llm/ping
+# 返回：{ "ok": true, "model": "glm-4-flash", "reply": "OK", "elapsed_ms": 430 }
 ```
 
 ---
@@ -397,4 +427,7 @@ A：纯文本问答需要 Embedding API。智谱 GLM 的 `embedding-3` 支持此
 A：执行 `pip install chromadb` 或重新执行 `pip install -r requirements.txt`。
 
 **Q：多轮对话历史是否持久化？**  
-A：不持久化，保存在内存中，服务重启后清空。每个 `session_id` 最多保留最近 5 轮对话。
+A：已支持双存储。内存中通过 `ChatHistory` 缓存（最多 5 轮，TTL 1 小时），同时持久化到 SQLite 数据库（`chat_sessions` 和 `chat_messages` 表）。服务重启后 SQLite 数据仍在。通过 `GET /api/chat/sessions` 可列出所有历史会话，通过 `GET /api/chat/sessions/<id>` 可获取完整消息。
+
+**Q：如何使用关键词检索回退？**  
+A：当请求中不带 `cell_index` / `cell_id` 时，系统会先尝试调用 Embedding API 将问题文本转为向量。如果 Embedding 调用失败或 LLM 未配置 Embedding 模型，系统会自动从问题中提取基因名和细胞类型关键词，通过 ChromaDB 文档字段进行关键词匹配检索。如果关键词也无匹配结果，则回退到全库随机采样。
