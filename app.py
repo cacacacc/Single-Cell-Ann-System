@@ -42,7 +42,7 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from backend.ann_indexer import ANNIndexer, IndexConfig
+from backend.ann_indexer import ANNIndexer, IndexConfig, PCAReducer
 from backend.data_reader import DataLoader
 from backend.vector_store import (
     CellVectorStore,
@@ -1523,11 +1523,15 @@ def search():
 @login_required
 def benchmark_api():
     try:
+        import tracemalloc
+
         payload = _request_payload()
         dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
         dataset_path = _resolve_dataset_path(dataset_id)
         resolved_id = _dataset_id_from_path(dataset_path)
         use_rep = payload.get("use_rep") or DEFAULT_USE_REP
+        metric = str(payload.get("metric") or "l2").strip().lower()
+        pca_components = _parse_optional_int(payload, "pca_components") or 0
 
         query_count = _parse_int(payload, "query_count", default=500)
         k = _parse_int(payload, "k", default=DEFAULT_TOP_K)
@@ -1538,11 +1542,14 @@ def benchmark_api():
             return _json_response({"error": "k must be a positive integer"}, 400)
         if k > MAX_TOP_K:
             return _json_response({"error": f"k must not exceed {MAX_TOP_K}"}, 400)
+        if metric not in {"l2", "ip", "cosine", "correlation"}:
+            return _json_response({"error": f"unsupported metric: {metric}"}, 400)
 
         loader = _get_loader(resolved_id, dataset_path)
         vectors = loader.get_vectors(use_rep)
         n_cells = loader.n_cells
-        pq_m = _suggest_pq_m(vectors.shape[1])
+        dim = vectors.shape[1]
+        pq_m = _suggest_pq_m(dim)
 
         query_count = min(query_count, n_cells)
         if query_count <= 0:
@@ -1559,163 +1566,183 @@ def benchmark_api():
             query_indices = rng.choice(n_cells, size=query_count, replace=False)
         queries = vectors[query_indices]
 
+        pca_info = None
+        pca_vectors = None
+        pca_queries = None
+        if pca_components > 0:
+            if pca_components >= dim:
+                pca_components = max(1, dim // 2)
+            reducer = PCAReducer(n_components=pca_components)
+            pca_vectors = reducer.fit_transform(vectors)
+            pca_queries = pca_vectors[query_indices]
+            evr = reducer.explained_variance_ratio_
+            pca_info = {
+                "n_components": pca_components,
+                "original_dim": dim,
+                "reduced_dim": pca_components,
+                "explained_variance_ratio": [round(float(v), 6) for v in evr] if evr is not None else None,
+                "total_explained_variance": round(float(evr.sum()) * 100, 2) if evr is not None else None,
+            }
+            pq_m_pca = _suggest_pq_m(pca_components)
+        else:
+            pq_m_pca = pq_m
+
         standard_ks = [10, 20, 50, 100]
         ks = [value for value in standard_ks if value <= max_k]
 
-        algorithms = [
-            {
-                "id": "brute",
-                "label": "精确搜索 (暴力)",
-                "config": IndexConfig(backend="numpy", index_type="brute", metric="l2"),
-            },
-            {
-                "id": "faiss_hnsw",
-                "label": "FAISS-HNSW",
-                "config": IndexConfig(
-                    backend="faiss",
-                    index_type="hnsw",
-                    metric="l2",
-                    m=16,
-                    ef_construction=200,
-                    ef_search=50,
-                ),
-            },
-            {
-                "id": "hnswlib",
-                "label": "HNSWLIB",
-                "config": IndexConfig(
-                    backend="hnswlib",
-                    index_type="hnsw",
-                    metric="l2",
-                    m=16,
-                    ef_construction=200,
-                    ef_search=50,
-                ),
-            },
-            {
-                "id": "faiss_ivf",
-                "label": "FAISS-IVF",
-                "config": IndexConfig(
-                    backend="faiss",
-                    index_type="ivf_flat",
-                    metric="l2",
-                    nlist=100,
-                    nprobe=10,
-                ),
-            },
-            {
-                "id": "faiss_pq",
-                "label": "FAISS-PQ",
-                "config": IndexConfig(
-                    backend="faiss",
-                    index_type="pq",
-                    metric="l2",
-                    pq_m=pq_m,
-                    pq_nbits=8,
-                ),
-            },
-        ]
+        def _make_algorithms(target_metric, target_pq_m, label_prefix="", id_prefix="", optimized=False):
+            algos = [
+                {
+                    "id": f"{id_prefix}brute",
+                    "label": f"{label_prefix}精确搜索 (暴力)",
+                    "optimized": optimized,
+                    "config": IndexConfig(backend="numpy", index_type="brute", metric=target_metric),
+                },
+                {
+                    "id": f"{id_prefix}faiss_hnsw",
+                    "label": f"{label_prefix}FAISS-HNSW",
+                    "optimized": optimized,
+                    "config": IndexConfig(backend="faiss", index_type="hnsw", metric=target_metric, m=16, ef_construction=200, ef_search=50),
+                },
+                {
+                    "id": f"{id_prefix}hnswlib",
+                    "label": f"{label_prefix}HNSWLIB",
+                    "optimized": optimized,
+                    "config": IndexConfig(backend="hnswlib", index_type="hnsw", metric=target_metric, m=16, ef_construction=200, ef_search=50),
+                },
+                {
+                    "id": f"{id_prefix}faiss_ivf",
+                    "label": f"{label_prefix}FAISS-IVF",
+                    "optimized": optimized,
+                    "config": IndexConfig(backend="faiss", index_type="ivf_flat", metric=target_metric, nlist=100, nprobe=10),
+                },
+                {
+                    "id": f"{id_prefix}faiss_pq",
+                    "label": f"{label_prefix}FAISS-PQ",
+                    "optimized": optimized,
+                    "config": IndexConfig(backend="faiss", index_type="pq", metric=target_metric, pq_m=target_pq_m, pq_nbits=8),
+                },
+            ]
+            return algos
 
-        # Baseline: brute-force for ground truth
-        brute_algo = algorithms[0]
-        brute_indexer = _get_benchmark_indexer(
-            resolved_id, use_rep, vectors, brute_algo["config"]
-        )
+        def _eval_algorithms(algos, target_vectors, target_queries, rep_key):
+            brute_algo = algos[0]
+            brute_indexer = _get_benchmark_indexer(resolved_id, rep_key, target_vectors, brute_algo["config"])
 
-        truth_indices: List[np.ndarray] = []
-        start_time = time.perf_counter()
-        for query in queries:
-            _, idx = brute_indexer.search(query, max_k)
-            truth_indices.append(idx)
-        brute_elapsed = time.perf_counter() - start_time
+            truth_indices: List[np.ndarray] = []
+            tracemalloc.start()
+            snap_before = tracemalloc.take_snapshot()
+            start_time = time.perf_counter()
+            for query in target_queries:
+                _, idx = brute_indexer.search(query, max_k)
+                truth_indices.append(idx)
+            brute_elapsed = time.perf_counter() - start_time
+            snap_after = tracemalloc.take_snapshot()
+            brute_mem = sum(stat.size_diff for stat in snap_after.compare_to(snap_before, "lineno") if stat.size_diff > 0) / (1024 * 1024)
+            tracemalloc.stop()
 
-        results: List[Dict[str, Any]] = []
-
-        brute_recalls = []
-        for k_value in standard_ks:
-            if k_value <= max_k:
-                brute_recalls.append(100.0)
-            else:
-                brute_recalls.append(None)
-
-        results.append(
-            {
+            results: List[Dict[str, Any]] = []
+            brute_avg_ms = round(brute_elapsed / query_count * 1000.0, 3)
+            brute_recalls = [100.0 if kv <= max_k else None for kv in standard_ks]
+            results.append({
                 "id": brute_algo["id"],
                 "label": brute_algo["label"],
+                "optimized": brute_algo.get("optimized", False),
                 "available": True,
-                "avg_ms": round(brute_elapsed / query_count * 1000.0, 3),
+                "avg_ms": brute_avg_ms,
+                "qps": round(1000.0 / brute_avg_ms, 1) if brute_avg_ms > 0 else None,
+                "memory_mb": round(brute_mem, 3),
                 "recall_curve": brute_recalls,
-            }
-        )
+            })
 
-        # Evaluate approximate algorithms
-        for algo in algorithms[1:]:
-            config = algo["config"]
-            try:
-                indexer = _get_benchmark_indexer(
-                    resolved_id, use_rep, vectors, config
-                )
-            except ImportError as exc:
-                results.append(
-                    {
+            for algo in algos[1:]:
+                config = algo["config"]
+                tracemalloc.start()
+                snap_before = tracemalloc.take_snapshot()
+                try:
+                    indexer = _get_benchmark_indexer(resolved_id, rep_key, target_vectors, config)
+                except ImportError as exc:
+                    tracemalloc.stop()
+                    results.append({
                         "id": algo["id"],
                         "label": algo["label"],
+                        "optimized": algo.get("optimized", False),
                         "available": False,
                         "error": str(exc),
                         "avg_ms": None,
+                        "qps": None,
+                        "memory_mb": None,
                         "recall_curve": [None for _ in standard_ks],
-                    }
-                )
-                continue
+                    })
+                    continue
+                snap_after = tracemalloc.take_snapshot()
+                build_mem = sum(stat.size_diff for stat in snap_after.compare_to(snap_before, "lineno") if stat.size_diff > 0) / (1024 * 1024)
+                tracemalloc.stop()
 
-            recall_sums = {k_value: 0.0 for k_value in ks}
-            start_time = time.perf_counter()
-            for idx, query in enumerate(queries):
-                _, pred_indices = indexer.search(query, max_k)
-                truth = truth_indices[idx]
-                for k_value in ks:
-                    pred_set = set(pred_indices[:k_value].tolist())
-                    truth_set = set(truth[:k_value].tolist())
-                    recall_sums[k_value] += len(pred_set.intersection(truth_set)) / k_value
-            elapsed = time.perf_counter() - start_time
+                recall_sums = {kv: 0.0 for kv in ks}
+                start_time = time.perf_counter()
+                for qi, query in enumerate(target_queries):
+                    _, pred_indices = indexer.search(query, max_k)
+                    truth = truth_indices[qi]
+                    for kv in ks:
+                        pred_set = set(pred_indices[:kv].tolist())
+                        truth_set = set(truth[:kv].tolist())
+                        recall_sums[kv] += len(pred_set.intersection(truth_set)) / kv
+                elapsed = time.perf_counter() - start_time
 
-            recall_curve: List[Optional[float]] = []
-            for k_value in standard_ks:
-                if k_value <= max_k:
-                    recall_value = recall_sums[k_value] / query_count * 100.0
-                    recall_curve.append(round(recall_value, 2))
-                else:
-                    recall_curve.append(None)
+                recall_curve: List[Optional[float]] = []
+                for kv in standard_ks:
+                    if kv <= max_k:
+                        recall_curve.append(round(recall_sums[kv] / query_count * 100.0, 2))
+                    else:
+                        recall_curve.append(None)
 
-            results.append(
-                {
+                avg_ms = round(elapsed / query_count * 1000.0, 3)
+                results.append({
                     "id": algo["id"],
                     "label": algo["label"],
+                    "optimized": algo.get("optimized", False),
                     "available": True,
-                    "avg_ms": round(elapsed / query_count * 1000.0, 3),
+                    "avg_ms": avg_ms,
+                    "qps": round(1000.0 / avg_ms, 1) if avg_ms > 0 else None,
+                    "memory_mb": round(build_mem, 3),
                     "recall_curve": recall_curve,
-                }
-            )
+                })
+            return results
+
+        base_algorithms = _make_algorithms(metric, pq_m)
+        base_results = _eval_algorithms(base_algorithms, vectors, queries, use_rep)
+
+        all_results = list(base_results)
+
+        if pca_components > 0:
+            pca_algorithms = _make_algorithms(metric, pq_m_pca, label_prefix="[PCA] ", id_prefix="pca_", optimized=True)
+            pca_results = _eval_algorithms(pca_algorithms, pca_vectors, pca_queries, f"{use_rep}_pca")
+            all_results.extend(pca_results)
 
         created_at = time.strftime("%Y-%m-%d %H:%M:%S")
         entry = {
             "created_at": created_at,
             "dataset_id": resolved_id,
             "use_rep": use_rep,
+            "metric": metric,
             "query_count": query_count,
             "k": k,
             "k_values": standard_ks,
-            "algorithms": results,
+            "pca": pca_info,
+            "algorithms": all_results,
         }
         history_id = _append_benchmark_history(entry)
 
         return _json_response({
             "dataset_id": resolved_id,
             "use_rep": use_rep,
+            "metric": metric,
             "query_count": query_count,
             "k": k,
             "k_values": standard_ks,
-            "algorithms": results,
+            "pca": pca_info,
+            "algorithms": all_results,
             "created_at": created_at,
             "history_id": history_id,
         })
@@ -2678,6 +2705,59 @@ def benchmark_history():
             except ValueError:
                 pass
         return _json_response({"history": history})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
+@app.get("/api/benchmark/export")
+@login_required
+def benchmark_export_csv():
+    try:
+        import csv
+        import io
+
+        history_id = _parse_optional_int(dict(request.args), "history_id")
+        history = _load_benchmark_history()
+        if not history:
+            return _json_response({"error": "no benchmark history available"}, 404)
+
+        if history_id is not None and 0 <= history_id < len(history):
+            entry = history[history_id]
+        else:
+            entry = history[-1]
+
+        k_values = entry.get("k_values", [10, 20, 50, 100])
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        header = ["algorithm", "optimized", "available", "avg_ms", "qps", "memory_mb"]
+        for kv in k_values:
+            header.append(f"recall@{kv}")
+        writer.writerow(header)
+
+        for algo in entry.get("algorithms", []):
+            recall_curve = algo.get("recall_curve", [])
+            row = [
+                algo.get("label", algo.get("id", "")),
+                algo.get("optimized", False),
+                algo.get("available", False),
+                algo.get("avg_ms", ""),
+                algo.get("qps", ""),
+                algo.get("memory_mb", ""),
+            ]
+            for val in recall_curve:
+                row.append(val if val is not None else "")
+            writer.writerow(row)
+
+        csv_content = output.getvalue()
+        created_at = entry.get("created_at", "unknown").replace(" ", "_").replace(":", "")
+        filename = f"benchmark_{created_at}.csv"
+
+        return Response(
+            csv_content,
+            content_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
 

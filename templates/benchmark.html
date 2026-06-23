@@ -50,12 +50,35 @@
         border-radius: 6px;
         font-weight: 600;
         font-family: monospace;
-        font-size: 1.1rem;
+        font-size: 0.95rem;
     }
     .field-hint {
         color: #A0AABF;
         font-size: 0.85rem;
         line-height: 1.5;
+    }
+    .pca-info-box {
+        background: rgba(26, 188, 156, 0.1);
+        border: 1px solid rgba(26, 188, 156, 0.3);
+        border-radius: 6px;
+        padding: 10px 15px;
+        color: #1ABC9C;
+        font-size: 0.85rem;
+        margin-bottom: 16px;
+    }
+    .btn-export {
+        background: rgba(74, 144, 226, 0.15);
+        border: 1px solid rgba(74, 144, 226, 0.4);
+        color: #4A90E2;
+        padding: 6px 14px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .btn-export:hover {
+        background: rgba(74, 144, 226, 0.3);
+        color: #fff;
     }
 </style>
 
@@ -71,6 +94,16 @@
                     <label class="form-label">评测数据集</label>
                     <select class="form-select dark-control" id="benchmarkDatasetSelect">
                         <option value="" disabled selected>正在加载数据集...</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label">距离度量</label>
+                    <select class="form-select dark-control" id="metricSelect">
+                        <option value="l2" selected>L2 欧氏距离</option>
+                        <option value="cosine">余弦距离 (Cosine)</option>
+                        <option value="ip">内积 (Inner Product)</option>
+                        <option value="correlation">相关性 (Pearson)</option>
                     </select>
                 </div>
 
@@ -106,7 +139,7 @@
                     <small class="field-hint mt-1 d-block">系统将随机抽取这些数量的细胞进行查询跑分。</small>
                 </div>
 
-                <div class="mb-5">
+                <div class="mb-4">
                     <label class="form-label d-flex justify-content-between">
                         <span>Top-K 召回数量</span>
                         <strong id="k-value" style="color: #4A90E2;">20</strong>
@@ -114,8 +147,18 @@
                     <input type="range" class="form-range" min="10" max="100" step="10" value="20" id="topKSlider">
                 </div>
 
-                <button type="button" class="btn btn-glow-purple w-100" id="startBenchmarkBtn">
+                <div class="mb-4">
+                    <label class="form-label">PCA 降维对比 (可选)</label>
+                    <input type="number" class="form-control dark-control" id="pcaComponents" value="0" min="0" max="200" step="5" placeholder="0 = 不启用">
+                    <small class="field-hint mt-1 d-block">输入目标维度 (如 10)，系统将同时测试 PCA 降维后的算法性能。0 表示不启用。</small>
+                </div>
+
+                <button type="button" class="btn btn-glow-purple w-100 mb-3" id="startBenchmarkBtn">
                     <i class="fa-solid fa-rocket me-2"></i>开始性能跑分
+                </button>
+
+                <button type="button" class="btn-export w-100" id="exportCsvBtn" style="display: none;">
+                    <i class="fa-solid fa-file-csv me-1"></i> 导出 CSV 报告
                 </button>
 
                 <div class="mt-4">
@@ -129,26 +172,39 @@
     </div>
 
     <div class="search-main">
-        <div class="dark-card mb-4 d-flex justify-content-between align-items-center" style="padding: 15px 25px;">
+        <div class="dark-card mb-4 d-flex justify-content-between align-items-center flex-wrap gap-2" style="padding: 15px 25px;">
             <div class="fw-bold fs-5 text-white">
                 <i class="fa-solid fa-chart-line me-2" style="color: #4A90E2;"></i>实验结果评估报告
             </div>
-            <div class="d-flex gap-3">
+            <div class="d-flex gap-2 flex-wrap">
                 <div class="stat-badge" id="stat-time">Avg Time: -- ms</div>
+                <div class="stat-badge" id="stat-qps" style="color: #F5A623; border-color: rgba(245,166,35,0.3); background-color: rgba(245,166,35,0.1);">QPS: --</div>
                 <div class="stat-badge" id="stat-recall" style="color: #2ecc71; border-color: rgba(46,204,113,0.3); background-color: rgba(46,204,113,0.1);">Recall: -- %</div>
+                <div class="stat-badge" id="stat-memory" style="color: #E83E8C; border-color: rgba(232,62,140,0.3); background-color: rgba(232,62,140,0.1);">Memory: -- MB</div>
             </div>
         </div>
 
         <div id="benchmarkWarning" class="mb-3" style="color: #F5A623; font-size: 0.85rem; display: none;"></div>
+        <div id="pcaInfoBox" class="pca-info-box" style="display: none;"></div>
 
         <div class="dark-card mb-4" style="padding: 20px;">
             <h6 class="text-white mb-3 fw-bold">查询响应时间对比 (Latency)</h6>
-            <div id="timeChart" class="chart-box" style="width: 100%; height: 300px;"></div>
+            <div id="timeChart" class="chart-box" style="width: 100%; height: 380px;"></div>
         </div>
 
-        <div class="dark-card" style="padding: 20px; margin-bottom: 0;">
+        <div class="dark-card mb-4" style="padding: 20px;">
             <h6 class="text-white mb-3 fw-bold">算法召回率/准确率曲线 (Recall @ K)</h6>
-            <div id="recallChart" class="chart-box" style="width: 100%; height: 300px;"></div>
+            <div id="recallChart" class="chart-box" style="width: 100%; height: 380px;"></div>
+        </div>
+
+        <div class="dark-card mb-4" id="memoryChartCard" style="padding: 20px;">
+            <h6 class="text-white mb-3 fw-bold">内存占用对比 (Memory Usage)</h6>
+            <div id="memoryChart" class="chart-box" style="width: 100%; height: 380px;"></div>
+        </div>
+
+        <div class="dark-card" id="comparisonCard" style="padding: 20px;">
+            <h6 class="text-white mb-3 fw-bold">改进前 vs 改进后 对比 (PCA 优化)</h6>
+            <div id="comparisonChart" class="chart-box" style="width: 100%; height: 380px;"></div>
         </div>
     </div>
 </div>
@@ -160,161 +216,449 @@
     const kValue = document.getElementById('k-value');
     const datasetSelect = document.getElementById('benchmarkDatasetSelect');
     const queryCountInput = document.getElementById('queryCount');
+    const metricSelect = document.getElementById('metricSelect');
+    const pcaInput = document.getElementById('pcaComponents');
     const historyContainer = document.getElementById('benchmarkHistory');
+    const exportBtn = document.getElementById('exportCsvBtn');
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
 
     const timeChart = echarts.init(document.getElementById('timeChart'));
     const recallChart = echarts.init(document.getElementById('recallChart'));
+    const memoryChart = echarts.init(document.getElementById('memoryChart'));
+    const comparisonChart = echarts.init(document.getElementById('comparisonChart'));
+
+    let lastHistoryId = null;
 
     const commonTheme = {
         backgroundColor: 'transparent',
-        tooltip: { backgroundColor: 'rgba(20, 26, 48, 0.9)', borderColor: '#4A90E2', textStyle: { color: '#fff' } },
+        tooltip: { backgroundColor: 'rgba(20, 26, 48, 0.95)', borderColor: '#4A90E2', textStyle: { color: '#fff', fontSize: 12 } },
         xAxis: { axisLine: { lineStyle: { color: '#8A96A8' } }, axisLabel: { color: '#8A96A8' } },
-        yAxis: { splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }, axisLabel: { color: '#8A96A8' } },
-        legend: { textStyle: { color: '#fff' } }
+        yAxis: { splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } }, axisLabel: { color: '#8A96A8' } },
+        legend: { textStyle: { color: '#ccc', fontSize: 11 } }
     };
-    const categoryAxisLabel = {
+
+    const rotatedLabel = {
         color: '#8A96A8',
         interval: 0,
-        hideOverlap: false,
-        lineHeight: 18,
-        formatter: value => String(value).replace(' (', '\n(')
+        rotate: 35,
+        fontSize: 11,
+        lineHeight: 14
     };
-
-    const initialAlgorithms = [
-        { id: 'brute', label: '精确搜索 (Exact KNN)', shortLabel: '精确搜索' },
-        { id: 'faiss_hnsw', label: '近似搜索 (FAISS-HNSW)', shortLabel: 'FAISS-HNSW' },
-        { id: 'hnswlib', label: '近似搜索 (HNSWLIB)', shortLabel: 'HNSWLIB' },
-        { id: 'faiss_ivf', label: '近似搜索 (FAISS-IVF)', shortLabel: 'FAISS-IVF' },
-        { id: 'faiss_pq', label: '近似搜索 (FAISS-PQ)', shortLabel: 'FAISS-PQ' }
-    ];
 
     const algoColors = {
-        brute: '#8A96A8',
-        faiss_hnsw: '#4A90E2',
-        hnswlib: '#1ABC9C',
-        faiss_ivf: '#E83E8C',
-        faiss_pq: '#F5A623'
+        brute: '#8A96A8', faiss_hnsw: '#4A90E2', hnswlib: '#1ABC9C',
+        faiss_ivf: '#E83E8C', faiss_pq: '#F5A623',
+        pca_brute: '#6c7a89', pca_faiss_hnsw: '#3498db', pca_hnswlib: '#27ae60',
+        pca_faiss_ivf: '#e74c3c', pca_faiss_pq: '#f39c12'
     };
+    function getAlgoColor(id) { return algoColors[id] || '#4A90E2'; }
 
-    const timeOption = {
-        ...commonTheme,
-        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-        grid: { left: '3%', right: '4%', bottom: 44, top: '15%', containLabel: true },
-        xAxis: { type: 'category', data: initialAlgorithms.map(item => item.label), ...commonTheme.xAxis, axisLabel: categoryAxisLabel },
-        yAxis: { type: 'value', name: '平均耗时 (ms)', nameTextStyle: { color: '#8A96A8' }, ...commonTheme.yAxis },
-        series: [{
-            type: 'bar',
-            barWidth: '40%',
-            itemStyle: { borderRadius: [4, 4, 0, 0] },
-            data: initialAlgorithms.map(() => 0)
-        }]
-    };
-    timeChart.setOption(timeOption);
-
-    const recallOption = {
-        ...commonTheme,
-        tooltip: { trigger: 'axis' },
-        legend: { data: initialAlgorithms.map(item => item.shortLabel), ...commonTheme.legend },
-        grid: { left: '3%', right: '4%', bottom: '3%', top: '20%', containLabel: true },
-        xAxis: { type: 'category', data: ['Top-10', 'Top-20', 'Top-50', 'Top-100'], name: 'K值', ...commonTheme.xAxis },
-        yAxis: { type: 'value', name: '召回率 (%)', min: 80, max: 100, ...commonTheme.yAxis },
-        series: initialAlgorithms.map(item => ({
-            name: item.shortLabel,
-            type: 'line',
-            data: item.id === 'brute' ? [100, 100, 100, 100] : [null, null, null, null],
-            lineStyle: { type: item.id === 'brute' ? 'dashed' : 'solid', color: algoColors[item.id] },
-            itemStyle: { color: algoColors[item.id] },
-            smooth: item.id !== 'brute'
-        }))
-    };
-    recallChart.setOption(recallOption);
-
-    function displayLabel(algo) {
-        if (algo.id === 'brute') return '精确搜索';
-        return algo.label || algo.id;
+    function shortName(algo) {
+        if (!algo.id) return algo.label || '?';
+        const map = {
+            brute: 'Brute', faiss_hnsw: 'FAISS-HNSW', hnswlib: 'HNSWLIB',
+            faiss_ivf: 'FAISS-IVF', faiss_pq: 'FAISS-PQ',
+            pca_brute: '[PCA] Brute', pca_faiss_hnsw: '[PCA] HNSW', pca_hnswlib: '[PCA] HNSWLIB',
+            pca_faiss_ivf: '[PCA] IVF', pca_faiss_pq: '[PCA] PQ'
+        };
+        return map[algo.id] || algo.label || algo.id;
     }
 
     function buildRecallSeries(algorithms, kLabels) {
-        return algorithms.map(algo => {
-            const color = algoColors[algo.id] || '#8A96A8';
-            const isExact = algo.id === 'brute';
+        return algorithms.filter(a => a.id !== 'brute' && a.id !== 'pca_brute').map(algo => {
+            const color = getAlgoColor(algo.id);
+            const isPca = algo.optimized || (algo.id && algo.id.startsWith('pca_'));
             return {
-                name: displayLabel(algo),
+                name: shortName(algo),
                 type: 'line',
                 data: algo.recall_curve || kLabels.map(() => null),
-                lineStyle: { type: isExact ? 'dashed' : 'solid', color },
+                lineStyle: { color, width: isPca ? 3 : 2 },
                 itemStyle: { color },
-                smooth: !isExact
+                smooth: true,
+                symbol: isPca ? 'diamond' : 'circle',
+                symbolSize: isPca ? 8 : 6,
+                label: { show: false }
             };
         });
     }
 
     function updateStats(algorithms) {
-        const approx = algorithms.filter(item => item.available && item.id !== 'brute');
+        const baseApprox = algorithms.filter(a => a.available && !a.optimized && a.id !== 'brute');
         const statTime = document.getElementById('stat-time');
+        const statQps = document.getElementById('stat-qps');
         const statRecall = document.getElementById('stat-recall');
+        const statMemory = document.getElementById('stat-memory');
 
-        if (approx.length === 0) {
+        if (baseApprox.length === 0) {
             statTime.innerText = 'Avg Time: -- ms';
+            statQps.innerText = 'QPS: --';
             statRecall.innerText = 'Recall: -- %';
+            statMemory.innerText = 'Memory: -- MB';
             return;
         }
 
-        const fastest = approx.reduce((best, item) => {
-            if (best === null) return item;
-            if (item.avg_ms === null || item.avg_ms === undefined) return best;
-            return item.avg_ms < best.avg_ms ? item : best;
+        const fastest = baseApprox.reduce((best, a) => {
+            if (a.avg_ms == null) return best;
+            return (!best || a.avg_ms < best.avg_ms) ? a : best;
         }, null);
 
-        const bestRecall = approx.reduce((best, item) => {
-            const recalls = (item.recall_curve || []).filter(val => val !== null && val !== undefined);
+        const bestRecall = baseApprox.reduce((best, a) => {
+            const recalls = (a.recall_curve || []).filter(v => v != null);
             const last = recalls.length ? recalls[recalls.length - 1] : null;
-            if (last === null) return best;
-            if (best === null || last > best.value) {
-                return { label: item.label, value: last };
-            }
-            return best;
+            if (last == null) return best;
+            return (!best || last > best.value) ? { label: shortName(a), value: last } : best;
         }, null);
 
-        statTime.innerText = fastest ? `${fastest.label}: ${fastest.avg_ms.toFixed(2)} ms` : 'Avg Time: -- ms';
-        statRecall.innerText = bestRecall ? `${bestRecall.label} Recall: ${bestRecall.value.toFixed(2)} %` : 'Recall: -- %';
+        const lightest = baseApprox.reduce((best, a) => {
+            if (a.memory_mb == null) return best;
+            return (!best || a.memory_mb < best.memory_mb) ? a : best;
+        }, null);
+
+        statTime.innerText = fastest ? `${shortName(fastest)}: ${fastest.avg_ms.toFixed(2)} ms` : 'Avg Time: -- ms';
+        statQps.innerText = fastest && fastest.qps ? `QPS: ${fastest.qps}` : 'QPS: --';
+        statRecall.innerText = bestRecall ? `Recall: ${bestRecall.value.toFixed(2)} %` : 'Recall: -- %';
+        statMemory.innerText = lightest ? `Memory: ${lightest.memory_mb.toFixed(2)} MB` : 'Memory: -- MB';
     }
 
     function renderBenchmarkResult(data) {
         const algorithms = data.algorithms || [];
-        const kValues = data.k_values || [10, 20, 50, 100];
+        const rawKValues = data.k_values || [10, 20, 50, 100];
+        // Filter out K values where all algorithms have null recall data
+        const validIndices = [];
+        rawKValues.forEach((kv, idx) => {
+            const hasData = algorithms.some(a => a.recall_curve && a.recall_curve[idx] != null);
+            if (hasData) validIndices.push(idx);
+        });
+        const kValues = validIndices.map(i => rawKValues[i]);
         const kLabels = kValues.map(k => `Top-${k}`);
+        // Remap each algorithm's recall_curve to only include valid indices
+        algorithms.forEach(a => {
+            if (a.recall_curve) {
+                a.recall_curve = validIndices.map(i => a.recall_curve[i]);
+            }
+        });
+        const pcaInfo = data.pca;
         const warningBox = document.getElementById('benchmarkWarning');
+        const pcaBox = document.getElementById('pcaInfoBox');
 
-        const unavailable = algorithms.filter(item => !item.available);
+        lastHistoryId = data.history_id;
+        exportBtn.style.display = lastHistoryId != null ? 'block' : 'none';
+
+        const unavailable = algorithms.filter(a => !a.available);
         if (unavailable.length > 0) {
-            const labels = unavailable.map(item => item.label).join('、');
-            warningBox.innerText = `以下算法不可用（缺少依赖或配置不支持）：${labels}`;
+            warningBox.innerText = `以下算法不可用：${unavailable.map(a => a.label).join('、')}`;
             warningBox.style.display = 'block';
         } else {
             warningBox.style.display = 'none';
         }
 
-        const categories = algorithms.map(item => item.label);
-        const barData = algorithms.map(item => {
-            if (!item.available || item.avg_ms === null || item.avg_ms === undefined) {
-                return { value: null, itemStyle: { color: '#3A435E' } };
-            }
-            return { value: item.avg_ms, itemStyle: { color: algoColors[item.id] || '#4A90E2' } };
-        });
+        if (pcaInfo) {
+            pcaBox.innerHTML = `<i class="fa-solid fa-flask me-1"></i> PCA 降维：${pcaInfo.original_dim} 维 → ${pcaInfo.reduced_dim} 维，总方差解释率 <b>${pcaInfo.total_explained_variance}%</b>`;
+            pcaBox.style.display = 'block';
+        } else {
+            pcaBox.style.display = 'none';
+        }
 
-        timeChart.setOption({
-            grid: { left: '3%', right: '4%', bottom: 44, top: '15%', containLabel: true },
-            xAxis: { type: 'category', data: categories, ...commonTheme.xAxis, axisLabel: categoryAxisLabel },
-            series: [{ data: barData }]
-        });
+        const baseAlgos = algorithms.filter(a => !a.optimized);
+        const pcaAlgos = algorithms.filter(a => a.optimized);
+
+        // === 1. Latency chart ===
+        // Build paired grouped bar chart when PCA data exists
+        const hasPca = pcaAlgos.length > 0;
+        if (hasPca) {
+            // Paired mode: group by base algorithm name
+            const pairedCategories = baseAlgos.map(a => shortName(a));
+            const baseBarData = baseAlgos.map(a => {
+                if (!a.available || a.avg_ms == null) return { value: null, itemStyle: { color: '#3A435E' } };
+                return { value: a.avg_ms, itemStyle: { color: getAlgoColor(a.id) }, qps: a.qps, memory_mb: a.memory_mb };
+            });
+            const pcaBarData = baseAlgos.map(base => {
+                const pcaMatch = pcaAlgos.find(p => p.id === 'pca_' + base.id);
+                if (!pcaMatch || !pcaMatch.available || pcaMatch.avg_ms == null) return { value: null, itemStyle: { color: '#3A435E' } };
+                return { value: pcaMatch.avg_ms, itemStyle: { color: getAlgoColor(pcaMatch.id) }, qps: pcaMatch.qps, memory_mb: pcaMatch.memory_mb };
+            });
+
+            timeChart.setOption({
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'shadow' },
+                    backgroundColor: 'rgba(20, 26, 48, 0.95)', borderColor: '#4A90E2',
+                    textStyle: { color: '#fff', fontSize: 12 },
+                    formatter: function(params) {
+                        let tip = `<b>${params[0].name}</b>`;
+                        params.forEach(p => {
+                            if (p.value == null) return;
+                            tip += `<br/>${p.marker} ${p.seriesName}: <b>${p.value.toFixed(3)} ms</b>`;
+                            if (p.data && p.data.qps) tip += ` (QPS: ${p.data.qps})`;
+                        });
+                        return tip;
+                    }
+                },
+                legend: { data: ['原始', 'PCA 优化'], ...commonTheme.legend, top: 0 },
+                grid: { left: '3%', right: '6%', bottom: 70, top: 40, containLabel: true },
+                xAxis: { type: 'category', data: pairedCategories, ...commonTheme.xAxis, axisLabel: { ...rotatedLabel } },
+                yAxis: {
+                    type: 'value', name: '平均耗时 (ms)',
+                    nameTextStyle: { color: '#8A96A8', fontSize: 11 },
+                    ...commonTheme.yAxis,
+                    axisLabel: { color: '#8A96A8', formatter: v => v >= 1 ? v : v.toFixed(2) }
+                },
+                series: [
+                    {
+                        name: '原始', type: 'bar', barGap: '20%',
+                        itemStyle: { borderRadius: [3, 3, 0, 0] },
+                        data: baseBarData,
+                        label: { show: true, position: 'top', fontSize: 10, color: '#4A90E2', formatter: p => p.value != null ? p.value.toFixed(2) + ' ms' : '' }
+                    },
+                    {
+                        name: 'PCA 优化', type: 'bar',
+                        itemStyle: { borderRadius: [3, 3, 0, 0], color: '#1ABC9C' },
+                        data: pcaBarData,
+                        label: { show: true, position: 'top', fontSize: 10, color: '#1ABC9C', formatter: p => p.value != null ? p.value.toFixed(2) + ' ms' : '' }
+                    }
+                ]
+            }, true);
+        } else {
+            // Single mode: no PCA, show all base algorithms
+            const categories = baseAlgos.map(a => shortName(a));
+            const barData = baseAlgos.map(a => {
+                if (!a.available || a.avg_ms == null) return { value: null, itemStyle: { color: '#3A435E' } };
+                return { value: a.avg_ms, itemStyle: { color: getAlgoColor(a.id) }, qps: a.qps, memory_mb: a.memory_mb };
+            });
+
+            timeChart.setOption({
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'shadow' },
+                    backgroundColor: 'rgba(20, 26, 48, 0.95)', borderColor: '#4A90E2',
+                    textStyle: { color: '#fff', fontSize: 12 },
+                    formatter: function(params) {
+                        const p = params[0];
+                        if (p.value == null) return `${p.name}<br/>N/A`;
+                        let tip = `<b>${p.name}</b><br/>耗时: <b>${p.value.toFixed(3)} ms</b>`;
+                        if (p.data && p.data.qps) tip += `<br/>QPS: <b>${p.data.qps}</b>`;
+                        if (p.data && p.data.memory_mb != null) tip += `<br/>内存: <b>${p.data.memory_mb.toFixed(3)} MB</b>`;
+                        return tip;
+                    }
+                },
+                legend: { show: false },
+                grid: { left: '3%', right: '6%', bottom: 70, top: '12%', containLabel: true },
+                xAxis: { type: 'category', data: categories, ...commonTheme.xAxis, axisLabel: { ...rotatedLabel } },
+                yAxis: {
+                    type: 'value', name: '平均耗时 (ms)',
+                    nameTextStyle: { color: '#8A96A8', fontSize: 11 },
+                    ...commonTheme.yAxis,
+                    axisLabel: { color: '#8A96A8', formatter: v => v >= 1 ? v : v.toFixed(2) }
+                },
+                series: [{
+                    type: 'bar', barWidth: '50%',
+                    itemStyle: { borderRadius: [3, 3, 0, 0] },
+                    data: barData,
+                    label: { show: true, position: 'top', fontSize: 10, color: '#aaa', formatter: p => p.value != null ? p.value.toFixed(2) + ' ms' : '' }
+                }]
+            }, true);
+        }
+
+        // === 2. Recall chart (hide brute, show data labels) ===
+        const recallSeries = buildRecallSeries(algorithms, kLabels);
+        const recallNames = recallSeries.map(s => s.name);
 
         recallChart.setOption({
-            legend: { data: algorithms.map(displayLabel), ...commonTheme.legend },
+            backgroundColor: 'transparent',
+            tooltip: { trigger: 'axis', backgroundColor: 'rgba(20, 26, 48, 0.95)', borderColor: '#4A90E2', textStyle: { color: '#fff', fontSize: 12 } },
+            legend: { data: recallNames, type: 'scroll', pageIconColor: '#4A90E2', pageIconInactiveColor: '#555', textStyle: { color: '#ccc', fontSize: 11 }, top: 0 },
+            grid: { left: '3%', right: '4%', bottom: '3%', top: 40, containLabel: true },
             xAxis: { type: 'category', data: kLabels, name: 'K值', ...commonTheme.xAxis },
-            series: buildRecallSeries(algorithms, kLabels)
-        });
+            yAxis: { type: 'value', name: '召回率 (%)', min: 75, max: 101, ...commonTheme.yAxis },
+            series: recallSeries
+        }, true);
+
+        // === 3. Memory chart ===
+        // Only consider ANN algorithms (exclude brute) for memory chart visibility
+        const memCheckAlgos = algorithms.filter(a => a.id !== 'brute' && a.id !== 'pca_brute' && a.available);
+        const hasMemory = memCheckAlgos.some(a => a.memory_mb != null && a.memory_mb >= 0);
+        const memCard = document.getElementById('memoryChartCard');
+        if (hasMemory) {
+
+            // 排除暴力搜索（内存数据不准确），只展示 ANN 近似算法
+            const memBaseAlgos = baseAlgos.filter(a => a.id !== 'brute' && a.available);
+            const memPcaAlgos = pcaAlgos.filter(a => a.id !== 'pca_brute' && a.available);
+
+            // Helper: ensure very small memory values still produce a visible bar
+            function memValue(mb) {
+                if (mb == null) return null;
+                return Math.max(mb, 0);
+            }
+
+            if (hasPca && memPcaAlgos.length > 0) {
+                // Paired mode
+                const memCategories = memBaseAlgos.map(a => shortName(a));
+                const memBaseData = memBaseAlgos.map(a => {
+                    const v = memValue(a.memory_mb);
+                    if (v == null) return { value: null, itemStyle: { color: '#3A435E' } };
+                    return { value: v, itemStyle: { color: getAlgoColor(a.id) } };
+                });
+                const memPcaData = memBaseAlgos.map(base => {
+                    const pcaMatch = memPcaAlgos.find(p => p.id === 'pca_' + base.id);
+                    const v = pcaMatch ? memValue(pcaMatch.memory_mb) : null;
+                    if (v == null) return { value: null, itemStyle: { color: '#3A435E' } };
+                    return { value: v, itemStyle: { color: getAlgoColor(pcaMatch.id) } };
+                });
+
+                memoryChart.setOption({
+                    backgroundColor: 'transparent',
+                    tooltip: {
+                        trigger: 'axis', axisPointer: { type: 'shadow' },
+                        backgroundColor: 'rgba(20, 26, 48, 0.95)', borderColor: '#E83E8C',
+                        textStyle: { color: '#fff', fontSize: 12 },
+                        formatter: function(params) {
+                            let tip = `<b>${params[0].name}</b>`;
+                            params.forEach(p => {
+                                if (p.value == null) return;
+                                tip += `<br/>${p.marker} ${p.seriesName}: <b>${p.value.toFixed(3)} MB</b>`;
+                            });
+                            return tip;
+                        }
+                    },
+                    legend: { data: ['原始', 'PCA 优化'], ...commonTheme.legend, top: 0 },
+                    grid: { left: '3%', right: '6%', bottom: 60, top: 40, containLabel: true },
+                    xAxis: { type: 'category', data: memCategories, ...commonTheme.xAxis, axisLabel: { color: '#8A96A8', interval: 0, rotate: 25, fontSize: 12 } },
+                    yAxis: {
+                        type: 'value',
+                        name: '内存占用 (MB)', nameTextStyle: { color: '#8A96A8', fontSize: 11 },
+                        ...commonTheme.yAxis,
+                        axisLabel: { color: '#8A96A8', formatter: v => v >= 1 ? v.toFixed(1) : v.toFixed(3) }
+                    },
+                    series: [
+                        {
+                            name: '原始', type: 'bar', barGap: '20%', barMaxWidth: 60,
+                            itemStyle: { borderRadius: [3, 3, 0, 0] },
+                            data: memBaseData,
+                            label: { show: true, position: 'top', fontSize: 10, color: '#4A90E2', formatter: p => p.value != null ? p.value.toFixed(3) + ' MB' : '' }
+                        },
+                        {
+                            name: 'PCA 优化', type: 'bar', barMaxWidth: 60,
+                            itemStyle: { borderRadius: [3, 3, 0, 0], color: '#1ABC9C' },
+                            data: memPcaData,
+                            label: { show: true, position: 'top', fontSize: 10, color: '#1ABC9C', formatter: p => p.value != null ? p.value.toFixed(3) + ' MB' : '' }
+                        }
+                    ]
+                }, true);
+            } else {
+                // Single mode
+                const memCategories = memBaseAlgos.map(a => shortName(a));
+                const memData = memBaseAlgos.map(a => {
+                    const v = memValue(a.memory_mb);
+                    if (v == null) return { value: null, itemStyle: { color: '#3A435E' } };
+                    return { value: v, itemStyle: { color: getAlgoColor(a.id) } };
+                });
+                memoryChart.setOption({
+                    backgroundColor: 'transparent',
+                    tooltip: {
+                        trigger: 'axis', axisPointer: { type: 'shadow' },
+                        backgroundColor: 'rgba(20, 26, 48, 0.95)', borderColor: '#E83E8C',
+                        textStyle: { color: '#fff', fontSize: 12 },
+                        formatter: p => {
+                            const v = p[0].value;
+                            return `<b>${p[0].name}</b><br/>内存: <b>${v != null ? v.toFixed(3) + ' MB' : 'N/A'}</b>`;
+                        }
+                    },
+                    legend: { show: false },
+                    grid: { left: '3%', right: '6%', bottom: 60, top: '12%', containLabel: true },
+                    xAxis: { type: 'category', data: memCategories, ...commonTheme.xAxis, axisLabel: { color: '#8A96A8', interval: 0, rotate: 25, fontSize: 12 } },
+                    yAxis: {
+                        type: 'value',
+                        name: '内存占用 (MB)', nameTextStyle: { color: '#8A96A8', fontSize: 11 },
+                        ...commonTheme.yAxis,
+                        axisLabel: { color: '#8A96A8', formatter: v => v >= 1 ? v.toFixed(1) : v.toFixed(3) }
+                    },
+                    series: [{
+                        type: 'bar', barWidth: '45%', barMaxWidth: 60,
+                        itemStyle: { borderRadius: [3, 3, 0, 0] },
+                        data: memData,
+                        label: { show: true, position: 'top', fontSize: 10, color: '#aaa', formatter: p => p.value != null ? p.value.toFixed(3) + ' MB' : '' }
+                    }]
+                }, true);
+            }
+            // Trigger resize after container becomes visible so ECharts recalculates dimensions
+            setTimeout(() => memoryChart.resize(), 0);
+        } else {
+            memoryChart.setOption({
+                backgroundColor: 'transparent',
+                graphic: { type: 'text', left: 'center', top: 'middle', style: { text: '暂无内存数据', fontSize: 14, fill: '#8A96A8' } },
+                xAxis: { show: false }, yAxis: { show: false }, series: []
+            }, true);
+        }
+
+        // === 4. Before/After comparison ===
+        const compCard = document.getElementById('comparisonCard');
+        if (pcaAlgos.length > 0 && baseAlgos.length > 0) {
+
+            const baseNonBrute = baseAlgos.filter(a => a.id !== 'brute' && a.available);
+            const pcaNonBrute = pcaAlgos.filter(a => a.id !== 'pca_brute' && a.available);
+            const compLabels = [];
+            const compBefore = [];
+            const compAfter = [];
+
+            baseNonBrute.forEach(base => {
+                const pcaMatch = pcaNonBrute.find(p => p.id === 'pca_' + base.id);
+                if (pcaMatch && base.avg_ms != null && pcaMatch.avg_ms != null) {
+                    compLabels.push(shortName(base));
+                    compBefore.push(base.avg_ms);
+                    compAfter.push(pcaMatch.avg_ms);
+                }
+            });
+
+            comparisonChart.setOption({
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: 'rgba(20, 26, 48, 0.95)', borderColor: '#1ABC9C',
+                    textStyle: { color: '#fff', fontSize: 12 },
+                    formatter: function(params) {
+                        let tip = `<b>${params[0].name}</b>`;
+                        params.forEach(p => {
+                            tip += `<br/>${p.marker} ${p.seriesName}: <b>${p.value.toFixed(3)} ms</b>`;
+                        });
+                        return tip;
+                    }
+                },
+                legend: { data: ['改进前', '改进后 (PCA)'], ...commonTheme.legend, top: 0 },
+                grid: { left: '3%', right: '6%', bottom: '15%', top: 40, containLabel: true },
+                xAxis: {
+                    type: 'category', data: compLabels,
+                    axisLine: { lineStyle: { color: '#8A96A8' } },
+                    axisLabel: { color: '#8A96A8', fontSize: 12, interval: 0, fontWeight: 'bold' }
+                },
+                yAxis: {
+                    type: 'value', name: '平均耗时 (ms)',
+                    nameTextStyle: { color: '#8A96A8', fontSize: 11 },
+                    ...commonTheme.yAxis
+                },
+                series: [
+                    {
+                        name: '改进前', type: 'bar', barGap: '20%',
+                        data: compBefore,
+                        itemStyle: { color: '#4A90E2', borderRadius: [4, 4, 0, 0] },
+                        label: { show: true, position: 'top', fontSize: 11, color: '#4A90E2', fontWeight: 'bold', formatter: p => p.value.toFixed(3) + ' ms' }
+                    },
+                    {
+                        name: '改进后 (PCA)', type: 'bar',
+                        data: compAfter,
+                        itemStyle: { color: '#1ABC9C', borderRadius: [4, 4, 0, 0] },
+                        label: { show: true, position: 'top', fontSize: 11, color: '#1ABC9C', fontWeight: 'bold', formatter: p => p.value.toFixed(3) + ' ms' }
+                    }
+                ]
+            }, true);
+            // Trigger resize after container becomes visible so ECharts recalculates dimensions
+            setTimeout(() => comparisonChart.resize(), 0);
+        } else {
+            comparisonChart.setOption({
+                backgroundColor: 'transparent',
+                graphic: { type: 'text', left: 'center', top: 'middle', style: { text: '暂无 PCA 对比数据', fontSize: 14, fill: '#8A96A8' } },
+                xAxis: { show: false }, yAxis: { show: false }, series: []
+            }, true);
+        }
 
         updateStats(algorithms);
     }
@@ -351,43 +695,68 @@
             historyContainer.innerHTML = history
                 .slice(-5)
                 .reverse()
-                .map(item => `
-                    <div class="d-flex justify-content-between" style="font-size: 0.82rem;">
-                        <span>${item.created_at}</span>
-                        <span>Q:${item.query_count} | K:${item.k}</span>
-                    </div>
-                `)
+                .map((item, idx) => {
+                    const histId = history.length - 1 - idx;
+                    const metricLabel = item.metric ? item.metric.toUpperCase() : 'L2';
+                    const pcaLabel = item.pca ? ` | PCA:${item.pca.reduced_dim}` : '';
+                    return `
+                        <div class="d-flex justify-content-between align-items-center" style="font-size: 0.82rem; cursor: pointer; padding: 2px 0;"
+                             onclick="viewHistory(${histId})">
+                            <span>${item.created_at}</span>
+                            <span>${metricLabel}${pcaLabel} | Q:${item.query_count} K:${item.k}</span>
+                        </div>
+                    `;
+                })
                 .join('');
         } catch (err) {
             historyContainer.innerText = '历史记录加载失败';
         }
     }
 
+    async function viewHistory(historyId) {
+        try {
+            const res = await fetch(`/api/benchmark/history?limit=50`);
+            const data = await res.json();
+            if (!res.ok || !data.history) return;
+            const entry = data.history[historyId];
+            if (entry) {
+                lastHistoryId = historyId;
+                exportBtn.style.display = 'block';
+                renderBenchmarkResult(entry);
+            }
+        } catch (err) { /* ignore */ }
+    }
+
+    exportBtn.addEventListener('click', () => {
+        const url = lastHistoryId != null ? `/api/benchmark/export?history_id=${lastHistoryId}` : '/api/benchmark/export';
+        window.open(url, '_blank');
+    });
+
     document.getElementById('startBenchmarkBtn').addEventListener('click', async function() {
         const btn = this;
         const datasetId = datasetSelect.value;
         const queryCount = parseInt(queryCountInput.value, 10);
         const topK = parseInt(slider.value, 10);
+        const metric = metricSelect.value;
+        const pcaComp = parseInt(pcaInput.value, 10) || 0;
 
-        if (!datasetId) {
-            alert('请先选择数据集');
-            return;
-        }
+        if (!datasetId) { alert('请先选择数据集'); return; }
 
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>正在压测计算...';
         btn.disabled = true;
         timeChart.showLoading({ text: '索引运算中...', color: '#4A90E2', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
         recallChart.showLoading({ text: '召回率评估中...', color: '#E83E8C', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
+        memoryChart.showLoading({ text: '内存分析中...', color: '#1ABC9C', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
+        comparisonChart.showLoading({ text: '对比分析中...', color: '#F5A623', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
 
         try {
+            const body = { dataset_id: datasetId, query_count: queryCount, k: topK, metric };
+            if (pcaComp > 0) body.pca_components = pcaComp;
+
             const res = await fetch('/api/benchmark', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    dataset_id: datasetId,
-                    query_count: queryCount,
-                    k: topK
-                })
+                body: JSON.stringify(body)
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || '跑分失败');
@@ -404,6 +773,8 @@
         } finally {
             timeChart.hideLoading();
             recallChart.hideLoading();
+            memoryChart.hideLoading();
+            comparisonChart.hideLoading();
         }
     });
 
@@ -413,6 +784,8 @@
     window.addEventListener('resize', () => {
         timeChart.resize();
         recallChart.resize();
+        memoryChart.resize();
+        comparisonChart.resize();
     });
 </script>
 {% endblock %}
