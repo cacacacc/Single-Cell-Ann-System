@@ -1626,12 +1626,18 @@ def benchmark_api():
             return algos
 
         def _eval_algorithms(algos, target_vectors, target_queries, rep_key):
+            def _build_fresh(vectors, config):
+                """每次跑分都重新构建索引，绕过缓存以准确度量内存。"""
+                indexer = ANNIndexer(dim=vectors.shape[1], config=config)
+                indexer.build_index(vectors)
+                return indexer
+
             brute_algo = algos[0]
-            brute_indexer = _get_benchmark_indexer(resolved_id, rep_key, target_vectors, brute_algo["config"])
 
             truth_indices: List[np.ndarray] = []
             tracemalloc.start()
             snap_before = tracemalloc.take_snapshot()
+            brute_indexer = _build_fresh(target_vectors, brute_algo["config"])
             start_time = time.perf_counter()
             for query in target_queries:
                 _, idx = brute_indexer.search(query, max_k)
@@ -1660,7 +1666,7 @@ def benchmark_api():
                 tracemalloc.start()
                 snap_before = tracemalloc.take_snapshot()
                 try:
-                    indexer = _get_benchmark_indexer(resolved_id, rep_key, target_vectors, config)
+                    indexer = _build_fresh(target_vectors, config)
                 except ImportError as exc:
                     tracemalloc.stop()
                     results.append({
