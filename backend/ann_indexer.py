@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 
@@ -20,7 +20,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 _SUPPORTED_BACKENDS = {"auto", "faiss", "hnswlib", "numpy"}
-_SUPPORTED_METRICS = {"l2", "ip", "cosine"}
+_SUPPORTED_METRICS = {"l2", "ip", "cosine", "correlation"}
 _SUPPORTED_INDEX_TYPES = {"flat", "ivf_flat", "hnsw", "pq", "brute"}
 
 
@@ -496,14 +496,20 @@ class ANNIndexer:
         return True
 
     def _prepare_vectors(self, vectors: np.ndarray) -> np.ndarray:
-        if self._config.metric != "cosine":
-            return np.ascontiguousarray(vectors, dtype=np.float32)
-        return self._normalize_rows(vectors)
+        if self._config.metric in ("cosine", "correlation"):
+            prepared = np.ascontiguousarray(vectors, dtype=np.float32)
+            if self._config.metric == "correlation":
+                prepared = prepared - prepared.mean(axis=1, keepdims=True)
+            return self._normalize_rows(prepared)
+        return np.ascontiguousarray(vectors, dtype=np.float32)
 
     def _prepare_query(self, query: np.ndarray) -> np.ndarray:
-        if self._metric != "cosine":
-            return np.ascontiguousarray(query, dtype=np.float32)
-        return self._normalize_row(query)
+        if self._metric in ("cosine", "correlation"):
+            prepared = np.ascontiguousarray(query, dtype=np.float32)
+            if self._metric == "correlation":
+                prepared = prepared - prepared.mean()
+            return self._normalize_row(prepared)
+        return np.ascontiguousarray(query, dtype=np.float32)
 
     def _normalize_rows(self, vectors: np.ndarray) -> np.ndarray:
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
@@ -600,7 +606,9 @@ class ANNIndexer:
             raise ImportError("faiss is not available")
         if self._metric == "l2":
             return faiss.METRIC_L2
-        return faiss.METRIC_INNER_PRODUCT
+        if self._metric in ("cosine", "correlation", "ip"):
+            return faiss.METRIC_INNER_PRODUCT
+        return faiss.METRIC_L2
 
     def _build_faiss_index(self, vectors: np.ndarray, index_type: str):
         if faiss is None:
@@ -660,7 +668,7 @@ class ANNIndexer:
             raise ImportError("hnswlib is not available")
 
         space = self._metric
-        if space == "cosine":
+        if space in ("cosine", "correlation"):
             space = "cosine"
         elif space == "ip":
             space = "ip"
@@ -683,6 +691,16 @@ class ANNIndexer:
             return np.sum(diffs * diffs, axis=1, dtype=np.float32)
         if self._metric == "cosine":
             return 1.0 - np.sum(vectors * query, axis=1, dtype=np.float32)
+        if self._metric == "correlation":
+            q_centered = query - query.mean()
+            q_norm = np.linalg.norm(q_centered)
+            if q_norm > 0:
+                q_centered = q_centered / q_norm
+            v_centered = vectors - vectors.mean(axis=1, keepdims=True)
+            v_norms = np.linalg.norm(v_centered, axis=1, keepdims=True)
+            v_norms = np.where(v_norms == 0, 1.0, v_norms)
+            v_centered = v_centered / v_norms
+            return 1.0 - np.sum(v_centered * q_centered, axis=1, dtype=np.float32)
         return -np.sum(vectors * query, axis=1, dtype=np.float32)
 
     def _recompute_and_sort(
@@ -702,6 +720,97 @@ class ANNIndexer:
         indices = indices[order].astype(np.int64, copy=False)
         distances = distances[order].astype(np.float32, copy=False)
         return indices, distances
+
+
+class PCAReducer:
+    """基于 NumPy SVD 的 PCA 降维预处理器。
+
+    针对单细胞高维稀疏数据，在 ANN 索引构建前对向量进行降维，
+    减少计算量和内存占用，同时保留主要方差信息。
+
+    Parameters
+    ----------
+    n_components : int
+        降维后的目标维度数。
+    """
+
+    def __init__(self, n_components: int):
+        if n_components < 1:
+            raise ValueError("n_components must be >= 1")
+        self.n_components = n_components
+        self._mean: Optional[np.ndarray] = None
+        self._components: Optional[np.ndarray] = None
+        self._explained_variance_ratio: Optional[np.ndarray] = None
+
+    @property
+    def is_fitted(self) -> bool:
+        return self._mean is not None and self._components is not None
+
+    @property
+    def explained_variance_ratio_(self) -> Optional[np.ndarray]:
+        return self._explained_variance_ratio
+
+    def fit(self, vectors: np.ndarray) -> "PCAReducer":
+        vectors = np.asarray(vectors, dtype=np.float64)
+        if vectors.ndim != 2:
+            raise ValueError("vectors must be 2D")
+        n_samples, n_features = vectors.shape
+        n_components = min(self.n_components, n_samples, n_features)
+
+        self._mean = vectors.mean(axis=0)
+        centered = vectors - self._mean
+
+        _, s, vt = np.linalg.svd(centered, full_matrices=False)
+        self._components = vt[:n_components].astype(np.float32)
+
+        explained_var = (s[:n_components] ** 2) / (n_samples - 1)
+        total_var = (s ** 2).sum() / (n_samples - 1)
+        self._explained_variance_ratio = (explained_var / total_var).astype(np.float64)
+
+        return self
+
+    def transform(self, vectors: np.ndarray) -> np.ndarray:
+        if not self.is_fitted:
+            raise RuntimeError("PCAReducer has not been fitted")
+        vectors = np.asarray(vectors, dtype=np.float32)
+        centered = vectors - self._mean.astype(np.float32)
+        return np.ascontiguousarray(centered @ self._components.T, dtype=np.float32)
+
+    def fit_transform(self, vectors: np.ndarray) -> np.ndarray:
+        self.fit(vectors)
+        return self.transform(vectors)
+
+    def inverse_transform(self, reduced: np.ndarray) -> np.ndarray:
+        if not self.is_fitted:
+            raise RuntimeError("PCAReducer has not been fitted")
+        reduced = np.asarray(reduced, dtype=np.float32)
+        return np.ascontiguousarray(
+            reduced @ self._components + self._mean.astype(np.float32),
+            dtype=np.float32,
+        )
+
+    def save(self, path: Union[str, Path]) -> None:
+        if not self.is_fitted:
+            raise RuntimeError("PCAReducer has not been fitted")
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            str(path),
+            n_components=self.n_components,
+            mean=self._mean,
+            components=self._components,
+            explained_variance_ratio=self._explained_variance_ratio,
+        )
+
+    @classmethod
+    def load(cls, path: Union[str, Path]) -> "PCAReducer":
+        path = Path(path)
+        with np.load(str(path), allow_pickle=False) as data:
+            reducer = cls(n_components=int(data["n_components"]))
+            reducer._mean = data["mean"]
+            reducer._components = data["components"]
+            reducer._explained_variance_ratio = data["explained_variance_ratio"]
+        return reducer
 
 
 def _demo() -> None:
