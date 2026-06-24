@@ -71,59 +71,28 @@
                         <i class="fa-solid fa-gear"></i>
                     </a>
 
-                    <!-- 2. 小铃铛：消息通知中心 (点击唤出下拉列表) -->
+                    <!-- 2. 小铃铛：消息通知中心 -->
                     <div class="dropdown">
                         <a href="#" class="position-relative" id="notificationDropdown" data-bs-toggle="dropdown" aria-expanded="false" title="系统通知">
                             <i class="fa-solid fa-bell"></i>
-                            <!-- 呼吸闪烁的未读红点 -->
-                            <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle notification-dot">
+                            <span id="notiDot" class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle notification-dot" style="display: none;">
                                 <span class="visually-hidden">New alerts</span>
                             </span>
                         </a>
-                        
-                        <!-- 暗黑风格的消息下拉菜单 -->
+
                         <ul class="dropdown-menu dropdown-menu-end dark-dropdown shadow-lg" aria-labelledby="notificationDropdown" style="width: 320px; border-radius: 8px;">
                             <li class="px-3 py-2 border-bottom border-secondary d-flex justify-content-between align-items-center">
                                 <span class="fw-bold text-white">系统通知中心</span>
-                                <span class="badge bg-danger rounded-pill" id="noti-count">3 未读</span>
+                                <span class="badge bg-danger rounded-pill" id="noti-count" style="display: none;">0 未读</span>
                             </li>
-                            <div class="noti-list" style="max-height: 300px; overflow-y: auto;">
-                                <li>
-                                    <a class="dropdown-item noti-item unread" href="#">
-                                        <div class="d-flex align-items-start">
-                                            <i class="fa-solid fa-circle-check text-success mt-1 me-2"></i>
-                                            <div>
-                                                <div class="text-white text-wrap" style="font-size: 0.9rem;">Adult_Liver_Atlas 的 FAISS-HNSW 索引已构建完毕。</div>
-                                                <small class="text-muted">2 分钟前</small>
-                                            </div>
-                                        </div>
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item noti-item unread" href="#">
-                                        <div class="d-flex align-items-start">
-                                            <i class="fa-solid fa-triangle-exclamation text-warning mt-1 me-2"></i>
-                                            <div>
-                                                <div class="text-white text-wrap" style="font-size: 0.9rem;">警告：高维数据解析导致内存占用短暂峰值超过 85%。</div>
-                                                <small class="text-muted">1 小时前</small>
-                                            </div>
-                                        </div>
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item noti-item unread" href="#">
-                                        <div class="d-flex align-items-start">
-                                            <i class="fa-solid fa-user-plus" style="color: #4A90E2; margin-top: 4px; margin-right: 8px;"></i>
-                                            <div>
-                                                <div class="text-white text-wrap" style="font-size: 0.9rem;">新用户 researcher_02 已注册，请等待管理员分配权限。</div>
-                                                <small class="text-muted">昨天 16:30</small>
-                                            </div>
-                                        </div>
-                                    </a>
+                            <div class="noti-list" id="notiList" style="max-height: 340px; overflow-y: auto;">
+                                <li class="noti-empty" id="notiLoading">
+                                    <i class="fa-solid fa-spinner fa-spin"></i>加载中...
                                 </li>
                             </div>
-                            <li class="px-3 py-2 border-top border-secondary text-center">
-                                <a href="#" class="text-decoration-none" style="font-size: 0.85rem; color: #4A90E2;" onclick="markAllRead(event)">标为全读</a>
+                            <li class="px-3 py-2 border-top border-secondary d-flex justify-content-between">
+                                <a href="#" class="text-decoration-none" style="font-size: 0.85rem; color: #4A90E2;" onclick="markAllRead(event)">全部已读</a>
+                                <a href="#" class="text-decoration-none" style="font-size: 0.85rem; color: #A0AABF;" onclick="loadNotifications()">刷新</a>
                             </li>
                         </ul>
                     </div>
@@ -234,6 +203,125 @@
             await fetch('/api/auth/logout', { method: 'POST' });
             window.location.href = '/login';
         });
+    </script>
+
+    <script>
+    /* ====== 系统通知中心 ====== */
+    const NOTI_ICONS = {
+        success: { icon: 'fa-circle-check', color: '#2ecc71' },
+        warning: { icon: 'fa-triangle-exclamation', color: '#F5A623' },
+        error:   { icon: 'fa-circle-xmark', color: '#E83E8C' },
+        info:    { icon: 'fa-circle-info', color: '#4A90E2' },
+    };
+
+    function relativeTime(dateStr) {
+        if (!dateStr) return '';
+        const now = Date.now();
+        const then = new Date(dateStr + 'Z').getTime();
+        const diff = Math.floor((now - then) / 1000);
+        if (diff < 60) return '刚刚';
+        if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+        if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+        if (diff < 604800) return Math.floor(diff / 86400) + ' 天前';
+        return dateStr.slice(0, 10);
+    }
+
+    function renderNotiItem(n) {
+        const iconCfg = NOTI_ICONS[n.type] || NOTI_ICONS.info;
+        const readClass = n.is_read ? 'read' : 'unread';
+        const contentHtml = n.content ? `<small class="text-muted d-block mt-1" style="font-size:0.8rem;">${n.content}</small>` : '';
+        return `
+            <li>
+                <a class="dropdown-item noti-item ${readClass}" href="#" onclick="onNotiClick(event, ${n.id}, ${n.is_read})">
+                    <div class="d-flex align-items-start">
+                        <i class="fa-solid ${iconCfg.icon}" style="color:${iconCfg.color}; margin-top:4px; margin-right:8px; flex-shrink:0;"></i>
+                        <div style="min-width:0; flex:1;">
+                            <div class="noti-title text-white text-wrap" style="font-size:0.9rem;">${n.title}</div>
+                            ${contentHtml}
+                            <small class="text-muted" style="font-size:0.75rem;">${relativeTime(n.created_at)}</small>
+                        </div>
+                    </div>
+                    <span class="noti-delete" onclick="deleteNoti(event, ${n.id})" title="删除"><i class="fa-solid fa-xmark"></i></span>
+                </a>
+            </li>`;
+    }
+
+    async function loadNotifications() {
+        const list = document.getElementById('notiList');
+        if (!list) return;
+        try {
+            const res = await fetch('/api/notifications?limit=20');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+
+            const notifications = data.notifications || [];
+            const unreadCount = data.unread_count || 0;
+
+            updateNotiBadge(unreadCount);
+
+            if (notifications.length === 0) {
+                list.innerHTML = `<li class="noti-empty"><i class="fa-regular fa-bell-slash"></i>暂无通知</li>`;
+                return;
+            }
+            list.innerHTML = notifications.map(renderNotiItem).join('');
+        } catch (err) {
+            list.innerHTML = `<li class="noti-empty"><i class="fa-solid fa-triangle-exclamation"></i>加载失败</li>`;
+        }
+    }
+
+    async function loadUnreadCount() {
+        try {
+            const res = await fetch('/api/notifications/unread-count');
+            const data = await res.json();
+            if (res.ok) updateNotiBadge(data.unread_count || 0);
+        } catch (err) { /* silent */ }
+    }
+
+    function updateNotiBadge(count) {
+        const badge = document.getElementById('noti-count');
+        const dot = document.getElementById('notiDot');
+        if (!badge || !dot) return;
+        if (count > 0) {
+            badge.textContent = count + ' 未读';
+            badge.style.display = '';
+            dot.style.display = '';
+        } else {
+            badge.style.display = 'none';
+            dot.style.display = 'none';
+        }
+    }
+
+    async function onNotiClick(event, id, isRead) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!isRead) {
+            await fetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
+            loadNotifications();
+        }
+    }
+
+    async function markAllRead(event) {
+        event.preventDefault();
+        await fetch('/api/notifications/mark-all-read', { method: 'POST' });
+        loadNotifications();
+    }
+
+    async function deleteNoti(event, id) {
+        event.preventDefault();
+        event.stopPropagation();
+        await fetch(`/api/notifications/${id}`, { method: 'DELETE' });
+        loadNotifications();
+    }
+
+    // 下拉菜单打开时刷新列表
+    document.getElementById('notificationDropdown')?.addEventListener('shown.bs.dropdown', loadNotifications);
+
+    // 页面加载时初始化
+    loadUnreadCount();
+    loadNotifications();
+
+    // 每 30 秒轮询未读数
+    setInterval(loadUnreadCount, 30000);
     </script>
 
     {% block scripts %}{% endblock %}

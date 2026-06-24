@@ -215,6 +215,71 @@ body {
     background-color: var(--bg-card);
 }
 
+/* 通知红点呼吸动画 */
+.notification-dot {
+    animation: noti-pulse 2s ease-in-out infinite;
+}
+@keyframes noti-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+/* 未读通知项：左侧蓝色边框 + 背景高亮 */
+.noti-item.unread {
+    border-left: 3px solid #4A90E2;
+    background-color: rgba(74, 144, 226, 0.06) !important;
+}
+.noti-item.unread .noti-title {
+    font-weight: 600;
+}
+
+/* 已读通知项：无左边框，正常背景 */
+.noti-item.read {
+    border-left: 3px solid transparent;
+    opacity: 0.75;
+}
+.noti-item.read:hover {
+    opacity: 1;
+}
+
+/* 通知项通用 */
+.noti-item {
+    position: relative;
+    transition: background-color 0.15s, opacity 0.15s;
+    cursor: pointer;
+}
+.noti-item .noti-delete {
+    display: none;
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #A0AABF;
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 4px;
+}
+.noti-item:hover .noti-delete {
+    display: block;
+}
+.noti-item .noti-delete:hover {
+    color: #E83E8C;
+}
+
+/* 空状态 */
+.noti-empty {
+    text-align: center;
+    padding: 30px 20px;
+    color: #A0AABF;
+    font-size: 0.9rem;
+}
+.noti-empty i {
+    font-size: 2rem;
+    margin-bottom: 10px;
+    display: block;
+    opacity: 0.4;
+}
+
 /* ================= 卡片样式 ================= */
 .dark-card {
     background-color: var(--bg-card);
