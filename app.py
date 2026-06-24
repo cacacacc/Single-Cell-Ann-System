@@ -788,6 +788,7 @@ def register_api():
             is_active=True,
         )
         _set_session_user(user, remember=bool(payload.get("remember")))
+        _notify_admins("info", "新用户注册", f"用户 {user['username']} 已注册，请等待管理员分配权限")
         return _json_response({"status": "registered", "user": user}, 201)
     except UserStoreError as exc:
         return _user_error_response(exc)
@@ -1255,6 +1256,9 @@ def upload_dataset():
     handle.save(str(target_path))
     dataset_id = _dataset_id_from_path(target_path)
     _DATASET_CACHE.pop(dataset_id, None)
+    current = _current_user()
+    if current:
+        _notify_admins("info", "新数据集上传", f"{filename} 已上传，数据集 ID: {dataset_id}")
     return _json_response({"status": "uploaded", "dataset_id": dataset_id}, 201)
 
 
@@ -1314,6 +1318,13 @@ def build_index():
             resolved_id, use_rep, index_config,
             build_if_missing=True, index_name=index_name,
         )
+        current = _current_user()
+        if current:
+            _notify(
+                current["id"], "success",
+                f"索引构建完成",
+                f"{resolved_id} 的 {index_name} 索引 ({indexer.backend}/{indexer.index_type}) 已构建完毕",
+            )
         return _json_response(
             {
                 "status": "built",
@@ -1626,12 +1637,18 @@ def benchmark_api():
             return algos
 
         def _eval_algorithms(algos, target_vectors, target_queries, rep_key):
+            def _build_fresh(vectors, config):
+                """每次跑分都重新构建索引，绕过缓存以准确度量内存。"""
+                indexer = ANNIndexer(dim=vectors.shape[1], config=config)
+                indexer.build_index(vectors)
+                return indexer
+
             brute_algo = algos[0]
-            brute_indexer = _get_benchmark_indexer(resolved_id, rep_key, target_vectors, brute_algo["config"])
 
             truth_indices: List[np.ndarray] = []
             tracemalloc.start()
             snap_before = tracemalloc.take_snapshot()
+            brute_indexer = _build_fresh(target_vectors, brute_algo["config"])
             start_time = time.perf_counter()
             for query in target_queries:
                 _, idx = brute_indexer.search(query, max_k)
@@ -1660,7 +1677,7 @@ def benchmark_api():
                 tracemalloc.start()
                 snap_before = tracemalloc.take_snapshot()
                 try:
-                    indexer = _get_benchmark_indexer(resolved_id, rep_key, target_vectors, config)
+                    indexer = _build_fresh(target_vectors, config)
                 except ImportError as exc:
                     tracemalloc.stop()
                     results.append({
@@ -2047,6 +2064,14 @@ def vectordb_init():
             top_genes=top_genes,
         )
         elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+
+        current = _current_user()
+        if current:
+            _notify(
+                current["id"], "success",
+                "向量数据库初始化完成",
+                f"{resolved_id} 的 ChromaDB 已写入 {count} 条细胞数据",
+            )
 
         return _json_response(
             {
@@ -2657,6 +2682,87 @@ def rename_chat_session_api(session_id: str):
         return _json_response({"status": "renamed", "session_id": session_id, "title": title})
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
+
+
+# ============================================================
+# 系统通知中心 API
+# ============================================================
+
+def _notify(user_id: int, noti_type: str, title: str, content: str = "") -> None:
+    """快捷创建通知（静默失败，不影响主流程）。"""
+    try:
+        _user_store().add_notification(user_id, noti_type, title, content)
+    except Exception:
+        app.logger.exception("Failed to create notification")
+
+
+def _notify_admins(noti_type: str, title: str, content: str = "") -> None:
+    """给所有管理员发送通知。"""
+    try:
+        admins = _user_store().list_users()
+        for admin in admins:
+            if admin.get("role") == "admin" and admin.get("is_active"):
+                _notify(admin["id"], noti_type, title, content)
+    except Exception:
+        app.logger.exception("Failed to notify admins")
+
+
+@app.get("/api/notifications")
+@login_required
+def list_notifications_api():
+    user = _current_user()
+    assert user is not None
+    limit = _parse_int(dict(request.args), "limit", default=20)
+    unread_only = request.args.get("unread_only", "").lower() in ("1", "true", "yes")
+    notifications = _user_store().list_notifications(
+        user["id"], limit=limit, unread_only=unread_only
+    )
+    unread_count = _user_store().count_unread(user["id"])
+    return _json_response({
+        "notifications": notifications,
+        "unread_count": unread_count,
+        "total": len(notifications),
+    })
+
+
+@app.get("/api/notifications/unread-count")
+@login_required
+def notification_unread_count_api():
+    user = _current_user()
+    assert user is not None
+    count = _user_store().count_unread(user["id"])
+    return _json_response({"unread_count": count})
+
+
+@app.patch("/api/notifications/<int:noti_id>/read")
+@login_required
+def mark_notification_read_api(noti_id: int):
+    user = _current_user()
+    assert user is not None
+    ok = _user_store().mark_read(noti_id, user["id"])
+    if not ok:
+        return _json_response({"error": "通知不存在"}, 404)
+    return _json_response({"status": "read", "id": noti_id})
+
+
+@app.post("/api/notifications/mark-all-read")
+@login_required
+def mark_all_notifications_read_api():
+    user = _current_user()
+    assert user is not None
+    count = _user_store().mark_all_read(user["id"])
+    return _json_response({"status": "all_read", "marked_count": count})
+
+
+@app.delete("/api/notifications/<int:noti_id>")
+@login_required
+def delete_notification_api(noti_id: int):
+    user = _current_user()
+    assert user is not None
+    ok = _user_store().delete_notification(noti_id, user["id"])
+    if not ok:
+        return _json_response({"error": "通知不存在"}, 404)
+    return _json_response({"status": "deleted", "id": noti_id})
 
 
 @app.get("/api/llm/info")

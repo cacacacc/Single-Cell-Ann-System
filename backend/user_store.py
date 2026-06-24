@@ -219,6 +219,27 @@ class UserStore:
                 """
             )
             # ─────────────────────────────────────────────────────────────────
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id    INTEGER NOT NULL,
+                    type       TEXT NOT NULL DEFAULT 'info',
+                    title      TEXT NOT NULL,
+                    content    TEXT,
+                    is_read    INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_noti_user_read
+                ON notifications(user_id, is_read)
+                """
+            )
+            # ─────────────────────────────────────────────────────────────────
 
             admin_username = normalize_username(default_admin_username)
             existing_admin = conn.execute(
@@ -622,6 +643,89 @@ class UserStore:
                 "DELETE FROM chat_sessions WHERE user_id = ?", (user_id,)
             )
         return cursor.rowcount
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 通知中心
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def add_notification(
+        self, user_id: int, noti_type: str, title: str, content: str = ""
+    ) -> Dict[str, Any]:
+        now = utc_now()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO notifications (user_id, type, title, content, is_read, created_at)
+                VALUES (?, ?, ?, ?, 0, ?)
+                """,
+                (user_id, noti_type, title, content, now),
+            )
+            return {
+                "id": cursor.lastrowid,
+                "user_id": user_id,
+                "type": noti_type,
+                "title": title,
+                "content": content,
+                "is_read": False,
+                "created_at": now,
+            }
+
+    def list_notifications(
+        self, user_id: int, limit: int = 20, unread_only: bool = False
+    ) -> List[Dict[str, Any]]:
+        limit = min(max(limit, 1), 100)
+        sql = "SELECT * FROM notifications WHERE user_id = ?"
+        params: list = [user_id]
+        if unread_only:
+            sql += " AND is_read = 0"
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [
+            {
+                "id": int(r["id"]),
+                "user_id": int(r["user_id"]),
+                "type": r["type"],
+                "title": r["title"],
+                "content": r["content"] or "",
+                "is_read": bool(r["is_read"]),
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
+
+    def count_unread(self, user_id: int) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM notifications WHERE user_id = ? AND is_read = 0",
+                (user_id,),
+            ).fetchone()
+        return int(row["cnt"]) if row else 0
+
+    def mark_read(self, notification_id: int, user_id: int) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?",
+                (notification_id, user_id),
+            )
+        return cursor.rowcount > 0
+
+    def mark_all_read(self, user_id: int) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0",
+                (user_id,),
+            )
+        return cursor.rowcount
+
+    def delete_notification(self, notification_id: int, user_id: int) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM notifications WHERE id = ? AND user_id = ?",
+                (notification_id, user_id),
+            )
+        return cursor.rowcount > 0
 
     # ─────────────────────────────────────────────────────────────────────────
 
