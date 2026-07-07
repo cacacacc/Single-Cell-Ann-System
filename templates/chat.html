@@ -886,6 +886,10 @@
     let sysLLM = { configured: false, provider: '', model: '' };
     let sysDataset = { id: '', filename: '', nCells: 0 };
     let datasets = [];
+    const launchParams = new URLSearchParams(window.location.search);
+    let activeCellContextId = launchParams.get('cell_id') || '';
+    let launchQuestion = launchParams.get('question') || '';
+    let launchDatasetId = launchParams.get('dataset_id') || '';
 
     // DOM refs
     const chatMessages  = document.getElementById('chatMessages');
@@ -918,6 +922,9 @@
 
         // 4) Update UI state
         updateInputState();
+
+        // 5) Apply optional context from visualization/search page
+        applyLaunchContext();
     }
 
     async function loadDatasets() {
@@ -930,9 +937,10 @@
                 : '<option value="">无可用数据集</option>';
 
             if (datasets.length > 0) {
-                sysDataset.id = datasets[0].id;
-                sysDataset.filename = datasets[0].filename;
-                sysDataset.nCells = datasets[0].n_cells || 0;
+                const selected = datasets.find(d => d.id === launchDatasetId) || datasets[0];
+                sysDataset.id = selected.id;
+                sysDataset.filename = selected.filename;
+                sysDataset.nCells = selected.n_cells || 0;
                 datasetSelect.value = sysDataset.id;
             }
         } catch (err) {
@@ -1025,6 +1033,17 @@
         }
     }
 
+    function applyLaunchContext() {
+        if (!activeCellContextId) return;
+        const question = launchQuestion || `请基于细胞 ${activeCellContextId} 及其相似细胞，分析它可能的细胞类型、生物学功能和关键证据。`;
+        chatInput.value = question;
+        autoResizeInput();
+        showStatus(
+            `已从 UMAP 带入细胞 <strong>${escapeHtml(activeCellContextId)}</strong> 作为本轮问答上下文，可直接发送或修改问题。`,
+            'info'
+        );
+    }
+
     // ===================================================================
     //  Vector DB Init (one-click)
     // ===================================================================
@@ -1081,6 +1100,8 @@
             sysDataset.filename = ds.filename;
             sysDataset.nCells = ds.n_cells || 0;
         }
+        activeCellContextId = '';
+        launchQuestion = '';
 
         if (sessionId) {
             try { await fetch(`/api/chat/history?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' }); } catch (e) {}
@@ -1196,6 +1217,7 @@
             body: JSON.stringify({
                 question: question,
                 dataset_id: sysDataset.id || undefined,
+                cell_id: activeCellContextId || undefined,
                 n_results: 5,
                 session_id: sessionId,
                 temperature: controls.temperature,
@@ -1282,6 +1304,7 @@
             body: JSON.stringify({
                 question: question,
                 dataset_id: sysDataset.id || undefined,
+                cell_id: activeCellContextId || undefined,
                 n_results: 5,
                 session_id: sessionId,
                 temperature: controls.temperature,
