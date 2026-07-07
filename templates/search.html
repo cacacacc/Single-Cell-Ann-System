@@ -150,6 +150,264 @@
     .cell-browser-actions button:disabled {
         opacity: 0.35;
     }
+
+    .umap-interaction-hint {
+        color: #8A96A8;
+        font-size: 0.82rem;
+        margin-top: 10px;
+    }
+    .legend-filter-button {
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(255,255,255,0.03);
+        color: #FFFFFF;
+        border-radius: 6px;
+        padding: 5px 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.85rem;
+        line-height: 1;
+        cursor: pointer;
+        transition: all 0.18s ease;
+    }
+    .legend-filter-button:hover {
+        border-color: rgba(74,144,226,0.75);
+        background: rgba(74,144,226,0.12);
+    }
+    .legend-filter-button.is-muted {
+        opacity: 0.38;
+    }
+    .legend-filter-button.is-active {
+        border-color: #4A90E2;
+        background: rgba(74,144,226,0.18);
+    }
+    .legend-color-swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        flex-shrink: 0;
+    }
+    .legend-filter-reset {
+        border: 1px solid rgba(255,255,255,0.12);
+        background: transparent;
+        color: #8A96A8;
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-size: 0.85rem;
+    }
+    .legend-filter-reset:hover {
+        color: #FFFFFF;
+        border-color: rgba(255,255,255,0.28);
+    }
+    .umap-context-menu {
+        position: fixed;
+        z-index: 2147483647;
+        min-width: 230px;
+        background: #11172c;
+        border: 1px solid rgba(74, 144, 226, 0.75);
+        border-radius: 8px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+        padding: 8px;
+        display: none;
+    }
+    .umap-context-menu.show {
+        display: block;
+    }
+    .umap-context-title {
+        color: #FFFFFF;
+        font-family: monospace;
+        font-size: 0.82rem;
+        word-break: break-all;
+        padding: 6px 8px 4px;
+    }
+    .umap-context-type {
+        display: inline-block;
+        margin: 0 8px 8px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        color: #FFFFFF;
+        font-size: 0.75rem;
+    }
+    .umap-context-action {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: #DCE6F5;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        border-radius: 6px;
+        text-align: left;
+        font-size: 0.86rem;
+    }
+    .umap-context-action:hover {
+        background: rgba(74, 144, 226, 0.16);
+        color: #FFFFFF;
+    }
+    .umap-quick-panel {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border: 1px solid rgba(74,144,226,0.24);
+        background: rgba(6, 10, 24, 0.72);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .umap-quick-cell {
+        min-width: 0;
+        color: #8A96A8;
+        font-size: 0.84rem;
+    }
+    .umap-quick-cell strong {
+        display: block;
+        color: #FFFFFF;
+        font-family: monospace;
+        font-size: 0.86rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 380px;
+    }
+    .umap-quick-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+    .umap-quick-btn {
+        border: 1px solid rgba(255,255,255,0.16);
+        background: rgba(255,255,255,0.04);
+        color: #DCE6F5;
+        border-radius: 6px;
+        padding: 6px 9px;
+        font-size: 0.84rem;
+        white-space: nowrap;
+    }
+    .umap-quick-btn:hover:not(:disabled) {
+        background: rgba(74,144,226,0.16);
+        border-color: rgba(74,144,226,0.7);
+        color: #FFFFFF;
+    }
+    .umap-quick-btn.primary {
+        background: #923a73;
+        border-color: #923a73;
+        color: #FFFFFF;
+    }
+    .umap-quick-btn.ai {
+        background: rgba(74,144,226,0.18);
+        border-color: rgba(74,144,226,0.72);
+        color: #FFFFFF;
+    }
+    .umap-quick-btn:disabled {
+        opacity: 0.42;
+        cursor: not-allowed;
+    }
+    .result-row {
+        cursor: pointer;
+        transition: background-color 0.16s ease, box-shadow 0.16s ease;
+    }
+    .result-row.is-linked td {
+        background-color: rgba(74, 144, 226, 0.16) !important;
+        box-shadow: inset 3px 0 0 #4A90E2;
+    }
+    .inline-action-btn {
+        border: 1px solid rgba(255,255,255,0.16);
+        background: rgba(255,255,255,0.04);
+        color: #DCE6F5;
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-size: 0.8rem;
+        white-space: nowrap;
+    }
+    .inline-action-btn:hover {
+        border-color: rgba(74,144,226,0.75);
+        background: rgba(74,144,226,0.16);
+        color: #FFFFFF;
+    }
+    .umap-side-panels {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 12px;
+        margin-top: 12px;
+    }
+    .umap-info-panel {
+        border: 1px solid rgba(74,144,226,0.22);
+        background: rgba(6, 10, 24, 0.66);
+        border-radius: 8px;
+        padding: 12px;
+        min-width: 0;
+    }
+    .umap-info-title {
+        color: #FFFFFF;
+        font-weight: 700;
+        font-size: 0.92rem;
+        margin-bottom: 8px;
+    }
+    .umap-info-text {
+        color: #8A96A8;
+        font-size: 0.84rem;
+        line-height: 1.45;
+    }
+    .pill-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+    }
+    .cell-pill {
+        border: 1px solid rgba(74,144,226,0.38);
+        background: rgba(10, 16, 34, 0.96);
+        border-radius: 999px;
+        padding: 3px 8px;
+        color: #FFFFFF;
+        font-size: 0.78rem;
+        max-width: 190px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+    }
+    button.cell-pill {
+        cursor: pointer;
+    }
+    .cell-pill:hover {
+        border-color: rgba(74,144,226,0.9);
+        background: rgba(25, 39, 76, 0.98);
+        color: #FFFFFF;
+    }
+    .nl-query-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+    }
+    .nl-query-row input {
+        min-width: 0;
+        flex: 1;
+    }
+    .brush-rect {
+        position: fixed;
+        z-index: 2147483646;
+        border: 1px solid #4A90E2;
+        background: rgba(74, 144, 226, 0.16);
+        pointer-events: none;
+        display: none;
+    }
+    #brushToggleBtn.brush-active {
+        background: rgba(74, 144, 226, 0.25);
+        border-color: #4A90E2 !important;
+        box-shadow: 0 0 10px rgba(74, 144, 226, 0.35);
+    }
+    #brushToggleBtn.brush-active i {
+        color: #4A90E2;
+    }
+    @media (max-width: 1100px) {
+        .umap-side-panels {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 
 <!-- 采用全新的 Flex 容器 -->
@@ -360,11 +618,83 @@
                         </select>
                     </div>
                     <button class="btn btn-sm text-white" id="redrawBtn" style="border: 1px solid rgba(255,255,255,0.2); background: transparent;">重绘</button>
+                    <button class="btn btn-sm text-white" id="brushToggleBtn" style="border: 1px solid rgba(255,255,255,0.2); background: transparent;" title="框选模式：拖拽矩形选中多个细胞">
+                        <i class="fa-regular fa-square me-1"></i>框选
+                    </button>
+                </div>
+            </div>
+
+            <div class="umap-quick-panel">
+                <div class="umap-quick-cell">
+                    当前细胞
+                    <strong id="umapQuickCellId">请先右键一个 UMAP 点</strong>
+                    <span id="umapQuickCellType">未选择</span>
+                </div>
+                <div class="umap-quick-actions">
+                    <button type="button" class="umap-quick-btn primary" id="umapQuickSearchBtn" disabled>
+                        <i class="fa-solid fa-magnifying-glass me-1"></i>搜索相似
+                    </button>
+                    <button type="button" class="umap-quick-btn ai" id="umapQuickAiBtn" disabled>
+                        <i class="fa-solid fa-robot me-1"></i>AI 分析
+                    </button>
+                    <button type="button" class="umap-quick-btn" id="umapQuickLocateBtn" disabled>
+                        <i class="fa-solid fa-crosshairs me-1"></i>定位
+                    </button>
+                    <button type="button" class="umap-quick-btn" id="umapQuickCopyBtn" disabled>
+                        <i class="fa-solid fa-copy me-1"></i>复制 ID
+                    </button>
+                    <button type="button" class="umap-quick-btn" id="umapQuickFillBtn" disabled>
+                        <i class="fa-solid fa-pen-to-square me-1"></i>填入
+                    </button>
+                    <button type="button" class="umap-quick-btn" id="umapQuickCompareBtn" disabled>
+                        <i class="fa-solid fa-code-compare me-1"></i>加入对比
+                    </button>
                 </div>
             </div>
 
             <!-- ECharts 渲染容器 (高度适度收紧到 420px，消除下方过多空白) -->
-            <div id="umapChart" class="chart-box" style="width: 100%; height: 420px;"></div>
+            <div id="umapChart" class="chart-box" style="width: 100%; height: 420px; position: relative; margin-top: 10px;"></div>
+            <div class="umap-interaction-hint">
+                <i class="fa-solid fa-hand-pointer me-1" style="color:#4A90E2;"></i>
+                右键 UMAP 细胞点可打开快捷菜单并联动表格；按住 Shift 在图上拖拽可框选细胞群；点击图例可过滤类型。
+            </div>
+
+            <div class="umap-side-panels">
+                <div class="umap-info-panel">
+                    <div class="umap-info-title"><i class="fa-solid fa-vector-square me-1" style="color:#4A90E2;"></i>框选区域查询</div>
+                    <div id="selectionSummary" class="umap-info-text">按住 Shift 并拖拽 UMAP 区域后，这里会统计主要细胞类型、数量占比、查询种子和距离分布。</div>
+                    <div class="pill-list" id="selectionSeeds"></div>
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        <button type="button" class="umap-quick-btn" id="selectionQueryBtn" disabled>
+                            <i class="fa-solid fa-magnifying-glass me-1"></i>用首个种子查询
+                        </button>
+                        <button type="button" class="umap-quick-btn ai" id="selectionAiBtn" disabled>
+                            <i class="fa-solid fa-robot me-1"></i>解释细胞群
+                        </button>
+                    </div>
+                </div>
+                <div class="umap-info-panel">
+                    <div class="umap-info-title"><i class="fa-solid fa-comments me-1" style="color:#4A90E2;"></i>自然语言辅助</div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="button" class="umap-quick-btn ai nl-prompt-btn" data-question="解释当前选中的细胞群">解释当前选中的细胞群</button>
+                        <button type="button" class="umap-quick-btn ai nl-prompt-btn" data-question="这些细胞可能是什么类型">这些细胞可能是什么类型</button>
+                    </div>
+                    <div class="nl-query-row">
+                        <input type="text" class="form-control dark-control" id="naturalQuestionInput" placeholder="输入给 AI 细胞助手的问题">
+                        <button type="button" class="umap-quick-btn ai" id="naturalQuestionBtn" title="发送到 AI 细胞助手">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="umap-info-panel mt-3">
+                <div class="d-flex justify-content-between align-items-center gap-2">
+                    <div class="umap-info-title mb-0"><i class="fa-solid fa-code-compare me-1" style="color:#4A90E2;"></i>对比列表</div>
+                    <button type="button" class="legend-filter-reset" id="clearCompareBtn">清空</button>
+                </div>
+                <div id="compareList" class="pill-list"><span class="umap-info-text">尚未加入细胞。</span></div>
+            </div>
 
             <!-- 底部自定义图例区 -->
             <div id="custom-legend-box" class="mt-3 p-3" style="background-color: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">
@@ -395,14 +725,13 @@
                         <th class="ps-4">Rank</th>
                         <th>细胞 ID</th>
                         <th>细胞类型 (Cell Type)</th>
-                        <th>来源数据集</th>
                         <th id="distanceHeader">距离得分 (L2 Distance)</th>
                         <th>操作</th>
                     </tr>
                 </thead>
                 <tbody id="result-tbody">
                     <tr>
-                        <td colspan="6" class="text-center py-5">
+                        <td colspan="5" class="text-center py-5">
                             <i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i>
                             <div style="color: #8A96A8;">请在左侧设定参数并点击【开始近似检索】</div>
                         </td>
@@ -413,6 +742,36 @@
 
     </div>
 </div>
+
+<!-- UMAP 快捷菜单 -->
+<div id="umapContextMenu" class="umap-context-menu">
+    <div class="umap-context-title" id="umapContextCellId">—</div>
+    <span class="umap-context-type" id="umapContextCellType">unknown</span>
+    <button type="button" class="umap-context-action" data-action="search">
+        <i class="fa-solid fa-magnifying-glass"></i>作为查询搜索相似细胞
+    </button>
+    <button type="button" class="umap-context-action" data-action="ai">
+        <i class="fa-solid fa-robot"></i>发送到 AI 细胞助手
+    </button>
+    <button type="button" class="umap-context-action" data-action="metadata">
+        <i class="fa-solid fa-circle-info"></i>查看元数据
+    </button>
+    <button type="button" class="umap-context-action" data-action="locate">
+        <i class="fa-solid fa-crosshairs"></i>定位到该细胞
+    </button>
+    <button type="button" class="umap-context-action" data-action="copy">
+        <i class="fa-solid fa-copy"></i>复制 Cell ID
+    </button>
+    <button type="button" class="umap-context-action" data-action="fill">
+        <i class="fa-solid fa-pen-to-square"></i>填入查询框
+    </button>
+    <button type="button" class="umap-context-action" data-action="compare">
+        <i class="fa-solid fa-code-compare"></i>加入对比列表
+    </button>
+</div>
+
+<div id="umapBrushRect" class="brush-rect"></div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -767,10 +1126,14 @@
     let lastSearchQueryId = null;
     let lastSearchPayload = null;
     let focusedCellId = null;
+    let activeUmapCategoryFilters = new Set();
+    let lastUmapRenderResults = [];
+    let lastUmapRenderQueryId = null;
 
     document.getElementById('showLegend').addEventListener('change', function(e) {
         document.getElementById('custom-legend-box').style.display = e.target.checked ? 'block' : 'none';
     });
+    document.getElementById('bgSample').addEventListener('change', rerenderCurrentUmap);
 
     function generateCluster(center, color, count, typeName) {
         let data = [];
@@ -789,6 +1152,37 @@
 
     const chartDom = document.getElementById('umapChart');
     const myChart = echarts.init(chartDom);
+
+    function formatUmapTooltip(params) {
+        const data = params.data || {};
+        const cellId = escapeHtml(data.name || data.cell_id || '-');
+        const cellType = escapeHtml(data.type || data.category || 'unknown');
+        const role = escapeHtml(data.role || params.seriesName || 'UMAP 细胞');
+        const color = data.itemStyle?.color || params.color || '#8A96A8';
+        const x = Array.isArray(data.value) && Number.isFinite(data.value[0]) ? Number(data.value[0]).toFixed(3) : '-';
+        const y = Array.isArray(data.value) && Number.isFinite(data.value[1]) ? Number(data.value[1]).toFixed(3) : '-';
+        const rank = data.rank != null ? `#${escapeHtml(data.rank)}` : '-';
+        const distance = data.dist != null ? escapeHtml(data.dist) : '-';
+        const similarity = data.similarity != null ? escapeHtml(data.similarity) : '-';
+
+        return `
+            <div style="min-width: 260px; max-width: 340px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;">
+                    <div style="font-weight:700; color:#fff;">${role}</div>
+                    <span style="width:10px; height:10px; border-radius:50%; background:${color}; display:inline-block; flex-shrink:0;"></span>
+                </div>
+                <div style="font-family:monospace; color:#fff; word-break:break-all; margin-bottom:6px;">${cellId}</div>
+                <div style="display:grid; grid-template-columns:86px minmax(0,1fr); gap:4px 10px; font-size:12px; line-height:1.45;">
+                    <span style="color:#8A96A8;">Cell Type</span><span style="color:${color};">${cellType}</span>
+                    <span style="color:#8A96A8;">UMAP</span><span style="font-family:monospace; color:#DCE6F5;">(${x}, ${y})</span>
+                    <span style="color:#8A96A8;">Rank</span><span style="color:#DCE6F5;">${rank}</span>
+                    <span style="color:#8A96A8;">Distance</span><span style="color:#2ecc71; font-family:monospace;">${distance}</span>
+                    <span style="color:#8A96A8;">Similarity</span><span style="color:#F5A623; font-family:monospace;">${similarity}</span>
+                </div>
+                <div style="margin-top:8px; color:#8A96A8; font-size:11px;">右键该细胞可打开快捷菜单</div>
+            </div>
+        `;
+    }
     
     baseOption = {
         backgroundColor: 'transparent',
@@ -796,12 +1190,8 @@
             backgroundColor: 'rgba(20, 26, 48, 0.9)',
             borderColor: '#4A90E2',
             textStyle: { color: '#fff' },
-            formatter: function (params) {
-                if(params.seriesName === '查询目标' || params.seriesName === 'Top-K 结果') {
-                    return `ID: ${params.data.name}<br>Type: <span style="color:${params.color}">${params.data.type}</span><br>Dist: ${params.data.dist}`;
-                }
-                return `ID: ${params.data.name}<br>Type: <span style="color:${params.color}">${params.data.type}</span>`;
-            }
+            extraCssText: 'box-shadow: 0 10px 28px rgba(0,0,0,0.55); border-radius: 8px;',
+            formatter: formatUmapTooltip
         },
         dataZoom: [
             { type: 'inside', xAxisIndex: 0 },
@@ -825,24 +1215,75 @@
         return currentUmapColorMap[category] || '#8A96A8';
     }
 
+    function rerenderCurrentUmap() {
+        renderUmapChart(lastUmapRenderResults, lastUmapRenderQueryId);
+    }
+
     function renderUmapLegend() {
         if (!currentUmapCategories.length) {
             legendContainer.innerHTML = '<div style="color: #8A96A8; font-size: 0.85rem;">暂无 UMAP 数据</div>';
             return;
         }
-        legendContainer.innerHTML = currentUmapCategories.slice(0, 10).map(cat => `
-            <div class="d-flex align-items-center" style="font-size: 0.85rem; color: #FFFFFF;">
-                <div style="width: 12px; height: 12px; background-color: ${getUmapColor(cat.name)}; border-radius: 2px; margin-right: 6px;"></div>
-                ${cat.name} <span style="color: #A0AABF; margin-left: 4px;">(${cat.count})</span>
-            </div>
-        `).join('');
+        legendContainer.innerHTML = '';
+        const hasFilter = activeUmapCategoryFilters.size > 0;
+
+        currentUmapCategories.slice(0, 10).forEach(cat => {
+            const isActive = activeUmapCategoryFilters.has(cat.name);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'legend-filter-button';
+            if (hasFilter && !isActive) btn.classList.add('is-muted');
+            if (isActive) btn.classList.add('is-active');
+            btn.title = hasFilter && isActive ? '取消该类型过滤' : '只显示该细胞类型';
+
+            const swatch = document.createElement('span');
+            swatch.className = 'legend-color-swatch';
+            swatch.style.backgroundColor = getUmapColor(cat.name);
+            btn.appendChild(swatch);
+
+            const label = document.createElement('span');
+            label.textContent = cat.name;
+            btn.appendChild(label);
+
+            const count = document.createElement('span');
+            count.style.color = '#A0AABF';
+            count.textContent = `(${cat.count})`;
+            btn.appendChild(count);
+
+            btn.addEventListener('click', () => {
+                if (activeUmapCategoryFilters.has(cat.name)) {
+                    activeUmapCategoryFilters.delete(cat.name);
+                } else {
+                    activeUmapCategoryFilters.add(cat.name);
+                }
+                rerenderCurrentUmap();
+            });
+
+            legendContainer.appendChild(btn);
+        });
+
+        if (hasFilter) {
+            const resetBtn = document.createElement('button');
+            resetBtn.type = 'button';
+            resetBtn.className = 'legend-filter-reset';
+            resetBtn.innerHTML = '<i class="fa-solid fa-xmark me-1"></i>清除过滤';
+            resetBtn.addEventListener('click', () => {
+                activeUmapCategoryFilters.clear();
+                rerenderCurrentUmap();
+            });
+            legendContainer.appendChild(resetBtn);
+        }
     }
 
     function renderUmapChart(resultRows = [], queryId = null) {
+        lastUmapRenderResults = resultRows || [];
+        lastUmapRenderQueryId = queryId;
         const showBackground = document.getElementById('bgSample').checked;
         const resultIds = new Set(resultRows.map(row => row.cell_id));
         const highlightIds = new Set(resultRows.map(row => row.cell_id));
         if (queryId) highlightIds.add(queryId);
+        const categoryFilterActive = activeUmapCategoryFilters.size > 0;
+        const isVisibleCategory = point => !categoryFilterActive || activeUmapCategoryFilters.has(point.category);
         const pointById = new Map(currentUmapPoints.map(point => [point.cell_id, point]));
         forcedUmapPointMap.forEach((point, cellId) => {
             pointById.set(cellId, point);
@@ -850,10 +1291,12 @@
 
         const backgroundData = showBackground ? currentUmapPoints
             .filter(point => !highlightIds.has(point.cell_id))
+            .filter(isVisibleCategory)
             .map(point => ({
                 value: [point.x, point.y],
                 name: point.cell_id,
                 type: point.category,
+                role: '背景细胞',
                 itemStyle: { color: getUmapColor(point.category) }
             })) : [];
 
@@ -866,7 +1309,10 @@
                     value: [point.x, point.y],
                     name: point.cell_id,
                     type: point.category,
+                    role: 'Top-K 相似细胞',
+                    rank: row.rank ?? row.rank_index ?? '',
                     dist: row.distance,
+                    similarity: row.similarity_score,
                     itemStyle: { color: '#F5A623' }
                 };
             });
@@ -877,6 +1323,8 @@
                 value: [point.x, point.y],
                 name: point.cell_id,
                 type: point.category,
+                role: '查询目标细胞',
+                rank: 'Query',
                 itemStyle: { color: '#FFFFFF' }
             }));
 
@@ -884,7 +1332,15 @@
         const focusData = focusPoint ? [{
             value: [focusPoint.x, focusPoint.y],
             name: focusPoint.cell_id,
-            type: focusPoint.category
+            type: focusPoint.category,
+            role: '定位目标'
+        }] : [];
+        const linkedPoint = linkedCellId ? pointById.get(linkedCellId) : null;
+        const linkedData = linkedPoint ? [{
+            value: [linkedPoint.x, linkedPoint.y],
+            name: linkedPoint.cell_id,
+            type: linkedPoint.category,
+            role: '表格/图联动高亮'
         }] : [];
 
         baseOption = {
@@ -893,10 +1349,8 @@
                 backgroundColor: 'rgba(20, 26, 48, 0.9)',
                 borderColor: '#4A90E2',
                 textStyle: { color: '#fff' },
-                formatter: function (params) {
-                    const dist = params.data.dist !== undefined ? `<br>Dist: ${params.data.dist}` : '';
-                    return `ID: ${params.data.name}<br>Type: <span style="color:${params.color}">${params.data.type}</span>${dist}`;
-                }
+                extraCssText: 'box-shadow: 0 10px 28px rgba(0,0,0,0.55); border-radius: 8px;',
+                formatter: formatUmapTooltip
             },
             dataZoom: [
                 { type: 'inside', xAxisIndex: 0 },
@@ -917,6 +1371,15 @@
                     itemStyle: { color: '#FFD166' },
                     data: focusData,
                     z: 7
+                },
+                {
+                    name: '联动高亮',
+                    type: 'effectScatter',
+                    symbolSize: 18,
+                    rippleEffect: { scale: 2.1, brushType: 'stroke' },
+                    itemStyle: { color: '#4A90E2' },
+                    data: linkedData,
+                    z: 8
                 }
             ]
         };
@@ -983,18 +1446,6 @@
     async function loadUmap() {
         const datasetId = datasetSelect.value;
         if (!datasetId) return;
-        const selectedOption = datasetSelect.options[datasetSelect.selectedIndex];
-        if (selectedOption && selectedOption.dataset.merged === 'true') {
-            myChart.clear();
-            currentUmapPoints = [];
-            currentUmapCategories = [];
-            legendContainer.innerHTML = '<div style="color: #8A96A8; font-size: 0.85rem; padding: 8px;">UMAP 可视化不适用于合并数据集</div>';
-            myChart.setOption({
-                title: { text: 'UMAP 不适用于合并数据集', left: 'center', top: 'center', textStyle: { color: '#8A96A8', fontSize: 14 } },
-                xAxis: { show: false }, yAxis: { show: false }, series: []
-            });
-            return;
-        }
         myChart.showLoading({ text: '加载 UMAP...', color: '#4A90E2', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
         try {
             const params = new URLSearchParams({ dataset_id: datasetId, limit: '3000', color_by: 'cell_type' });
@@ -1005,6 +1456,7 @@
             currentUmapCategories = data.categories || [];
             forcedUmapPointMap = new Map();
             currentUmapColorMap = {};
+            activeUmapCategoryFilters.clear();
             currentUmapCategories.forEach((cat, idx) => {
                 currentUmapColorMap[cat.name] = umapColors[idx % umapColors.length];
             });
@@ -1041,11 +1493,41 @@
         forcedUmapPointMap = new Map((data.points || []).map(point => [point.cell_id, point]));
     }
 
+    // === 框选模式切换按钮 ===
+    let brushModeActive = false;
+    const brushToggleBtn = document.getElementById('brushToggleBtn');
+    brushToggleBtn.addEventListener('click', function () {
+        brushModeActive = !brushModeActive;
+        if (brushModeActive) {
+            this.classList.add('brush-active');
+            this.innerHTML = '<i class="fa-solid fa-check-square me-1"></i>框选中';
+            // 框选模式下禁用 dataZoom，直接拖拽即可框选
+            myChart.setOption({
+                dataZoom: [
+                    { type: 'inside', xAxisIndex: 0, disabled: true },
+                    { type: 'inside', yAxisIndex: 0, disabled: true },
+                    { type: 'slider', show: false }
+                ]
+            });
+        } else {
+            this.classList.remove('brush-active');
+            this.innerHTML = '<i class="fa-regular fa-square me-1"></i>框选';
+            // 恢复 dataZoom
+            myChart.setOption({
+                dataZoom: [
+                    { type: 'inside', xAxisIndex: 0, disabled: false },
+                    { type: 'inside', yAxisIndex: 0, disabled: false },
+                    { type: 'slider', show: false }
+                ]
+            });
+        }
+    });
+
     document.getElementById('redrawBtn').addEventListener('click', function() {
         this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         setTimeout(() => {
             renderUmapChart();
-            document.getElementById('result-tbody').innerHTML = '<tr><td colspan="6" class="text-center py-5"><i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i><div style="color: #8A96A8;">已重绘图谱，请重新执行检索</div></td></tr>';
+            document.getElementById('result-tbody').innerHTML = '<tr><td colspan="5" class="text-center py-5"><i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i><div style="color: #8A96A8;">已重绘图谱，请重新执行检索</div></td></tr>';
             document.getElementById('search-status').className = 'badge bg-secondary me-3';
             document.getElementById('search-status').innerText = '等待查询...';
             this.innerHTML = '重绘';
@@ -1063,10 +1545,7 @@
                 return;
             }
             datasetSelect.innerHTML = data.datasets
-                .map(ds => {
-                    const badge = ds.is_merged ? ' [合并]' : '';
-                    return `<option value="${ds.id}" data-merged="${ds.is_merged ? 'true' : 'false'}">${ds.filename}${badge}</option>`;
-                })
+                .map(ds => `<option value="${ds.id}">${ds.filename}</option>`)
                 .join('');
             const rerunDataset = rerunParams.get('dataset_id');
             if (rerunDataset && data.datasets.some(ds => ds.id === rerunDataset)) {
@@ -1223,7 +1702,7 @@
         btn.disabled = true;
         statusBadge.className = 'badge bg-warning text-dark me-3';
         statusBadge.innerHTML = '<span class="spinner-grow spinner-grow-sm me-1"></span>引擎计算中';
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5" style="color: #8A96A8;">正在进行高维空间近邻计算...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">正在进行高维空间近邻计算...</td></tr>';
 
         try {
             const useSavedIndex = savedIndexSelect.value && savedIndexSelect.value !== '__manual__';
@@ -1277,36 +1756,28 @@
 
             let tableHTML = '';
             if (!data.results || data.results.length === 0) {
-                tableHTML = '<tr><td colspan="6" class="text-center py-5" style="color: #8A96A8;">未找到结果</td></tr>';
+                tableHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">未找到结果</td></tr>';
             } else {
                 data.results.forEach((row, idx) => {
-                    const srcDs = row.source_dataset || datasetId;
                     tableHTML += `
-                        <tr>
+                        <tr class="result-row" data-cell-id="${escapeHtml(row.cell_id || '')}">
                             <td class="ps-4 fw-bold" style="color: #4A90E2;">#${idx + 1}</td>
-                            <td class="text-white">${row.cell_id || '-'}</td>
-                            <td><span class="badge" style="background-color: #E83E8C; padding: 6px 10px;">${row.cell_type || 'unknown'}</span></td>
-                            <td><span class="badge" style="background: rgba(74,144,226,0.15); color: #4A90E2; font-size: 0.75rem;">${srcDs}</span></td>
-                            <td style="color: #2ecc71; font-family: monospace; font-size: 1.1rem;">${row.distance}</td>
-                            <td><button class="btn btn-sm locate-btn" data-cell-id="${row.cell_id || ''}" title="定位至 UMAP" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);"><i class="fa-solid fa-crosshairs"></i></button></td>
+                            <td class="text-white">${escapeHtml(row.cell_id || '-')}</td>
+                            <td><span class="badge" style="background-color: #E83E8C; padding: 6px 10px;">${escapeHtml(row.cell_type || 'unknown')}</span></td>
+                            <td style="color: #2ecc71; font-family: monospace; font-size: 1.1rem;">${escapeHtml(row.distance)}</td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <button class="inline-action-btn locate-btn" data-cell-id="${escapeHtml(row.cell_id || '')}" title="定位至 UMAP"><i class="fa-solid fa-crosshairs"></i></button>
+                                    <button class="inline-action-btn query-again-btn" data-cell-id="${escapeHtml(row.cell_id || '')}"><i class="fa-solid fa-magnifying-glass me-1"></i>作为查询</button>
+                                    <button class="inline-action-btn metadata-btn" data-cell-id="${escapeHtml(row.cell_id || '')}"><i class="fa-solid fa-circle-info"></i></button>
+                                </div>
+                            </td>
                         </tr>
                     `;
                 });
             }
 
             tbody.innerHTML = tableHTML;
-            document.querySelectorAll('#result-tbody .locate-btn').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    const targetId = btn.dataset.cellId;
-                    if (!targetId) return;
-                    try {
-                        await focusUmapOnCell(targetId);
-                    } catch (err) {
-                        console.error('定位失败', err);
-                        alert('定位失败：' + (err.message || '未知错误'));
-                    }
-                });
-            });
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
             statusBadge.className = 'badge bg-success me-3';
@@ -1329,7 +1800,7 @@
             }
             renderUmapChart(data.results || [], data.cell_id);
         } catch (err) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5" style="color: #ff6b6b;">检索失败，请检查输入或后端日志</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #ff6b6b;">检索失败，请检查输入或后端日志</td></tr>';
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
             statusBadge.className = 'badge bg-danger me-3';
@@ -1403,7 +1874,559 @@
 
     exportCsvBtn.addEventListener('click', exportCSV);
 
+    document.getElementById('result-tbody').addEventListener('mouseover', (event) => {
+        const row = event.target.closest('.result-row');
+        if (!row?.dataset.cellId) return;
+        setLinkedCell(row.dataset.cellId);
+    });
+
+    document.getElementById('result-tbody').addEventListener('click', async (event) => {
+        const actionBtn = event.target.closest('button');
+        const row = event.target.closest('.result-row');
+        const cellId = actionBtn?.dataset.cellId || row?.dataset.cellId;
+        if (!cellId) return;
+
+        if (actionBtn?.classList.contains('query-again-btn')) {
+            queryWithCell(cellId);
+            return;
+        }
+        if (actionBtn?.classList.contains('metadata-btn')) {
+            showCellMetadata(getUmapPointById(cellId) || { cell_id: cellId, category: getResultByCellId(cellId)?.cell_type });
+            return;
+        }
+
+        try {
+            setLinkedCell(cellId);
+            await focusUmapOnCell(cellId);
+        } catch (err) {
+            console.error('定位失败', err);
+            alert('定位失败：' + (err.message || '未知错误'));
+        }
+    });
+
     loadDatasets();
+
+    // ================= UMAP 右键交互：快捷菜单 =================
+    const umapContextMenu = document.getElementById('umapContextMenu');
+    const umapContextCellId = document.getElementById('umapContextCellId');
+    const umapContextCellType = document.getElementById('umapContextCellType');
+    const umapQuickCellId = document.getElementById('umapQuickCellId');
+    const umapQuickCellType = document.getElementById('umapQuickCellType');
+    const umapQuickSearchBtn = document.getElementById('umapQuickSearchBtn');
+    const umapQuickAiBtn = document.getElementById('umapQuickAiBtn');
+    const umapQuickLocateBtn = document.getElementById('umapQuickLocateBtn');
+    const umapQuickCopyBtn = document.getElementById('umapQuickCopyBtn');
+    const umapQuickFillBtn = document.getElementById('umapQuickFillBtn');
+    const umapQuickCompareBtn = document.getElementById('umapQuickCompareBtn');
+    const selectionSummary = document.getElementById('selectionSummary');
+    const selectionSeeds = document.getElementById('selectionSeeds');
+    const selectionQueryBtn = document.getElementById('selectionQueryBtn');
+    const selectionAiBtn = document.getElementById('selectionAiBtn');
+    const naturalQuestionInput = document.getElementById('naturalQuestionInput');
+    const naturalQuestionBtn = document.getElementById('naturalQuestionBtn');
+    const compareList = document.getElementById('compareList');
+    const clearCompareBtn = document.getElementById('clearCompareBtn');
+    const umapBrushRect = document.getElementById('umapBrushRect');
+    let umapContextCell = null;        // 右键菜单当前选中的细胞
+    let selectedUmapCell = null;       // 固定快捷操作条当前选中的细胞
+    let linkedCellId = null;           // 表格/UMAP 当前联动高亮细胞
+    let selectedRegionCells = [];
+    let compareCells = [];
+    let brushStart = null;
+    // 查找离点击位置最近的 UMAP 数据点
+    function findNearestUmapPoint(dataX, dataY) {
+        const categoryFilterActive = activeUmapCategoryFilters.size > 0;
+        const visiblePoints = (currentUmapPoints || []).filter(point => {
+            return !categoryFilterActive || activeUmapCategoryFilters.has(point.category);
+        });
+        forcedUmapPointMap.forEach(point => {
+            if (point && !visiblePoints.some(item => item.cell_id === point.cell_id)) {
+                visiblePoints.push(point);
+            }
+        });
+        if (!visiblePoints.length) return null;
+        let bestPoint = null;
+        let bestDist = Infinity;
+        // 自适应阈值：基于当前可视范围计算
+        const chartOption = myChart.getOption();
+        const xMin = Number(chartOption.xAxis?.[0]?.min);
+        const xMax = Number(chartOption.xAxis?.[0]?.max);
+        const extent = getUmapExtent(currentUmapPoints);
+        const fallbackSpan = Math.max(extent.maxX - extent.minX, extent.maxY - extent.minY, 60);
+        const viewSpan = Number.isFinite(xMin) && Number.isFinite(xMax)
+            ? Math.abs(xMax - xMin)
+            : fallbackSpan;
+        const hitThreshold = Math.max(viewSpan * 0.035, 1.5);
+
+        for (const point of visiblePoints) {
+            const dx = point.x - dataX;
+            const dy = point.y - dataY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < bestDist && dist < hitThreshold) {
+                bestDist = dist;
+                bestPoint = point;
+            }
+        }
+        return bestPoint;
+    }
+
+    function hideUmapContextMenu() {
+        umapContextMenu.classList.remove('show');
+        umapContextCell = null;
+    }
+
+    function setSelectedUmapCell(point) {
+        selectedUmapCell = point || null;
+        const hasCell = Boolean(selectedUmapCell?.cell_id);
+        umapQuickCellId.textContent = hasCell ? selectedUmapCell.cell_id : '请先右键一个 UMAP 点';
+        umapQuickCellType.textContent = hasCell ? (selectedUmapCell.category || 'unknown') : '未选择';
+        [umapQuickSearchBtn, umapQuickAiBtn, umapQuickLocateBtn, umapQuickCopyBtn, umapQuickFillBtn, umapQuickCompareBtn]
+            .forEach(btn => { btn.disabled = !hasCell; });
+    }
+
+    function openAiAssistantForCell(cell) {
+        if (!cell?.cell_id) return;
+        openAiAssistant(`请基于细胞 ${cell.cell_id} 及其相似细胞，分析它可能的细胞类型、生物学功能和关键证据。`, [cell]);
+    }
+
+    async function copyCellIdToClipboard(cellId) {
+        if (!cellId) return false;
+        try {
+            await navigator.clipboard.writeText(cellId);
+            return true;
+        } catch {
+            queryCellIdInput.value = cellId;
+            return false;
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+    }
+
+    function cssEscape(value) {
+        if (window.CSS && typeof CSS.escape === 'function') return CSS.escape(value);
+        return String(value ?? '').replace(/["\\]/g, '\\$&');
+    }
+
+    function getResultByCellId(cellId) {
+        return (lastSearchResults || []).find(row => row.cell_id === cellId) || null;
+    }
+
+    function getCellMetadata(cell) {
+        if (!cell?.cell_id) return {};
+        const result = getResultByCellId(cell.cell_id);
+        return result?.metadata || {
+            cell_id: cell.cell_id,
+            cell_index: cell.cell_index,
+            cell_type: cell.category || cell.cell_type || 'unknown',
+            umap_x: cell.x,
+            umap_y: cell.y
+        };
+    }
+
+    function showCellMetadata(cell) {
+        if (!cell?.cell_id) return;
+        const metadata = getCellMetadata(cell);
+        alert(`Cell ID: ${cell.cell_id}\n\n${JSON.stringify(metadata, null, 2)}`);
+    }
+
+    function renderCompareList() {
+        if (!compareCells.length) {
+            compareList.innerHTML = '<span class="umap-info-text">尚未加入细胞。</span>';
+            return;
+        }
+        compareList.innerHTML = compareCells.map(cell => `
+            <span class="cell-pill" title="${escapeHtml(cell.cell_id)}">${escapeHtml(cell.cell_id)} · ${escapeHtml(cell.category || 'unknown')}</span>
+        `).join('');
+    }
+
+    function addCellToCompare(cell) {
+        if (!cell?.cell_id) return;
+        if (!compareCells.some(item => item.cell_id === cell.cell_id)) {
+            compareCells.push(cell);
+        }
+        renderCompareList();
+    }
+
+    function setLinkedCell(cellId, options = {}) {
+        linkedCellId = cellId || null;
+        document.querySelectorAll('#result-tbody .result-row').forEach(row => {
+            row.classList.toggle('is-linked', Boolean(linkedCellId && row.dataset.cellId === linkedCellId));
+        });
+        if (linkedCellId && options.scrollTable) {
+            const row = document.querySelector(`#result-tbody .result-row[data-cell-id="${cssEscape(linkedCellId)}"]`);
+            if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        renderUmapChart(lastSearchResults, lastSearchQueryId);
+    }
+
+    function selectUmapPoint(point, options = {}) {
+        if (!point?.cell_id) return;
+        setSelectedUmapCell(point);
+        setLinkedCell(point.cell_id, { scrollTable: options.scrollTable });
+    }
+
+    function queryWithCell(cellId) {
+        if (!cellId) return;
+        queryCellIdInput.value = cellId;
+        document.getElementById('startSearchBtn').click();
+    }
+
+    function openAiAssistant(question, cells = []) {
+        const cellIds = cells.map(cell => cell.cell_id).filter(Boolean);
+        const params = new URLSearchParams({
+            dataset_id: datasetSelect.value || '',
+            question: question || '解释当前选中的细胞。'
+        });
+        if (cellIds.length) {
+            params.set('cell_id', cellIds[0]);
+            params.set('cell_ids', cellIds.slice(0, 50).join(','));
+        }
+        window.location.href = `/chat?${params.toString()}`;
+    }
+
+    function getNearestUmapPointFromMouseEvent(e) {
+        const chartRect = chartDom.getBoundingClientRect();
+        const offsetX = e.clientX - chartRect.left;
+        const offsetY = e.clientY - chartRect.top;
+
+        let chartCoords;
+        try {
+            chartCoords = myChart.convertFromPixel(
+                { xAxisIndex: 0, yAxisIndex: 0 },
+                [offsetX, offsetY]
+            );
+        } catch {
+            return null;
+        }
+
+        if (!chartCoords || !Number.isFinite(chartCoords[0]) || !Number.isFinite(chartCoords[1])) {
+            return null;
+        }
+
+        return findNearestUmapPoint(chartCoords[0], chartCoords[1]);
+    }
+
+    function showUmapContextMenu(point, clientX, clientY) {
+        umapContextCell = point;
+        setSelectedUmapCell(point);
+        umapContextCellId.textContent = point.cell_id || '—';
+        umapContextCellType.textContent = point.category || 'unknown';
+        umapContextCellType.style.backgroundColor = getUmapColor(point.category);
+
+        const menuWidth = 250;
+        const menuHeight = 190;
+        const left = Math.min(clientX, window.innerWidth - menuWidth - 12);
+        const top = Math.min(clientY, window.innerHeight - menuHeight - 12);
+        umapContextMenu.style.left = Math.max(left, 12) + 'px';
+        umapContextMenu.style.top = Math.max(top, 12) + 'px';
+        umapContextMenu.classList.add('show');
+    }
+
+    function getPointFromChartParams(params) {
+        if (!params || params.componentType !== 'series' || !params.data) return null;
+        const cellId = params.data.name;
+        if (!cellId) return null;
+        return getUmapPointById(cellId) || {
+            cell_id: cellId,
+            category: params.data.type || 'unknown',
+            x: Array.isArray(params.data.value) ? params.data.value[0] : null,
+            y: Array.isArray(params.data.value) ? params.data.value[1] : null
+        };
+    }
+
+    chartDom.addEventListener('contextmenu', function (e) {
+        const point = getNearestUmapPointFromMouseEvent(e);
+        if (!point) return;
+        e.preventDefault();
+        selectUmapPoint(point, { scrollTable: true });
+        showUmapContextMenu(point, e.clientX, e.clientY);
+    });
+
+    // 点击右键菜单外部区域关闭
+    document.addEventListener('click', function (e) {
+        if (umapContextMenu.classList.contains('show') && !umapContextMenu.contains(e.target)) {
+            hideUmapContextMenu();
+        }
+    });
+
+    umapContextMenu.addEventListener('click', async function (e) {
+        const actionBtn = e.target.closest('.umap-context-action');
+        if (!actionBtn || !umapContextCell?.cell_id) return;
+
+        const cellId = umapContextCell.cell_id;
+        const action = actionBtn.dataset.action;
+        if (action === 'search') {
+            queryCellIdInput.value = cellId;
+            hideUmapContextMenu();
+            document.getElementById('startSearchBtn').click();
+        } else if (action === 'ai') {
+            openAiAssistantForCell(umapContextCell);
+        } else if (action === 'metadata') {
+            showCellMetadata(umapContextCell);
+        } else if (action === 'locate') {
+            hideUmapContextMenu();
+            try {
+                await focusUmapOnCell(cellId);
+            } catch (err) {
+                console.error('定位失败', err);
+                alert('定位失败：' + (err.message || '未知错误'));
+            }
+        } else if (action === 'copy') {
+            const copied = await copyCellIdToClipboard(cellId);
+            actionBtn.innerHTML = copied
+                ? '<i class="fa-solid fa-check"></i>已复制'
+                : '<i class="fa-solid fa-check"></i>已填入查询框';
+            setTimeout(() => {
+                actionBtn.innerHTML = '<i class="fa-solid fa-copy"></i>复制 Cell ID';
+            }, 1200);
+        } else if (action === 'fill') {
+            queryCellIdInput.value = cellId;
+            hideUmapContextMenu();
+        } else if (action === 'compare') {
+            addCellToCompare(umapContextCell);
+            hideUmapContextMenu();
+        }
+    });
+
+    umapQuickSearchBtn.addEventListener('click', function () {
+        if (!selectedUmapCell?.cell_id) return;
+        queryCellIdInput.value = selectedUmapCell.cell_id;
+        document.getElementById('startSearchBtn').click();
+    });
+
+    umapQuickAiBtn.addEventListener('click', function () {
+        openAiAssistantForCell(selectedUmapCell);
+    });
+
+    umapQuickLocateBtn.addEventListener('click', async function () {
+        if (!selectedUmapCell?.cell_id) return;
+        try {
+            await focusUmapOnCell(selectedUmapCell.cell_id);
+        } catch (err) {
+            console.error('定位失败', err);
+            alert('定位失败：' + (err.message || '未知错误'));
+        }
+    });
+
+    umapQuickCopyBtn.addEventListener('click', async function () {
+        if (!selectedUmapCell?.cell_id) return;
+        const copied = await copyCellIdToClipboard(selectedUmapCell.cell_id);
+        umapQuickCopyBtn.innerHTML = copied
+            ? '<i class="fa-solid fa-check me-1"></i>已复制'
+            : '<i class="fa-solid fa-check me-1"></i>已填入';
+        setTimeout(() => {
+            umapQuickCopyBtn.innerHTML = '<i class="fa-solid fa-copy me-1"></i>复制 ID';
+        }, 1200);
+    });
+
+    umapQuickFillBtn.addEventListener('click', function () {
+        if (!selectedUmapCell?.cell_id) return;
+        queryCellIdInput.value = selectedUmapCell.cell_id;
+    });
+
+    umapQuickCompareBtn.addEventListener('click', function () {
+        addCellToCompare(selectedUmapCell);
+    });
+
+    function getVisibleUmapPoints() {
+        const categoryFilterActive = activeUmapCategoryFilters.size > 0;
+        const allPoints = [...(currentUmapPoints || [])];
+        forcedUmapPointMap.forEach(point => {
+            if (point && !allPoints.some(item => item.cell_id === point.cell_id)) allPoints.push(point);
+        });
+        return allPoints.filter(point => !categoryFilterActive || activeUmapCategoryFilters.has(point.category));
+    }
+
+    function chooseSeedCells(cells) {
+        const queryPoint = lastSearchQueryId ? getUmapPointById(lastSearchQueryId) : null;
+        const sorted = [...cells];
+        if (queryPoint) {
+            sorted.sort((a, b) => {
+                const da = Math.hypot(a.x - queryPoint.x, a.y - queryPoint.y);
+                const db = Math.hypot(b.x - queryPoint.x, b.y - queryPoint.y);
+                return da - db;
+            });
+        }
+        return sorted.slice(0, 8);
+    }
+
+    function updateSelectionSummary(cells) {
+        selectedRegionCells = cells || [];
+        const count = selectedRegionCells.length;
+        selectionQueryBtn.disabled = count === 0;
+        selectionAiBtn.disabled = count === 0;
+
+        if (!count) {
+            selectionSummary.textContent = '按住 Shift 并拖拽 UMAP 区域后，这里会统计主要细胞类型、数量占比、查询种子和距离分布。';
+            selectionSeeds.innerHTML = '';
+            return;
+        }
+
+        const typeCounts = new Map();
+        selectedRegionCells.forEach(cell => {
+            const type = cell.category || 'unknown';
+            typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+        });
+        const topTypes = Array.from(typeCounts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 4)
+            .map(([type, n]) => `${type}: ${n} (${Math.round(n / count * 100)}%)`);
+
+        const queryPoint = lastSearchQueryId ? getUmapPointById(lastSearchQueryId) : null;
+        let distanceText = '当前无查询细胞，暂不计算距离分布。';
+        if (queryPoint) {
+            const distances = selectedRegionCells.map(cell => Math.hypot(cell.x - queryPoint.x, cell.y - queryPoint.y));
+            const min = Math.min(...distances);
+            const max = Math.max(...distances);
+            const avg = distances.reduce((sum, value) => sum + value, 0) / distances.length;
+            distanceText = `与当前查询细胞的 UMAP 距离：min ${min.toFixed(2)} / avg ${avg.toFixed(2)} / max ${max.toFixed(2)}`;
+        }
+
+        const seeds = chooseSeedCells(selectedRegionCells);
+        selectionSummary.innerHTML = `
+            <div>已框选 <strong class="text-white">${count}</strong> 个细胞。</div>
+            <div class="mt-1">主要类型：${escapeHtml(topTypes.join('；'))}</div>
+            <div class="mt-1">${escapeHtml(distanceText)}</div>
+        `;
+        selectionSeeds.innerHTML = seeds.map(cell => `
+            <button type="button" class="cell-pill" data-cell-id="${escapeHtml(cell.cell_id)}" title="${escapeHtml(cell.cell_id)}">${escapeHtml(cell.cell_id)}</button>
+        `).join('');
+    }
+
+    function cellsInsideBrushRect(rect) {
+        const left = Math.min(rect.startX, rect.endX);
+        const right = Math.max(rect.startX, rect.endX);
+        const top = Math.min(rect.startY, rect.endY);
+        const bottom = Math.max(rect.startY, rect.endY);
+        const chartRect = chartDom.getBoundingClientRect();
+        return getVisibleUmapPoints().filter(point => {
+            let pixel;
+            try {
+                pixel = myChart.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [point.x, point.y]);
+            } catch {
+                return false;
+            }
+            if (!pixel || !Number.isFinite(pixel[0]) || !Number.isFinite(pixel[1])) return false;
+            const x = chartRect.left + pixel[0];
+            const y = chartRect.top + pixel[1];
+            return x >= left && x <= right && y >= top && y <= bottom;
+        });
+    }
+
+    // === 按下/松开 Shift：临时禁用 dataZoom，框选时图表不移动 ===
+    let shiftHeld = false;
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Shift' && !shiftHeld) {
+            shiftHeld = true;
+            // 禁用 inside dataZoom，防止框选时图表跟随拖拽移动
+            myChart.setOption({
+                dataZoom: [
+                    { type: 'inside', xAxisIndex: 0, disabled: true },
+                    { type: 'inside', yAxisIndex: 0, disabled: true },
+                    { type: 'slider', show: false }
+                ]
+            });
+        }
+    });
+    document.addEventListener('keyup', (event) => {
+        if (event.key === 'Shift' && shiftHeld) {
+            shiftHeld = false;
+            // 如果不是框选模式，恢复 dataZoom
+            if (!brushModeActive) {
+                myChart.setOption({
+                    dataZoom: [
+                        { type: 'inside', xAxisIndex: 0, disabled: false },
+                        { type: 'inside', yAxisIndex: 0, disabled: false },
+                        { type: 'slider', show: false }
+                    ]
+                });
+            }
+        }
+    });
+
+    chartDom.addEventListener('mousedown', (event) => {
+        // 框选触发条件：Shift 按下 或 框选模式激活；仅左键
+        const shouldBrush = event.shiftKey || brushModeActive;
+        if (!shouldBrush || event.button !== 0) return;
+        event.preventDefault();
+        brushStart = { x: event.clientX, y: event.clientY };
+        umapBrushRect.style.left = `${event.clientX}px`;
+        umapBrushRect.style.top = `${event.clientY}px`;
+        umapBrushRect.style.width = '0px';
+        umapBrushRect.style.height = '0px';
+        umapBrushRect.style.display = 'block';
+    });
+
+    document.addEventListener('mousemove', (event) => {
+        if (!brushStart) return;
+        const left = Math.min(brushStart.x, event.clientX);
+        const top = Math.min(brushStart.y, event.clientY);
+        const width = Math.abs(event.clientX - brushStart.x);
+        const height = Math.abs(event.clientY - brushStart.y);
+        umapBrushRect.style.left = `${left}px`;
+        umapBrushRect.style.top = `${top}px`;
+        umapBrushRect.style.width = `${width}px`;
+        umapBrushRect.style.height = `${height}px`;
+    });
+
+    document.addEventListener('mouseup', (event) => {
+        if (!brushStart) return;
+        const rect = { startX: brushStart.x, startY: brushStart.y, endX: event.clientX, endY: event.clientY };
+        brushStart = null;
+        umapBrushRect.style.display = 'none';
+        // 如果不是框选模式（即用 Shift 临时框选），恢复 dataZoom
+        if (!brushModeActive) {
+            myChart.setOption({
+                dataZoom: [
+                    { type: 'inside', xAxisIndex: 0, disabled: false },
+                    { type: 'inside', yAxisIndex: 0, disabled: false },
+                    { type: 'slider', show: false }
+                ]
+            });
+        }
+        if (Math.abs(rect.endX - rect.startX) < 8 || Math.abs(rect.endY - rect.startY) < 8) return;
+        updateSelectionSummary(cellsInsideBrushRect(rect));
+    });
+
+    selectionSeeds.addEventListener('click', (event) => {
+        const pill = event.target.closest('[data-cell-id]');
+        if (!pill) return;
+        queryWithCell(pill.dataset.cellId);
+    });
+
+    selectionQueryBtn.addEventListener('click', () => {
+        const seed = chooseSeedCells(selectedRegionCells)[0];
+        if (seed?.cell_id) queryWithCell(seed.cell_id);
+    });
+
+    selectionAiBtn.addEventListener('click', () => {
+        openAiAssistant('解释当前选中的细胞群，概括主要细胞类型、可能功能和需要进一步验证的证据。', selectedRegionCells);
+    });
+
+    document.querySelectorAll('.nl-prompt-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            naturalQuestionInput.value = btn.dataset.question || '';
+            openAiAssistant(naturalQuestionInput.value, selectedRegionCells.length ? selectedRegionCells : [selectedUmapCell].filter(Boolean));
+        });
+    });
+
+    naturalQuestionBtn.addEventListener('click', () => {
+        const question = naturalQuestionInput.value.trim() || '解释当前选中的细胞群';
+        openAiAssistant(question, selectedRegionCells.length ? selectedRegionCells : [selectedUmapCell].filter(Boolean));
+    });
+
+    clearCompareBtn.addEventListener('click', () => {
+        compareCells = [];
+        renderCompareList();
+    });
 
     window.addEventListener('resize', () => myChart.resize());
 </script>

@@ -3152,12 +3152,13 @@ def _similarity_from_distance(distance: float, metric: str) -> float:
 def main() -> None:
     import sys
     port = int(os.getenv("PORT", "5000"))
+    debug = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true", "yes", "on")
     # macOS: FAISS(OpenMP) 在多线程模式下不安全，强制 threaded=False + use_reloader=False
     # Windows/Linux: 保持默认多线程，提升并发响应能力
     if sys.platform == "darwin":
-        app.run(debug=False, port=port, use_reloader=False, threaded=False)
+        app.run(debug=debug, port=port, use_reloader=debug, threaded=False)
     else:
-        app.run(debug=False, port=port, use_reloader=False, threaded=True)
+        app.run(debug=debug, port=port, use_reloader=debug, threaded=not debug)
 
 
 if __name__ == "__main__":
