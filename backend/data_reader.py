@@ -23,13 +23,17 @@ class _LightAnnDataProxy:
         self,
         obsm: Dict[str, np.ndarray],
         obs: "pd.DataFrame",
+        var: "pd.DataFrame",
         obs_names: List[str],
+        var_names: List[str],
         n_obs: int,
         n_vars: int,
     ) -> None:
         self.obsm = obsm
         self.obs = obs
+        self.var = var
         self.obs_names = obs_names
+        self.var_names = var_names
         self.n_obs = n_obs
         self.n_vars = n_vars
         # X 访问时抛出友好提示（原始基因表达矩阵已被丢弃以节省内存）
@@ -88,7 +92,9 @@ class DataLoader:
         # 提取 obs 元数据（cell 类型标注等，几 MB 级别）
         import pandas as pd
         self._obs: pd.DataFrame = _tmp.obs.copy()
+        self._var: pd.DataFrame = _tmp.var.copy()
         self._obs_names = list(_tmp.obs_names)
+        self._var_names = list(_tmp.var_names)
         self._n_obs: int = int(_tmp.n_obs)
         self._n_vars: int = int(_tmp.n_vars)
         # 关闭文件句柄，不再持有对 HDF5 的引用
@@ -103,7 +109,9 @@ class DataLoader:
         self._adata = _LightAnnDataProxy(
             obsm=self._obsm,
             obs=self._obs,
+            var=self._var,
             obs_names=self._obs_names,
+            var_names=self._var_names,
             n_obs=self._n_obs,
             n_vars=self._n_vars,
         )
@@ -252,6 +260,32 @@ class DataLoader:
             raise KeyError(f"cell_id not found: {cell_id}")
         return int(self._cell_id_to_index[key])
 
+    def get_X_block(self, start: int, end: int) -> np.ndarray:
+        """Read a row block from the raw expression matrix ``X`` without caching it.
+
+        This is intended for batch jobs such as top-gene extraction. The loader
+        still avoids keeping the full expression matrix in memory.
+        """
+        start = int(start)
+        end = int(end)
+        if start < 0 or end < start or end > self.n_cells:
+            raise IndexError(f"invalid X block range: [{start}, {end})")
+
+        backed = read_h5ad(str(self._file_path), backed="r")
+        try:
+            raw = backed.X[start:end]
+            if hasattr(raw, "toarray"):
+                arr = raw.toarray()
+            else:
+                arr = np.asarray(raw)
+            return np.asarray(arr, dtype=np.float32)
+        finally:
+            if hasattr(backed, "file") and backed.file is not None:
+                try:
+                    backed.file.close()
+                except Exception:
+                    pass
+
     # ------------------------------------------------------------------
     # 便捷属性
     # ------------------------------------------------------------------
@@ -292,6 +326,33 @@ class DataLoader:
     def obs_columns(self) -> List[str]:
         """obs 元数据的所有列名。"""
         return list(self._adata.obs.columns)
+
+    @property
+    def var_names(self) -> List[str]:
+        """Gene/feature IDs from ``adata.var_names``."""
+        return list(self._adata.var_names)
+
+    @property
+    def var_columns(self) -> List[str]:
+        """Available columns in ``adata.var``."""
+        return list(self._adata.var.columns)
+
+    def get_gene_names(self, preferred_columns: Optional[List[str]] = None) -> List[str]:
+        """Return display gene names, preferring symbol columns when present."""
+        candidates = preferred_columns or [
+            "feature_name",
+            "gene_symbol",
+            "gene_name",
+            "symbol",
+            "name",
+        ]
+        for col in candidates:
+            if col not in self._adata.var.columns:
+                continue
+            values = self._adata.var[col].astype(str).tolist()
+            if len(values) == self.n_genes and any(v and not v.startswith("ENSG") for v in values):
+                return values
+        return self.var_names
 
     @property
     def available_reps(self) -> List[str]:

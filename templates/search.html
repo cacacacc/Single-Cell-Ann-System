@@ -686,7 +686,7 @@
                         <button type="button" class="umap-quick-btn ai nl-prompt-btn" data-question="这些细胞可能是什么类型">这些细胞可能是什么类型</button>
                     </div>
                     <div class="nl-query-row">
-                        <input type="text" class="form-control dark-control" id="naturalQuestionInput" placeholder="例如：查询 cell_type 为 Kupffer cell 且 AgeGroup 为 Adult 的前 20 个细胞">
+                        <input type="text" class="form-control dark-control" id="naturalQuestionInput" placeholder="例如：找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型">
                         <button type="button" class="umap-quick-btn ai" id="naturalQuestionBtn" title="发送到 AI 细胞助手">
                             <i class="fa-solid fa-paper-plane"></i>
                         </button>
@@ -2436,7 +2436,7 @@
     naturalCellQueryBtn.addEventListener('click', async () => {
         const question = naturalQuestionInput.value.trim();
         if (!question) {
-            alert('请输入自然语言查询，例如：查询 cell_type 为 Kupffer cell 且 AgeGroup 为 Adult 的前 20 个细胞');
+            alert('请输入自然语言查询，例如：找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型');
             return;
         }
         const datasetId = datasetSelect.value;

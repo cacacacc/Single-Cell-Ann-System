@@ -843,7 +843,7 @@
                 </p>
                 <div class="suggestions" id="welcomeSuggestions">
                     <span class="suggestion-chip" onclick="askSuggestion(this)">查询 cell_type 为 Hepatocyte 的前 10 个细胞，并概括它们的主要特征</span>
-                    <span class="suggestion-chip" onclick="askSuggestion(this)">查询 tissue 为 right lobe of liver 的前 10 个细胞，并总结细胞类型分布</span>
+                    <span class="suggestion-chip" onclick="askSuggestion(this)">找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型</span>
                     <span class="suggestion-chip" onclick="askSuggestion(this)">查询 cell_type 为 Kupffer cell 且 AgeGroup 为 Adult 的前 10 个细胞，并解释其功能</span>
                     <span class="suggestion-chip" onclick="askSuggestion(this)">查询 sex 为 female 的前 10 个细胞，按细胞类型总结分布</span>
                 </div>
@@ -959,7 +959,7 @@
     let isStreaming = false;
 
     // System state (populated by init)
-    let sysVDB = { available: false, populated: false, count: 0, collection: '' };
+    let sysVDB = { available: false, populated: false, count: 0, collection: '', topGenesAvailable: false };
     let sysLLM = { configured: false, provider: '', model: '' };
     let sysDataset = { id: '', filename: '', nCells: 0 };
     let datasets = [];
@@ -1070,9 +1070,11 @@
             sysVDB.populated = data.is_populated === true;
             sysVDB.count = data.count || 0;
             sysVDB.collection = data.collection_name || '';
+            sysVDB.topGenesAvailable = data.top_genes_available === true;
         } catch (err) {
             sysVDB.available = false;
             sysVDB.populated = false;
+            sysVDB.topGenesAvailable = false;
         }
     }
 
@@ -1090,11 +1092,19 @@
         } else if (!sysVDB.populated) {
             // 已安装但未初始化 — 显示一键初始化按钮
             btnInitVDB.style.display = 'flex';
+            btnInitVDB.innerHTML = '<i class="fa-solid fa-database"></i> 初始化向量数据库';
+            btnInitVDB.title = '将数据集向量和高表达基因信息写入 ChromaDB，完成后即可使用 AI 问答';
             chatInputHint.innerHTML = '⚠️ 向量数据库未初始化，点击右上角 <strong>初始化向量数据库</strong> 按钮即可完成（约需 1-2 分钟）。';
         } else {
-            btnInitVDB.style.display = 'none';
+            btnInitVDB.style.display = sysVDB.topGenesAvailable ? 'none' : 'flex';
+            if (!sysVDB.topGenesAvailable) {
+                btnInitVDB.innerHTML = '<i class="fa-solid fa-rotate"></i> 重建基因索引';
+                btnInitVDB.title = '当前向量数据库缺少高表达基因信息，点击重建后可支持基因高表达查询';
+            }
             if (!sysLLM.configured) {
                 chatInputHint.innerHTML = '💡 LLM 未配置，但您仍可提问 — 系统将回退到向量检索展示结果（不含 AI 生成回答）。';
+            } else if (!sysVDB.topGenesAvailable) {
+                chatInputHint.innerHTML = '⚠️ 当前向量数据库缺少高表达基因信息；元数据查询可用，基因高表达查询需点击右上角 <strong>重建基因索引</strong>。';
             } else {
                 chatInputHint.innerHTML = 'AI 细胞助手基于 RAG 技术检索单细胞数据库后生成回答，请核对关键信息。';
             }
@@ -1143,7 +1153,8 @@
                     dataset_id: dsId,
                     use_rep: 'X_pca',
                     distance_metric: 'cosine',
-                    force: false,
+                    force: sysVDB.populated && !sysVDB.topGenesAvailable,
+                    top_genes: 20,
                 }),
             });
             const data = await res.json();
@@ -2060,7 +2071,7 @@
             <p style="max-width:480px;">我可以根据单细胞数据库中的细胞类型、组织来源和元数据信息，回答关于细胞功能、分型和生物学意义的问题。</p>
             <div class="suggestions" id="welcomeSuggestions">
                 <span class="suggestion-chip" onclick="askSuggestion(this)">查询 cell_type 为 Hepatocyte 的前 10 个细胞，并概括它们的主要特征</span>
-                <span class="suggestion-chip" onclick="askSuggestion(this)">查询 tissue 为 right lobe of liver 的前 10 个细胞，并总结细胞类型分布</span>
+                <span class="suggestion-chip" onclick="askSuggestion(this)">找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型</span>
                 <span class="suggestion-chip" onclick="askSuggestion(this)">查询 cell_type 为 Kupffer cell 且 AgeGroup 为 Adult 的前 10 个细胞，并解释其功能</span>
                 <span class="suggestion-chip" onclick="askSuggestion(this)">查询 sex 为 female 的前 10 个细胞，按细胞类型总结分布</span>
             </div>`;
