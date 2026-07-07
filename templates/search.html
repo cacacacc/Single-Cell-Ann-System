@@ -387,6 +387,12 @@
         min-width: 0;
         flex: 1;
     }
+    .nl-query-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+        flex-wrap: wrap;
+    }
     .brush-rect {
         position: fixed;
         z-index: 2147483646;
@@ -680,9 +686,14 @@
                         <button type="button" class="umap-quick-btn ai nl-prompt-btn" data-question="这些细胞可能是什么类型">这些细胞可能是什么类型</button>
                     </div>
                     <div class="nl-query-row">
-                        <input type="text" class="form-control dark-control" id="naturalQuestionInput" placeholder="输入给 AI 细胞助手的问题">
+                        <input type="text" class="form-control dark-control" id="naturalQuestionInput" placeholder="例如：查询 cell_type 为 Kupffer cell 且 AgeGroup 为 Adult 的前 20 个细胞">
                         <button type="button" class="umap-quick-btn ai" id="naturalQuestionBtn" title="发送到 AI 细胞助手">
                             <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
+                    <div class="nl-query-actions">
+                        <button type="button" class="umap-quick-btn" id="naturalCellQueryBtn" title="直接执行自然语言细胞查询">
+                            <i class="fa-solid fa-filter me-1"></i>查询细胞
                         </button>
                     </div>
                 </div>
@@ -811,6 +822,9 @@
     const nextCellsBtn = document.getElementById('nextCellsBtn');
     const filterFieldSelect = document.getElementById('filterFieldSelect');
     const filterValueInput = document.getElementById('filterValueInput');
+    const naturalQuestionInput = document.getElementById('naturalQuestionInput');
+    const naturalQuestionBtn = document.getElementById('naturalQuestionBtn');
+    const naturalCellQueryBtn = document.getElementById('naturalCellQueryBtn');
     let currentMetadata = null;
     let currentCellOffset = 0;
     let nextCellOffset = null;
@@ -1672,6 +1686,27 @@
         queryCellIdInput.value = row.dataset.cellId || '';
     });
 
+    function renderResultTable(results) {
+        if (!results || results.length === 0) {
+            return '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">未找到结果</td></tr>';
+        }
+        return results.map((row, idx) => `
+            <tr class="result-row" data-cell-id="${escapeHtml(row.cell_id || '')}">
+                <td class="ps-4 fw-bold" style="color: #4A90E2;">#${idx + 1}</td>
+                <td class="text-white">${escapeHtml(row.cell_id || '-')}</td>
+                <td><span class="badge" style="background-color: #E83E8C; padding: 6px 10px;">${escapeHtml(row.cell_type || 'unknown')}</span></td>
+                <td style="color: #2ecc71; font-family: monospace; font-size: 1.1rem;">${escapeHtml(row.distance ?? row.score ?? '-')}</td>
+                <td>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="inline-action-btn locate-btn" data-cell-id="${escapeHtml(row.cell_id || '')}" title="定位至 UMAP"><i class="fa-solid fa-crosshairs"></i></button>
+                        <button class="inline-action-btn query-again-btn" data-cell-id="${escapeHtml(row.cell_id || '')}"><i class="fa-solid fa-magnifying-glass me-1"></i>作为查询</button>
+                        <button class="inline-action-btn metadata-btn" data-cell-id="${escapeHtml(row.cell_id || '')}"><i class="fa-solid fa-circle-info"></i></button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
     document.getElementById('startSearchBtn').addEventListener('click', async function() {
         const btn = this;
         const tbody = document.getElementById('result-tbody');
@@ -1754,30 +1789,7 @@
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || '检索失败');
 
-            let tableHTML = '';
-            if (!data.results || data.results.length === 0) {
-                tableHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">未找到结果</td></tr>';
-            } else {
-                data.results.forEach((row, idx) => {
-                    tableHTML += `
-                        <tr class="result-row" data-cell-id="${escapeHtml(row.cell_id || '')}">
-                            <td class="ps-4 fw-bold" style="color: #4A90E2;">#${idx + 1}</td>
-                            <td class="text-white">${escapeHtml(row.cell_id || '-')}</td>
-                            <td><span class="badge" style="background-color: #E83E8C; padding: 6px 10px;">${escapeHtml(row.cell_type || 'unknown')}</span></td>
-                            <td style="color: #2ecc71; font-family: monospace; font-size: 1.1rem;">${escapeHtml(row.distance)}</td>
-                            <td>
-                                <div class="d-flex flex-wrap gap-2">
-                                    <button class="inline-action-btn locate-btn" data-cell-id="${escapeHtml(row.cell_id || '')}" title="定位至 UMAP"><i class="fa-solid fa-crosshairs"></i></button>
-                                    <button class="inline-action-btn query-again-btn" data-cell-id="${escapeHtml(row.cell_id || '')}"><i class="fa-solid fa-magnifying-glass me-1"></i>作为查询</button>
-                                    <button class="inline-action-btn metadata-btn" data-cell-id="${escapeHtml(row.cell_id || '')}"><i class="fa-solid fa-circle-info"></i></button>
-                                </div>
-                            </td>
-                        </tr>
-                    `;
-                });
-            }
-
-            tbody.innerHTML = tableHTML;
+            tbody.innerHTML = renderResultTable(data.results || []);
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
             statusBadge.className = 'badge bg-success me-3';
@@ -1922,8 +1934,6 @@
     const selectionSeeds = document.getElementById('selectionSeeds');
     const selectionQueryBtn = document.getElementById('selectionQueryBtn');
     const selectionAiBtn = document.getElementById('selectionAiBtn');
-    const naturalQuestionInput = document.getElementById('naturalQuestionInput');
-    const naturalQuestionBtn = document.getElementById('naturalQuestionBtn');
     const compareList = document.getElementById('compareList');
     const clearCompareBtn = document.getElementById('clearCompareBtn');
     const umapBrushRect = document.getElementById('umapBrushRect');
@@ -2421,6 +2431,72 @@
     naturalQuestionBtn.addEventListener('click', () => {
         const question = naturalQuestionInput.value.trim() || '解释当前选中的细胞群';
         openAiAssistant(question, selectedRegionCells.length ? selectedRegionCells : [selectedUmapCell].filter(Boolean));
+    });
+
+    naturalCellQueryBtn.addEventListener('click', async () => {
+        const question = naturalQuestionInput.value.trim();
+        if (!question) {
+            alert('请输入自然语言查询，例如：查询 cell_type 为 Kupffer cell 且 AgeGroup 为 Adult 的前 20 个细胞');
+            return;
+        }
+        const datasetId = datasetSelect.value;
+        if (!datasetId) {
+            alert('请先选择数据集');
+            return;
+        }
+        const tbody = document.getElementById('result-tbody');
+        const statusBadge = document.getElementById('search-status');
+        naturalCellQueryBtn.disabled = true;
+        naturalCellQueryBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>查询中';
+        statusBadge.className = 'badge bg-warning text-dark me-3';
+        statusBadge.innerHTML = '<span class="spinner-grow spinner-grow-sm me-1"></span>解析自然语言查询';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">正在解析自然语言并匹配细胞...</td></tr>';
+        try {
+            const res = await fetch('/api/cells/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dataset_id: datasetId,
+                    question,
+                    limit: parseInt(slider.value, 10) || 10,
+                    cell_id: selectedUmapCell?.cell_id || undefined,
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '自然语言查询失败');
+            const results = data.results || [];
+            tbody.innerHTML = renderResultTable(results);
+            lastSearchResults = results;
+            lastSearchQueryId = results[0]?.cell_id || null;
+            lastSearchPayload = { dataset_id: datasetId, question, natural_language: true };
+            exportCsvBtn.disabled = !results.length;
+            exportCsvBtn.title = results.length ? '导出当前检索结果' : '无结果可导出';
+            const plan = data.plan || {};
+            const parts = [];
+            if (Array.isArray(plan.conditions) && plan.conditions.length) {
+                parts.push(plan.conditions.map(c => `${c.field}=${c.value}`).join('；'));
+            }
+            if (Array.isArray(plan.gene_keywords) && plan.gene_keywords.length) {
+                parts.push(`基因 ${plan.gene_keywords.join('，')}`);
+            }
+            statusBadge.className = results.length ? 'badge bg-success me-3' : 'badge bg-secondary me-3';
+            statusBadge.innerText = `自然语言查询：${results.length} 个结果 · ${parts.join(' · ') || plan.mode || '宽泛查询'} · ${data.elapsed_ms || 0}ms`;
+            try {
+                await loadUmapCells(results.map(row => row.cell_id).filter(Boolean));
+            } catch (umapErr) {
+                forcedUmapPointMap = new Map();
+            }
+            renderUmapChart(results, lastSearchQueryId);
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #ff6b6b;">自然语言查询失败，请检查输入或后端日志</td></tr>';
+            statusBadge.className = 'badge bg-danger me-3';
+            statusBadge.innerText = err.message || '自然语言查询失败';
+            lastSearchResults = [];
+            exportCsvBtn.disabled = true;
+        } finally {
+            naturalCellQueryBtn.disabled = false;
+            naturalCellQueryBtn.innerHTML = '<i class="fa-solid fa-filter me-1"></i>查询细胞';
+        }
     });
 
     clearCompareBtn.addEventListener('click', () => {

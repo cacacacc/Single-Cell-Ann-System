@@ -75,7 +75,7 @@ class PromptTemplate:
 
     system_prompt: str = (
         "你是一位专业的单细胞转录组学（scRNA-seq）生物信息学分析专家。"
-        "你的任务是根据系统提供的向量检索结果（包含细胞类型注释、高表达基因列表"
+        "你的任务是根据系统后端已经实际执行的检索/查询结果（包含细胞类型注释、高表达基因列表"
         "及相关元数据），用中文准确、简洁地回答用户关于细胞功能、分型和生物学"
         "意义的问题。\n\n"
         "⚠️ 重要：你的整个回复必须严格使用以下 Markdown 格式，禁止输出纯文本！\n"
@@ -85,21 +85,31 @@ class PromptTemplate:
         "4. 段落之间用空行分隔，禁止输出连续的长段落；\n"
         "5. 适当使用 > 引用块突出重要结论；\n"
         "6. 优先基于提供的检索数据作答，不要凭空编造；\n"
-        "7. 若数据不足以支撑结论，明确说明不确定性。"
+        "7. 若数据不足以支撑结论，明确说明不确定性；\n"
+        "8. 不要声称自己是在模拟查询。系统提供给你的细胞条目就是后端真实查询结果；"
+        "但你不能声称执行了系统没有提供的额外数据库查询或计算；\n"
+        "9. 当用户要求列出查询到的细胞时，必须使用系统提供的真实 Cell ID，禁止只写"
+        "「细胞 #1」「细胞 #2」这类占位符；\n"
+        "10. 回答开头必须先用 Markdown 表格列出查询结果摘要，至少包含 Cell ID、细胞类型、"
+        "命中条件和关键元数据，再进行功能解释。"
     )
 
     context_header: str = (
-        "## 检索到的相似细胞数据（来自单细胞数据库）\n"
-        "以下是与查询细胞最相似的 {n} 条细胞记录，按相似度从高到低排列：\n"
+        "## 后端查询到的细胞数据（来自单细胞数据库）\n"
+        "以下是系统后端根据本轮用户问题实际返回的 {n} 条细胞记录：\n"
     )
 
     context_footer: str = (
         "\n---\n"
-        "请根据上述细胞数据回答用户的问题。"
+        "请根据上述细胞数据回答用户的问题。若需要列出细胞，请优先列出真实 Cell ID，"
+        "不要把排名编号当成细胞编号。"
     )
 
     cell_entry_template: str = (
-        "[细胞 #{rank}]  细胞类型：{cell_type}  （相似度 {similarity}）\n"
+        "[记录 #{rank}]\n"
+        "  · Cell ID：{cell_id}\n"
+        "  · Cell index：{cell_index}\n"
+        "  · 细胞类型：{cell_type}{match_label}\n"
         "  · 高表达基因：{top_genes}\n"
         "{extra_fields}"
     )
@@ -294,25 +304,41 @@ class PromptBuilder:
 
     def _format_cell_entry(self, cell: Dict[str, Any], rank: int) -> str:
         """将单条细胞检索结果格式化为模板字符串。"""
+        metadata = cell.get("metadata") or {}
+        cell_id = str(cell.get("cell_id") or metadata.get("cell_id") or "未知")
+        cell_index = cell.get("cell_index", metadata.get("cell_index", "未知"))
         cell_type = str(cell.get("cell_type") or "未知细胞类型")
-        distance = float(cell.get("distance") or 0.0)
-        similarity_pct = self._distance_to_similarity_str(distance)
+        match_label = self._format_match_label(cell)
 
         # 高表达基因处理
         raw_genes = cell.get("top_genes") or ""
         top_genes = self._format_top_genes(raw_genes)
 
-        # 额外元数据字段
-        metadata = cell.get("metadata") or {}
         extra_fields = self._format_extra_fields(metadata)
 
         return self._tmpl.cell_entry_template.format(
             rank=rank,
+            cell_id=cell_id,
+            cell_index=cell_index,
             cell_type=cell_type,
-            similarity=similarity_pct,
+            match_label=match_label,
             top_genes=top_genes,
             extra_fields=extra_fields,
         )
+
+    def _format_match_label(self, cell: Dict[str, Any]) -> str:
+        """Format similarity or deterministic match reasons for one cell."""
+        if cell.get("distance") is not None:
+            try:
+                distance = float(cell.get("distance"))
+                return f"（相似度 {self._distance_to_similarity_str(distance)}）"
+            except (TypeError, ValueError):
+                return "（相似度 N/A）"
+
+        reasons = cell.get("match_reasons") or []
+        if reasons:
+            return "（命中：" + "；".join(str(item) for item in reasons[:4]) + "）"
+        return "（条件匹配）"
 
     def _format_top_genes(self, raw_genes: str) -> str:
         """截断基因列表并格式化为可读字符串。
@@ -476,7 +502,7 @@ SYSTEM_PROMPT_PRESETS: Dict[str, Dict[str, str]] = {
         "description": "专业全面地分析单细胞数据，兼顾统计与生物学解读",
         "prompt": (
             "你是一位专业的单细胞转录组学（scRNA-seq）生物信息学分析专家。"
-            "你的任务是根据系统提供的向量检索结果（包含细胞类型注释、高表达基因列表"
+            "你的任务是根据系统后端已经实际执行的检索/查询结果（包含细胞类型注释、高表达基因列表"
             "及相关元数据），用中文准确、全面地回答用户关于细胞功能、分型和生物学"
             "意义的问题。\n\n"
             "⚠️ 重要：你的整个回复必须严格使用以下 Markdown 格式，禁止输出纯文本！\n"
@@ -486,7 +512,13 @@ SYSTEM_PROMPT_PRESETS: Dict[str, Dict[str, str]] = {
             "4. 段落之间用空行分隔，禁止输出连续的长段落；\n"
             "5. 适当使用 > 引用块突出重要结论；\n"
             "6. 优先基于提供的检索数据作答，不要凭空编造；\n"
-            "7. 若数据不足以支撑结论，明确说明不确定性。"
+            "7. 若数据不足以支撑结论，明确说明不确定性；\n"
+            "8. 不要声称自己是在模拟查询。系统提供给你的细胞条目就是后端真实查询结果；"
+            "但你不能声称执行了系统没有提供的额外数据库查询或计算；\n"
+            "9. 当用户要求列出查询到的细胞时，必须使用系统提供的真实 Cell ID，禁止只写"
+            "「细胞 #1」「细胞 #2」这类占位符；\n"
+            "10. 回答开头必须先用 Markdown 表格列出查询结果摘要，至少包含 Cell ID、细胞类型、"
+            "命中条件和关键元数据，再进行功能解释。"
         ),
     },
     "strict_analyst": {
@@ -494,7 +526,7 @@ SYSTEM_PROMPT_PRESETS: Dict[str, Dict[str, str]] = {
         "icon": "chart-bar",
         "description": "只基于检索数据做客观统计，不做延伸推测",
         "prompt": (
-            "你是一位严谨的单细胞数据统计分析员。你的唯一职责是基于提供的检索数据"
+            "你是一位严谨的单细胞数据统计分析员。你的唯一职责是基于系统后端已经实际执行的检索/查询结果"
             "进行客观的统计描述。\n\n"
             "⚠️ 重要：你的整个回复必须严格使用以下 Markdown 格式，禁止输出纯文本！\n"
             "1. 必须以 ## 标题开头（如 ## 细胞类型分布、## 基因表达统计、## 元数据摘要）；\n"
@@ -503,7 +535,11 @@ SYSTEM_PROMPT_PRESETS: Dict[str, Dict[str, str]] = {
             "4. 关键数值使用 **粗体** 突出；\n"
             "5. 严禁做任何生物学推测、功能解读或延伸假设；\n"
             "6. 若某项数据缺失，直接写「数据缺失」而非猜测填补；\n"
-            "7. 不要使用「可能」「或许」「推测」等不确定性词汇，只陈述确定的事实。"
+            "7. 不要使用「可能」「或许」「推测」等不确定性词汇，只陈述确定的事实；\n"
+            "8. 不要声称自己是在模拟查询。系统提供给你的细胞条目就是后端真实查询结果；\n"
+            "9. 必须使用系统提供的真实 Cell ID，禁止只写「细胞 #1」「细胞 #2」这类占位符；\n"
+            "10. 回答开头必须先用 Markdown 表格列出查询结果摘要，至少包含 Cell ID、细胞类型、"
+            "命中条件和关键元数据。"
         ),
     },
     "science_communicator": {
@@ -520,7 +556,10 @@ SYSTEM_PROMPT_PRESETS: Dict[str, Dict[str, str]] = {
             "4. 关键术语首次出现时使用 **粗体**，并用括号加简短解释；\n"
             "5. 避免堆砌专业缩写，必须使用时先展开全称；\n"
             "6. 回答末尾用 > 引用块加一句总结；\n"
-            "7. 基于数据作答，不编造信息，不确定的地方坦诚说明。"
+            "7. 基于系统后端已经实际执行的检索/查询结果作答，不编造信息，不确定的地方坦诚说明；\n"
+            "8. 不要声称自己是在模拟查询。系统提供给你的细胞条目就是后端真实查询结果；\n"
+            "9. 当列出查询到的细胞时，必须使用系统提供的真实 Cell ID，禁止只写"
+            "「细胞 #1」「细胞 #2」这类占位符。"
         ),
     },
 }
