@@ -395,13 +395,14 @@
                         <th class="ps-4">Rank</th>
                         <th>细胞 ID</th>
                         <th>细胞类型 (Cell Type)</th>
+                        <th>来源数据集</th>
                         <th id="distanceHeader">距离得分 (L2 Distance)</th>
                         <th>操作</th>
                     </tr>
                 </thead>
                 <tbody id="result-tbody">
                     <tr>
-                        <td colspan="5" class="text-center py-5">
+                        <td colspan="6" class="text-center py-5">
                             <i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i>
                             <div style="color: #8A96A8;">请在左侧设定参数并点击【开始近似检索】</div>
                         </td>
@@ -982,6 +983,18 @@
     async function loadUmap() {
         const datasetId = datasetSelect.value;
         if (!datasetId) return;
+        const selectedOption = datasetSelect.options[datasetSelect.selectedIndex];
+        if (selectedOption && selectedOption.dataset.merged === 'true') {
+            myChart.clear();
+            currentUmapPoints = [];
+            currentUmapCategories = [];
+            legendContainer.innerHTML = '<div style="color: #8A96A8; font-size: 0.85rem; padding: 8px;">UMAP 可视化不适用于合并数据集</div>';
+            myChart.setOption({
+                title: { text: 'UMAP 不适用于合并数据集', left: 'center', top: 'center', textStyle: { color: '#8A96A8', fontSize: 14 } },
+                xAxis: { show: false }, yAxis: { show: false }, series: []
+            });
+            return;
+        }
         myChart.showLoading({ text: '加载 UMAP...', color: '#4A90E2', textColor: '#fff', maskColor: 'rgba(5, 8, 20, 0.8)' });
         try {
             const params = new URLSearchParams({ dataset_id: datasetId, limit: '3000', color_by: 'cell_type' });
@@ -1032,7 +1045,7 @@
         this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         setTimeout(() => {
             renderUmapChart();
-            document.getElementById('result-tbody').innerHTML = '<tr><td colspan="5" class="text-center py-5"><i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i><div style="color: #8A96A8;">已重绘图谱，请重新执行检索</div></td></tr>';
+            document.getElementById('result-tbody').innerHTML = '<tr><td colspan="6" class="text-center py-5"><i class="fa-solid fa-inbox fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i><div style="color: #8A96A8;">已重绘图谱，请重新执行检索</div></td></tr>';
             document.getElementById('search-status').className = 'badge bg-secondary me-3';
             document.getElementById('search-status').innerText = '等待查询...';
             this.innerHTML = '重绘';
@@ -1050,7 +1063,10 @@
                 return;
             }
             datasetSelect.innerHTML = data.datasets
-                .map(ds => `<option value="${ds.id}">${ds.filename}</option>`)
+                .map(ds => {
+                    const badge = ds.is_merged ? ' [合并]' : '';
+                    return `<option value="${ds.id}" data-merged="${ds.is_merged ? 'true' : 'false'}">${ds.filename}${badge}</option>`;
+                })
                 .join('');
             const rerunDataset = rerunParams.get('dataset_id');
             if (rerunDataset && data.datasets.some(ds => ds.id === rerunDataset)) {
@@ -1207,7 +1223,7 @@
         btn.disabled = true;
         statusBadge.className = 'badge bg-warning text-dark me-3';
         statusBadge.innerHTML = '<span class="spinner-grow spinner-grow-sm me-1"></span>引擎计算中';
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">正在进行高维空间近邻计算...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5" style="color: #8A96A8;">正在进行高维空间近邻计算...</td></tr>';
 
         try {
             const useSavedIndex = savedIndexSelect.value && savedIndexSelect.value !== '__manual__';
@@ -1261,14 +1277,16 @@
 
             let tableHTML = '';
             if (!data.results || data.results.length === 0) {
-                tableHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #8A96A8;">未找到结果</td></tr>';
+                tableHTML = '<tr><td colspan="6" class="text-center py-5" style="color: #8A96A8;">未找到结果</td></tr>';
             } else {
                 data.results.forEach((row, idx) => {
+                    const srcDs = row.source_dataset || datasetId;
                     tableHTML += `
                         <tr>
                             <td class="ps-4 fw-bold" style="color: #4A90E2;">#${idx + 1}</td>
                             <td class="text-white">${row.cell_id || '-'}</td>
                             <td><span class="badge" style="background-color: #E83E8C; padding: 6px 10px;">${row.cell_type || 'unknown'}</span></td>
+                            <td><span class="badge" style="background: rgba(74,144,226,0.15); color: #4A90E2; font-size: 0.75rem;">${srcDs}</span></td>
                             <td style="color: #2ecc71; font-family: monospace; font-size: 1.1rem;">${row.distance}</td>
                             <td><button class="btn btn-sm locate-btn" data-cell-id="${row.cell_id || ''}" title="定位至 UMAP" style="color: #8A96A8; border: 1px solid rgba(255,255,255,0.2);"><i class="fa-solid fa-crosshairs"></i></button></td>
                         </tr>
@@ -1311,7 +1329,7 @@
             }
             renderUmapChart(data.results || [], data.cell_id);
         } catch (err) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5" style="color: #ff6b6b;">检索失败，请检查输入或后端日志</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5" style="color: #ff6b6b;">检索失败，请检查输入或后端日志</td></tr>';
             btn.innerHTML = '<i class="fa-solid fa-satellite-dish me-2"></i>开始近似检索';
             btn.disabled = false;
             statusBadge.className = 'badge bg-danger me-3';

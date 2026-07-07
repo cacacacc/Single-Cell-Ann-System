@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["ANNIndexer", "DataLoader", "DatasetManager"]
+__all__ = ["ANNIndexer", "DataLoader", "DatasetManager", "MergedDataLoader"]
 
 
 def __getattr__(name: str) -> Any:
@@ -14,4 +14,8 @@ def __getattr__(name: str) -> Any:
         from .data_reader import DataLoader, DatasetManager
 
         return {"DataLoader": DataLoader, "DatasetManager": DatasetManager}[name]
+    if name == "MergedDataLoader":
+        from .merged_loader import MergedDataLoader
+
+        return MergedDataLoader
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

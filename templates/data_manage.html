@@ -135,6 +135,9 @@
         <button class="cmd-btn cmd-btn-primary" data-bs-toggle="offcanvas" data-bs-target="#uploadPanel">
             <i class="fa-solid fa-cloud-arrow-up me-2"></i>上传数据集
         </button>
+        <button class="cmd-btn cmd-btn-primary" data-bs-toggle="modal" data-bs-target="#createMergeModal">
+            <i class="fa-solid fa-layer-group me-2"></i>合并数据集
+        </button>
         <button class="cmd-btn" onclick="batchDelete()">
             <i class="fa-solid fa-trash me-2"></i>批量删除
         </button>
@@ -343,6 +346,46 @@
         </div>
     </div>
 </div>
+
+<!-- ================= 合并数据集 Modal ================= -->
+<div class="modal fade" id="createMergeModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content" style="background: #1a1a2e; border: 1px solid rgba(111,38,86,0.3);">
+            <div class="modal-header border-bottom border-secondary">
+                <h5 class="modal-title fw-bold"><i class="fa-solid fa-layer-group me-2" style="color: var(--nankai-purple);"></i>创建合并数据集</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label text-muted">合并名称</label>
+                    <input type="text" class="form-control dark-control" id="mergeName" placeholder="例如：PBMC + Liver 联合数据集">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted">选择源数据集（至少 2 个）</label>
+                    <div id="mergeSourceList" class="p-3" style="background: rgba(255,255,255,0.03); border-radius: 8px; max-height: 250px; overflow-y: auto;">
+                        <div style="color: #8A96A8;">正在加载数据集列表...</div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted">向量表示</label>
+                    <select class="form-select dark-control" id="mergeUseRep">
+                        <option value="X_pca" selected>X_pca</option>
+                    </select>
+                    <small class="text-muted">所有源数据集必须使用相同维度的向量表示</small>
+                </div>
+                <div id="mergeValidation" class="mt-2"></div>
+                <div id="mergeError" class="mt-2" style="color: #ff6b6b; display: none;"></div>
+                <div id="mergeSuccess" class="mt-2" style="color: #2ecc71; display: none;"></div>
+            </div>
+            <div class="modal-footer border-top border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" id="createMergeBtn" onclick="createMergedDataset()" style="background-color: var(--nankai-purple); border-color: var(--nankai-purple);">
+                    <i class="fa-solid fa-plus me-1"></i>创建
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -373,21 +416,29 @@
                 ? `<span class="badge" style="background-color: var(--nankai-purple); padding: 6px 10px;">${ds.index_backend || 'READY'}</span>`
                 : '<span class="badge bg-secondary" style="padding: 6px 10px;">未建索引</span>';
             const metaLine = ds.modified_at ? ds.modified_at : '-';
+            const isMerged = ds.is_merged === true;
+            const mergedBadge = isMerged
+                ? '<span class="badge ms-1" style="background: rgba(74,144,226,0.2); color: #4A90E2; font-size: 0.7rem;"><i class="fa-solid fa-layer-group me-1"></i>合并</span>'
+                : '';
+            const sourceInfo = isMerged
+                ? `<small style="color: #4A90E2;">${(ds.source_datasets || []).length} 个源数据集</small>`
+                : '';
             const adminActions = isAdmin ? `
                         <i class="fa-solid fa-microchip action-icon build" title="构建索引" data-action="build" data-bs-toggle="modal" data-bs-target="#buildIndexModal"></i>
-                        <i class="fa-solid fa-trash action-icon delete" title="删除" data-action="delete"></i>
+                        <i class="fa-solid fa-trash action-icon delete" title="删除" data-action="delete" ${isMerged ? 'data-merged="true"' : ''}></i>
             ` : '';
             return `
-                <tr data-dataset-id="${ds.id}">
+                <tr data-dataset-id="${ds.id}" ${isMerged ? 'data-merged="true"' : ''}>
                     <td class="text-center"><input type="checkbox" class="table-checkbox row-checkbox" ${isAdmin ? '' : 'disabled'}></td>
                     <td>
-                        <div class="fw-bold text-white">${ds.id}</div>
+                        <div class="fw-bold text-white">${ds.id}${mergedBadge}</div>
                         <small style="color: var(--text-muted);">${ds.filename || '-'}</small>
+                        ${sourceInfo ? '<br>' + sourceInfo : ''}
                     </td>
                     <td>${formatNumber(ds.n_cells)}</td>
                     <td>${formatNumber(ds.n_genes)}</td>
                     <td>
-                        <div>系统导入</div>
+                        <div>${isMerged ? '合并创建' : '系统导入'}</div>
                         <small style="color: var(--text-muted);">${metaLine}</small>
                     </td>
                     <td>${statusBadge}</td>
@@ -615,7 +666,11 @@
                 return;
             }
             if (action === 'delete') {
-                deleteDataset(datasetId);
+                if (row.dataset.merged === 'true' || e.target.dataset.merged === 'true') {
+                    deleteMergedDataset(datasetId);
+                } else {
+                    deleteDataset(datasetId);
+                }
                 return;
             }
             if (action === 'manage') {
@@ -715,6 +770,139 @@
             await loadDatasets();
         } catch (err) {
             alert('删除索引失败: ' + (err.message || '未知错误'));
+        }
+    }
+
+    // ==================== 合并数据集功能 ====================
+
+    let _mergeDatasetsCache = [];
+
+    document.getElementById('createMergeModal').addEventListener('show.bs.modal', async () => {
+        document.getElementById('mergeName').value = '';
+        document.getElementById('mergeError').style.display = 'none';
+        document.getElementById('mergeSuccess').style.display = 'none';
+        document.getElementById('mergeValidation').innerHTML = '';
+        await loadMergeSourceList();
+    });
+
+    async function loadMergeSourceList() {
+        const container = document.getElementById('mergeSourceList');
+        container.innerHTML = '<div style="color: #8A96A8;">正在加载...</div>';
+        try {
+            const res = await fetch('/api/datasets');
+            const data = await res.json();
+            const datasets = (data.datasets || []).filter(ds => !ds.is_merged);
+            _mergeDatasetsCache = datasets;
+            if (datasets.length < 2) {
+                container.innerHTML = '<div style="color: #ff6b6b;">至少需要 2 个数据集才能合并</div>';
+                return;
+            }
+            container.innerHTML = datasets.map(ds => `
+                <div class="form-check mb-2">
+                    <input class="form-check-input merge-source-cb" type="checkbox" value="${ds.id}"
+                           id="mergeSrc_${ds.id}" onchange="updateMergeReps()">
+                    <label class="form-check-label text-white" for="mergeSrc_${ds.id}">
+                        ${ds.id}
+                        <small style="color: #8A96A8;">(${formatNumber(ds.n_cells)} 细胞, ${(ds.available_reps || []).join(', ')})</small>
+                    </label>
+                </div>
+            `).join('');
+            updateMergeReps();
+        } catch (err) {
+            container.innerHTML = '<div style="color: #ff6b6b;">加载失败</div>';
+        }
+    }
+
+    function updateMergeReps() {
+        const checked = document.querySelectorAll('.merge-source-cb:checked');
+        const selectedIds = Array.from(checked).map(cb => cb.value);
+        const repSelect = document.getElementById('mergeUseRep');
+        const validation = document.getElementById('mergeValidation');
+
+        if (selectedIds.length < 2) {
+            repSelect.innerHTML = '<option value="">请选择至少 2 个数据集</option>';
+            validation.innerHTML = '';
+            return;
+        }
+
+        const selectedDatasets = _mergeDatasetsCache.filter(ds => selectedIds.includes(ds.id));
+        let commonReps = null;
+        for (const ds of selectedDatasets) {
+            const reps = new Set(ds.available_reps || []);
+            commonReps = commonReps ? new Set([...commonReps].filter(r => reps.has(r))) : reps;
+        }
+
+        const reps = commonReps ? [...commonReps].sort() : [];
+        if (reps.length === 0) {
+            repSelect.innerHTML = '<option value="">无公共向量表示</option>';
+            validation.innerHTML = '<div style="color: #ff6b6b;"><i class="fa-solid fa-triangle-exclamation me-1"></i>所选数据集没有公共的向量表示</div>';
+            return;
+        }
+
+        const currentVal = repSelect.value;
+        repSelect.innerHTML = reps.map(r => `<option value="${r}" ${r === currentVal ? 'selected' : ''}>${r}</option>`).join('');
+
+        const useRep = repSelect.value || reps[0];
+        const dims = selectedDatasets.map(ds => {
+            // Approximate: n_genes may differ but vector_dim for same rep should match
+            return { id: ds.id, rep: useRep };
+        });
+        validation.innerHTML = `<div style="color: #2ecc71;"><i class="fa-solid fa-check me-1"></i>${selectedIds.length} 个数据集已选择，公共表示: ${useRep}</div>`;
+    }
+
+    async function createMergedDataset() {
+        const name = document.getElementById('mergeName').value.trim();
+        const useRep = document.getElementById('mergeUseRep').value;
+        const checked = document.querySelectorAll('.merge-source-cb:checked');
+        const sourceDatasets = Array.from(checked).map(cb => cb.value);
+        const errorEl = document.getElementById('mergeError');
+        const successEl = document.getElementById('mergeSuccess');
+        const btn = document.getElementById('createMergeBtn');
+
+        errorEl.style.display = 'none';
+        successEl.style.display = 'none';
+
+        if (!name) { errorEl.textContent = '请输入合并名称'; errorEl.style.display = 'block'; return; }
+        if (sourceDatasets.length < 2) { errorEl.textContent = '请至少选择 2 个源数据集'; errorEl.style.display = 'block'; return; }
+        if (!useRep) { errorEl.textContent = '请选择向量表示'; errorEl.style.display = 'block'; return; }
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>创建中...';
+
+        try {
+            const res = await fetch('/api/merged/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, source_datasets: sourceDatasets, use_rep: useRep }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '创建失败');
+
+            successEl.innerHTML = `<i class="fa-solid fa-check me-1"></i>合并数据集创建成功！ID: ${data.merged_id}，共 ${formatNumber(data.total_cells)} 个细胞`;
+            successEl.style.display = 'block';
+
+            setTimeout(() => {
+                bootstrap.Modal.getInstance(document.getElementById('createMergeModal')).hide();
+                loadDatasets();
+            }, 1500);
+        } catch (err) {
+            errorEl.textContent = err.message || '创建失败';
+            errorEl.style.display = 'block';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-plus me-1"></i>创建';
+        }
+    }
+
+    async function deleteMergedDataset(mergedId) {
+        if (!confirm(`确定删除合并数据集"${mergedId}"吗？\n源数据集不会被删除。`)) return;
+        try {
+            const res = await fetch(`/api/merged/${encodeURIComponent(mergedId)}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '删除失败');
+            await loadDatasets();
+        } catch (err) {
+            alert('删除合并数据集失败: ' + (err.message || '未知错误'));
         }
     }
 

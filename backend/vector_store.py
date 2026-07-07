@@ -258,10 +258,13 @@ class CellVectorStore:
 
                 # 高表达基因列表（字符串形式存入元数据）
                 if has_gene_info:
-                    vec_raw = loader.get_vector(global_idx, use_rep="X")
-                    top_gene_names = self._top_expressed_genes(
-                        vec_raw, gene_names, top_n=top_genes
-                    )
+                    try:
+                        vec_raw = loader.get_vector(global_idx, use_rep="X")
+                        top_gene_names = self._top_expressed_genes(
+                            vec_raw, gene_names, top_n=top_genes
+                        )
+                    except (ValueError, KeyError):
+                        top_gene_names = []
                     meta["top_genes"] = ",".join(top_gene_names)
                 else:
                     meta["top_genes"] = ""
