@@ -56,6 +56,16 @@ from backend.rag_engine import (
     get_or_create_engine,
     _CHAT_HISTORY,
 )
+from backend.merged_loader import (
+    MergedDataLoader,
+    MergedDatasetConfig,
+    get_merged_dir,
+    list_merged_configs,
+    load_merged_config,
+    save_merged_config,
+    delete_merged_config,
+    _make_merged_id,
+)
 from backend.user_store import (
     AuthenticationError,
     DuplicateUserError,
@@ -68,6 +78,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 INDEX_DIR = BASE_DIR / "indexes"
 CHROMA_DIR = BASE_DIR / DEFAULT_CHROMA_DIR
+MERGED_DIR = DATA_DIR / ".merged"
 
 DEFAULT_DATA_PATH = "data/liver.h5ad"
 DEFAULT_USE_REP = "X_pca"
@@ -79,6 +90,7 @@ ALLOWED_EXTENSIONS = {".h5ad"}
 _DATASET_CACHE: Dict[str, DataLoader] = {}
 _INDEX_CACHE: Dict[Tuple[str, str], Tuple[ANNIndexer, Tuple[Any, ...]]] = {}
 _BENCHMARK_INDEX_CACHE: Dict[Tuple[str, str, Tuple[Any, ...]], ANNIndexer] = {}
+_MERGED_CACHE: Dict[str, MergedDataLoader] = {}
 _BENCHMARK_HISTORY_PATH = DATA_DIR / "benchmark_history.json"
 USER_DB_PATH: Optional[Path] = None
 DEFAULT_ADMIN_USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")
@@ -100,10 +112,60 @@ def _normalize_dataset_id(dataset_id: Optional[str]) -> Optional[str]:
     return cleaned
 
 
+def _is_merged_dataset(dataset_id: str) -> bool:
+    return (MERGED_DIR / f"{dataset_id}.json").exists()
+
+
+def _get_merged_loader(merged_id: str) -> MergedDataLoader:
+    if merged_id in _MERGED_CACHE:
+        return _MERGED_CACHE[merged_id]
+    config = load_merged_config(DATA_DIR, merged_id)
+    source_loaders = {}
+    for ds_id in config.source_datasets:
+        source_loaders[ds_id] = _get_loader(ds_id)
+    merged = MergedDataLoader(config, source_loaders)
+    _MERGED_CACHE[merged_id] = merged
+    return merged
+
+
+def _merged_dataset_payload(config: MergedDatasetConfig) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "id": config.merged_id,
+        "filename": f"[合并] {config.name}",
+        "is_merged": True,
+        "source_datasets": config.source_datasets,
+        "use_rep": config.use_rep,
+        "created_at": config.created_at,
+        "size_mb": 0,
+        "modified_at": config.created_at,
+    }
+    if config.merged_id in _MERGED_CACHE:
+        merged = _MERGED_CACHE[config.merged_id]
+        payload["n_cells"] = merged.n_cells
+        payload["n_genes"] = merged.n_genes
+        payload["available_reps"] = merged.available_reps
+        payload["obs_columns"] = merged.obs_columns
+    else:
+        try:
+            merged = _get_merged_loader(config.merged_id)
+            payload["n_cells"] = merged.n_cells
+            payload["n_genes"] = merged.n_genes
+            payload["available_reps"] = merged.available_reps
+            payload["obs_columns"] = merged.obs_columns
+        except Exception as exc:
+            payload["error"] = str(exc)
+    _migrate_old_index(config.merged_id)
+    indices = _list_index_names(config.merged_id)
+    payload["index_status"] = "ready" if indices else "missing"
+    return payload
+
+
 def _resolve_dataset_path(dataset_id: Optional[str]) -> Path:
     if dataset_id:
         name = _normalize_dataset_id(dataset_id)
         assert name is not None
+        if _is_merged_dataset(name):
+            return MERGED_DIR / f"{name}.json"
         candidate = DATA_DIR / name
         if candidate.suffix == "":
             candidate = candidate.with_suffix(".h5ad")
@@ -336,9 +398,13 @@ def _read_stored_index_config(dataset_id: str, index_name: str) -> Optional[Dict
         return None
 
 
-def _get_loader(dataset_id: str, dataset_path: Optional[Path] = None) -> DataLoader:
+def _get_loader(dataset_id: str, dataset_path: Optional[Path] = None):
     if dataset_id in _DATASET_CACHE:
         return _DATASET_CACHE[dataset_id]
+    if _is_merged_dataset(dataset_id):
+        merged = _get_merged_loader(dataset_id)
+        _DATASET_CACHE[dataset_id] = merged
+        return merged
     if dataset_path is None:
         dataset_path = _resolve_dataset_path(dataset_id)
     loader = DataLoader(dataset_path)
@@ -1020,7 +1086,11 @@ def list_datasets():
     datasets = []
     for path in sorted(DATA_DIR.glob("*.h5ad")):
         dataset_id = _dataset_id_from_path(path)
-        datasets.append(_dataset_payload(dataset_id, path))
+        payload = _dataset_payload(dataset_id, path)
+        payload["is_merged"] = False
+        datasets.append(payload)
+    for config in list_merged_configs(DATA_DIR):
+        datasets.append(_merged_dataset_payload(config))
     return _json_response({"datasets": datasets})
 
 
@@ -1115,6 +1185,13 @@ def umap_points():
         limit = min(limit, 10000)
 
         loader = _get_loader(resolved_id, dataset_path)
+        if isinstance(loader, MergedDataLoader):
+            return _json_response({
+                "points": [],
+                "categories": [],
+                "is_merged": True,
+                "message": "UMAP 可视化不适用于合并数据集，各源数据集的 UMAP 坐标空间不统一。",
+            })
         if "X_umap" not in loader.adata.obsm:
             return _json_response({"error": "X_umap is not available for this dataset"}, 400)
 
@@ -1292,6 +1369,139 @@ def delete_dataset(dataset_id: str):
     return _json_response({"status": "deleted", "dataset_id": dataset_id})
 
 
+@app.post("/api/merged/create")
+@admin_required
+def create_merged_dataset():
+    try:
+        payload = _request_payload()
+        name = (payload.get("name") or "").strip()
+        source_datasets = payload.get("source_datasets") or []
+        use_rep = payload.get("use_rep") or DEFAULT_USE_REP
+
+        if not name:
+            return _json_response({"error": "name is required"}, 400)
+        if not isinstance(source_datasets, list) or len(source_datasets) < 2:
+            return _json_response({"error": "at least 2 source datasets are required"}, 400)
+
+        for ds_id in source_datasets:
+            try:
+                _resolve_dataset_path(ds_id)
+            except FileNotFoundError:
+                return _json_response({"error": f"source dataset not found: {ds_id}"}, 404)
+
+        loaders = {}
+        for ds_id in source_datasets:
+            loaders[ds_id] = _get_loader(ds_id)
+
+        for ds_id, loader in loaders.items():
+            if use_rep not in loader.available_reps:
+                return _json_response(
+                    {"error": f"source dataset '{ds_id}' does not have representation '{use_rep}', "
+                              f"available: {loader.available_reps}"},
+                    400,
+                )
+
+        dims = {ds_id: loader.vector_dim(use_rep) for ds_id, loader in loaders.items()}
+        if len(set(dims.values())) > 1:
+            return _json_response(
+                {"error": f"dimension mismatch across sources for '{use_rep}'", "dimensions": dims},
+                400,
+            )
+
+        merged_id = _make_merged_id(source_datasets)
+        if _is_merged_dataset(merged_id):
+            return _json_response({"error": "merged dataset with same sources already exists", "merged_id": merged_id}, 409)
+
+        config = MergedDatasetConfig(
+            merged_id=merged_id,
+            name=name,
+            source_datasets=source_datasets,
+            use_rep=use_rep,
+        )
+        save_merged_config(DATA_DIR, config)
+
+        merged = _get_merged_loader(merged_id)
+        return _json_response(
+            {
+                "status": "created",
+                "merged_id": merged_id,
+                "config": config.to_dict(),
+                "total_cells": merged.n_cells,
+                "vector_dim": merged.vector_dim(use_rep),
+            },
+            201,
+        )
+    except ValueError as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except Exception as exc:
+        app.logger.exception("Failed to create merged dataset")
+        return _json_response({"error": str(exc)}, 500)
+
+
+@app.get("/api/merged")
+@login_required
+def list_merged_datasets():
+    configs = list_merged_configs(DATA_DIR)
+    results = [_merged_dataset_payload(c) for c in configs]
+    return _json_response({"datasets": results})
+
+
+@app.get("/api/merged/<merged_id>")
+@login_required
+def get_merged_dataset(merged_id: str):
+    try:
+        merged_id = _normalize_dataset_id(merged_id)
+        if not _is_merged_dataset(merged_id):
+            return _json_response({"error": "merged dataset not found"}, 404)
+        config = load_merged_config(DATA_DIR, merged_id)
+        merged = _get_merged_loader(merged_id)
+        source_details = []
+        for ds_id in config.source_datasets:
+            loader = _get_loader(ds_id)
+            source_details.append({
+                "dataset_id": ds_id,
+                "n_cells": loader.n_cells,
+                "n_genes": loader.n_genes,
+                "available_reps": loader.available_reps,
+            })
+        return _json_response({
+            "config": config.to_dict(),
+            "total_cells": merged.n_cells,
+            "vector_dim": merged.vector_dim(config.use_rep),
+            "available_reps": merged.available_reps,
+            "obs_columns": merged.obs_columns,
+            "sources": source_details,
+        })
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 400)
+
+
+@app.delete("/api/merged/<merged_id>")
+@admin_required
+def delete_merged_dataset(merged_id: str):
+    try:
+        merged_id = _normalize_dataset_id(merged_id)
+        if not _is_merged_dataset(merged_id):
+            return _json_response({"error": "merged dataset not found"}, 404)
+
+        delete_merged_config(DATA_DIR, merged_id)
+        _MERGED_CACHE.pop(merged_id, None)
+        _DATASET_CACHE.pop(merged_id, None)
+        for key in list(_INDEX_CACHE.keys()):
+            if key[0] == merged_id:
+                _INDEX_CACHE.pop(key, None)
+
+        index_dir = _index_dir(merged_id)
+        if index_dir.exists():
+            for f in index_dir.iterdir():
+                f.unlink(missing_ok=True)
+            index_dir.rmdir()
+
+        return _json_response({"status": "deleted", "merged_id": merged_id})
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 500)
+
+
 @app.post("/api/index/build")
 @admin_required
 def build_index():
@@ -1455,6 +1665,7 @@ def search():
                     "cell_index": idx,
                     "cell_id": cell_info.get("cell_id"),
                     "cell_type": cell_info.get("cell_type", "unknown"),
+                    "source_dataset": cell_info.get("source_dataset", resolved_id),
                     "distance": round(distance, 6),
                     "similarity_score": round(
                         _similarity_from_distance(distance, metric), 6
