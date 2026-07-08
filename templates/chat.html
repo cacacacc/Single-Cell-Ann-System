@@ -430,12 +430,14 @@
     .msg-bubble table {
         width: 100%; border-collapse: collapse;
         margin: 10px 0; font-size: 0.85rem;
+        overflow: hidden;
+        border-radius: 8px;
     }
     .msg-bubble table td, .msg-bubble table th {
         border: 1px solid rgba(255,255,255,0.08);
         padding: 6px 12px; text-align: left;
     }
-    .msg-bubble table tr:first-child td {
+    .msg-bubble table th {
         background: rgba(74,144,226,0.1);
         font-weight: 600; color: #fff;
     }
@@ -1415,7 +1417,7 @@
 
                 if (data.startsWith('[FORMATTED]')) {
                     // 后端对换行符做了转义（\n → \\n），这里还原
-                    fullText = data.slice(12).replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
+                    fullText = data.slice('[FORMATTED]'.length).replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
                     if (!bubble) {
                         removeTypingIndicator(typingMsg);
                         const created = appendStreamingBubble();
@@ -1428,7 +1430,7 @@
 
                 if (data.startsWith('[SOURCES]')) {
                     try {
-                        currentSources = JSON.parse(data.slice(10));
+                        currentSources = JSON.parse(data.slice('[SOURCES]'.length));
                     } catch (e) { /* ignore parse errors */ }
                     if (currentNaturalQuery) {
                         updateQueryProgress(typingMsg, 'sources', {
@@ -1441,7 +1443,7 @@
 
                 if (data.startsWith('[NL_QUERY]')) {
                     try {
-                        currentNaturalQuery = JSON.parse(data.slice(10));
+                        currentNaturalQuery = JSON.parse(data.slice('[NL_QUERY]'.length));
                     } catch (e) { /* ignore parse errors */ }
                     updateQueryProgress(typingMsg, 'nl_query', {
                         plan: currentNaturalQuery,
@@ -1451,7 +1453,7 @@
                 }
 
                 if (data.startsWith('[ERROR]')) {
-                    throw new Error(data.slice(8));
+                    throw new Error(data.slice('[ERROR]'.length));
                 }
 
                 // 后端对换行符做了转义（\n → \\n），这里还原后再拼接
@@ -1527,7 +1529,7 @@
         }
         removeTypingIndicator(typingMsg);
         if (data.answer) {
-            appendMessage('assistant', data.answer);
+            appendMessage('assistant', data.answer, false, currentSources, currentNaturalQuery);
         }
     }
 
@@ -1567,9 +1569,13 @@
     // ===================================================================
     //  Message Rendering
     // ===================================================================
-    function appendMessage(role, content, isError) {
+    function appendMessage(role, content, isError, sources, naturalQuery) {
         const row = document.createElement('div');
         row.className = `message-row ${role}`;
+        if (role === 'assistant' && !isError) {
+            row._sources = Array.isArray(sources) ? sources.slice() : currentSources.slice();
+            row._naturalQuery = naturalQuery || currentNaturalQuery;
+        }
 
         const avatarIcon = role === 'user'
             ? '<i class="fa-solid fa-user"></i>'
@@ -1723,6 +1729,8 @@
 
     function finalizeAssistantBubble(bubble, fullText) {
         bubble.id = '';
+        bubble._sources = currentSources.slice();
+        bubble._naturalQuery = currentNaturalQuery;
         const contentEl = bubble.querySelector('.streaming-content');
         if (contentEl) contentEl.classList.remove('streaming-content');
 
@@ -1801,11 +1809,18 @@
             const td = cells.map(c => `<td>${c.trim()}</td>`).join('');
             return `<tr>${td}</tr>`;
         });
-        // Wrap table rows
-        html = html.replace(/((?:\x00TBSEP\x00)?(?:<tr>.*?<\/tr>\n?)+)/g, (m) => {
-            let tableHtml = m.replace(/\x00TBSEP\x00\n?/g, '');
-            // First row after sep becomes thead
-            return `<table>${tableHtml}</table>`;
+        // Wrap contiguous table rows and keep the markdown header separator in the same table.
+        html = html.replace(/((?:<tr>.*?<\/tr>\n?|\x00TBSEP\x00\n?)+)/g, (m) => {
+            const lines = m.split('\n').map(line => line.trim()).filter(Boolean);
+            const sepIndex = lines.indexOf('\x00TBSEP\x00');
+            const rows = lines.filter(line => line !== '\x00TBSEP\x00');
+            if (!rows.length) return '';
+            if (sepIndex === 1) {
+                const header = rows[0].replace(/<td>/g, '<th>').replace(/<\/td>/g, '</th>');
+                const body = rows.slice(1).join('');
+                return `<table><thead>${header}</thead><tbody>${body}</tbody></table>`;
+            }
+            return `<table><tbody>${rows.join('')}</tbody></table>`;
         });
         // Remove any table separator markers that were not adjacent to the row
         // group matched above, such as the standard header/separator/body layout.
@@ -2033,11 +2048,16 @@
     // ===================================================================
     //  Inline Sources (below AI message)
     // ===================================================================
-    function renderInlineSources(sources) {
-        if (!sources || sources.length === 0) return '';
+    function renderInlineSources(sources, naturalQuery) {
+        if (!sources || sources.length === 0) {
+            return `<div class="inline-sources">
+                <div class="inline-sources-header"><i class="fa-solid fa-microscope"></i> 暂无可展示的检索来源</div>
+                <div class="inline-source-meta"><span>本条回答没有收到后端返回的来源数据。</span></div>
+            </div>`;
+        }
         let html = '<div class="inline-sources">';
         html += `<div class="inline-sources-header"><i class="fa-solid fa-microscope"></i> RAG 检索到的 Top ${sources.length} 相似细胞</div>`;
-        html += renderNaturalQuerySummary(currentNaturalQuery);
+        html += renderNaturalQuerySummary(naturalQuery);
 
         sources.forEach((cell, idx) => {
             const sim = formatSimilarity(cell.distance);
@@ -2104,7 +2124,8 @@
     // ===================================================================
     function showSourcesForMessage(btn, event) {
         event.stopPropagation();
-        const bubble = btn.closest('.message-row').querySelector('.msg-bubble');
+        const row = btn.closest('.message-row');
+        const bubble = row.querySelector('.msg-bubble');
         const existing = bubble.querySelector('.inline-sources');
 
         if (existing) {
@@ -2117,7 +2138,7 @@
                 b.classList.remove('active');
                 b.innerHTML = '<i class="fa-solid fa-database"></i> 查看来源';
             });
-            bubble.insertAdjacentHTML('beforeend', renderInlineSources(currentSources));
+            bubble.insertAdjacentHTML('beforeend', renderInlineSources(row._sources || [], row._naturalQuery || null));
             btn.classList.add('active');
             btn.innerHTML = '<i class="fa-solid fa-database"></i> 隐藏来源';
         }
