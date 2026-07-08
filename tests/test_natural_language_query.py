@@ -37,6 +37,19 @@ class DummyStore:
     def is_populated(self) -> bool:
         return True
 
+    def get_by_cell_ids(self, cell_ids):
+        records = {
+            "cell-1": {
+                "cell_id": "cell-1",
+                "cell_index": 1,
+                "cell_type": "Kupffer cell",
+                "top_genes": "MARCO,C1QA,C1QB",
+                "document": "Cell type: Kupffer cell | Top genes: MARCO,C1QA,C1QB",
+                "metadata": {"cell_id": "cell-1", "cell_type": "Kupffer cell", "tissue": "liver", "top_genes": "MARCO,C1QA,C1QB"},
+            }
+        }
+        return {cell_id: records[cell_id] for cell_id in cell_ids if cell_id in records}
+
     def query_by_keywords(self, keywords, n_results=5):
         return [
             {
@@ -68,6 +81,15 @@ class NaturalLanguageQueryTests(unittest.TestCase):
 
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["results"][0]["cell_id"], "cell-1")
+
+    def test_execute_metadata_query_enriches_top_genes_from_store(self) -> None:
+        plan = parse_natural_cell_query("查询细胞类型为 Kupffer cell 的细胞", self.loader)
+        result = execute_natural_cell_query(plan, self.loader, store=DummyStore())
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["results"][0]["cell_id"], "cell-1")
+        self.assertEqual(result["results"][0]["top_genes"], "MARCO,C1QA,C1QB")
+        self.assertIn("Top genes: MARCO", result["results"][0]["document"])
 
     def test_execute_gene_keyword_query_uses_store(self) -> None:
         plan = parse_natural_cell_query("找 ALB 高表达的 Hepatocyte", self.loader)

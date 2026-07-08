@@ -342,6 +342,48 @@ def _keyword_result_ids(store: Any, keywords: Sequence[str], n_results: int) -> 
         return [], f"Keyword query failed: {exc}"
 
 
+def _enrich_results_from_store(
+    results: List[Dict[str, Any]],
+    store: Any,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Merge vector-store-only fields such as top_genes into query results."""
+    if not results:
+        return results, None
+    if store is None or not getattr(store, "is_populated", lambda: False)():
+        return results, None
+    if not hasattr(store, "get_by_cell_ids"):
+        return results, None
+
+    try:
+        records = store.get_by_cell_ids([str(row.get("cell_id") or "") for row in results])
+    except Exception as exc:
+        return results, f"Vector DB enrichment failed: {exc}"
+
+    if not records:
+        return results, None
+
+    enriched: List[Dict[str, Any]] = []
+    for row in results:
+        cid = str(row.get("cell_id") or "")
+        stored = records.get(cid)
+        if not stored:
+            enriched.append(row)
+            continue
+
+        merged = dict(row)
+        if stored.get("top_genes"):
+            merged["top_genes"] = stored.get("top_genes", "")
+        if stored.get("document"):
+            merged["document"] = stored.get("document", "")
+
+        stored_meta = stored.get("metadata") or {}
+        row_meta = row.get("metadata") or {}
+        merged["metadata"] = {**stored_meta, **row_meta}
+        enriched.append(merged)
+
+    return enriched, None
+
+
 def execute_natural_cell_query(
     plan: NaturalQueryPlan,
     loader: Any,
@@ -426,6 +468,10 @@ def execute_natural_cell_query(
             results.append(result)
             if len(results) >= limit:
                 break
+
+    results, warning = _enrich_results_from_store(results, store)
+    if warning:
+        warnings.append(warning)
 
     return {
         "plan": plan.to_dict() | {"warnings": warnings},

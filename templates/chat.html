@@ -362,6 +362,30 @@
         border-color: rgba(231,76,60,0.2);
         color: #E74C3C;
     }
+    .msg-action-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .inline-action-button {
+        border: 1px solid rgba(74,144,226,0.45);
+        background: rgba(74,144,226,0.14);
+        color: #BBD6FA;
+        border-radius: 8px;
+        padding: 7px 12px;
+        font-size: 0.82rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: background 0.2s, border-color 0.2s, color 0.2s;
+    }
+    .inline-action-button:hover {
+        background: rgba(74,144,226,0.24);
+        border-color: #4A90E2;
+        color: #fff;
+    }
 
     .msg-bubble p { margin: 0 0 8px 0; }
     .msg-bubble p:last-child { margin-bottom: 0; }
@@ -548,6 +572,20 @@
         text-align: center; font-size: 0.72rem; color: #5A6478;
         margin-top: 6px;
     }
+    .chat-input-hint .hint-action {
+        margin-left: 8px;
+        border: 1px solid rgba(74,144,226,0.35);
+        background: rgba(74,144,226,0.1);
+        color: #8DBAF2;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font-size: 0.72rem;
+        cursor: pointer;
+    }
+    .chat-input-hint .hint-action:hover {
+        color: #fff;
+        border-color: #4A90E2;
+    }
 
     /* ================= Typing Indicator ================= */
     .typing-indicator {
@@ -662,6 +700,10 @@
         background: rgba(245,166,35,0.08);
         border-color: rgba(245,166,35,0.2);
         color: #F5A623;
+    }
+    .chat-status-banner .inline-action-button {
+        margin-left: 10px;
+        padding: 5px 10px;
     }
 
     /* ================= LLM Settings Sidebar (right) ================= */
@@ -1084,6 +1126,8 @@
         btnSend.disabled = !canSend;
 
         const btnInitVDB = document.getElementById('btnInitVDB');
+        const initButtonHtml = '<button type="button" class="hint-action" onclick="initVectorDB()"><i class="fa-solid fa-database"></i> 立即初始化</button>';
+        const rebuildButtonHtml = '<button type="button" class="hint-action" onclick="initVectorDB()"><i class="fa-solid fa-rotate"></i> 重建基因索引</button>';
 
         if (!sysVDB.available && !sysVDB.populated) {
             // ChromaDB 未安装或无数据集
@@ -1094,7 +1138,7 @@
             btnInitVDB.style.display = 'flex';
             btnInitVDB.innerHTML = '<i class="fa-solid fa-database"></i> 初始化向量数据库';
             btnInitVDB.title = '将数据集向量和高表达基因信息写入 ChromaDB，完成后即可使用 AI 问答';
-            chatInputHint.innerHTML = '⚠️ 向量数据库未初始化，点击右上角 <strong>初始化向量数据库</strong> 按钮即可完成（约需 1-2 分钟）。';
+            chatInputHint.innerHTML = `⚠️ 向量数据库未初始化，初始化后才能使用 AI 查询。${initButtonHtml}`;
         } else {
             btnInitVDB.style.display = sysVDB.topGenesAvailable ? 'none' : 'flex';
             if (!sysVDB.topGenesAvailable) {
@@ -1104,7 +1148,7 @@
             if (!sysLLM.configured) {
                 chatInputHint.innerHTML = '💡 LLM 未配置，但您仍可提问 — 系统将回退到向量检索展示结果（不含 AI 生成回答）。';
             } else if (!sysVDB.topGenesAvailable) {
-                chatInputHint.innerHTML = '⚠️ 当前向量数据库缺少高表达基因信息；元数据查询可用，基因高表达查询需点击右上角 <strong>重建基因索引</strong>。';
+                chatInputHint.innerHTML = `⚠️ 当前向量数据库缺少高表达基因信息；元数据查询可用，基因高表达查询需要重建。${rebuildButtonHtml}`;
             } else {
                 chatInputHint.innerHTML = 'AI 细胞助手基于 RAG 技术检索单细胞数据库后生成回答，请核对关键信息。';
             }
@@ -1240,7 +1284,12 @@
 
         // Pre-flight checks
         if (!sysVDB.populated) {
-            showStatus('❌ 向量数据库未初始化，请先点击上方「一键初始化」按钮。', 'error');
+            showStatus(
+                '❌ 向量数据库未初始化，初始化后才能使用 AI 查询。'
+                + '<button type="button" class="inline-action-button" onclick="initVectorDB()">'
+                + '<i class="fa-solid fa-database"></i> 立即初始化向量数据库</button>',
+                'error'
+            );
             return;
         }
         if (!sysDataset.id) {
@@ -1492,13 +1541,27 @@
                 msg = '❌ **ChromaDB 未安装**\n\n请在服务器上执行：\n```\npip install chromadb\n```\n然后刷新页面。';
                 break;
             case 'VDB_NOT_INIT':
-                msg = '❌ **向量数据库未初始化**\n\n请点击上方状态栏中的「一键初始化」按钮，将细胞数据写入 ChromaDB。';
-                break;
+                msg = '❌ **向量数据库未初始化**\n\n需要先将当前数据集写入 ChromaDB，完成后即可使用自然语言查询。';
+                appendInitAction(appendMessage('assistant', msg, true));
+                return;
             default:
                 msg = `❌ **请求失败**\n\n${err.message || '未知错误'}\n\n请检查后端日志或稍后重试。`;
                 break;
         }
         appendMessage('assistant', msg, true);
+    }
+
+    function appendInitAction(row) {
+        const bubble = row?.querySelector('.msg-bubble');
+        if (!bubble) return;
+        const actions = document.createElement('div');
+        actions.className = 'msg-action-row';
+        actions.innerHTML = `
+            <button type="button" class="inline-action-button" onclick="initVectorDB()">
+                <i class="fa-solid fa-database"></i> 立即初始化向量数据库
+            </button>
+        `;
+        bubble.appendChild(actions);
     }
 
     // ===================================================================

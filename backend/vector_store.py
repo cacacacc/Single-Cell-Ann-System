@@ -413,6 +413,38 @@ class CellVectorStore:
             )
         return results
 
+    def get_by_cell_ids(self, cell_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch stored ChromaDB records by cell ID.
+
+        This is used to enrich deterministic metadata query results with fields
+        that only exist in the vector store, such as ``top_genes`` and
+        ``document``.
+        """
+        ids = [str(cell_id) for cell_id in cell_ids if str(cell_id).strip()]
+        if not ids or self.count() == 0:
+            return {}
+
+        raw = self._collection.get(
+            ids=ids,
+            include=["metadatas", "documents"],
+        )
+        found_ids = raw.get("ids", [])
+        metadatas = raw.get("metadatas", [])
+        documents = raw.get("documents", [])
+
+        records: Dict[str, Dict[str, Any]] = {}
+        for chroma_id, meta, doc in zip(found_ids, metadatas, documents):
+            meta = meta or {}
+            records[str(chroma_id)] = {
+                "cell_id": chroma_id,
+                "cell_index": meta.get("cell_index", -1),
+                "cell_type": meta.get("cell_type", "unknown"),
+                "top_genes": meta.get("top_genes", ""),
+                "document": doc,
+                "metadata": meta,
+            }
+        return records
+
     def query_by_keywords(
         self,
         keywords: List[str],

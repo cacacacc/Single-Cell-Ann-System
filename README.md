@@ -99,14 +99,19 @@ http://127.0.0.1:5000
 
 - 自然语言问答：输入生物学问题，系统自动检索相似细胞并结合 LLM 生成专业回答
 - 基于 ChromaDB 的向量数据库：将细胞 PCA 向量、元数据和高表达基因写入持久化向量库
-- 多种检索策略：细胞向量检索、Embedding API 文本检索、关键词匹配检索
+- 自然语言细胞查询：支持“查询 cell_type 为 Hepatocyte 的前 10 个细胞”“找 ALB 高表达的前 20 个细胞”等问题，自动解析为元数据过滤、基因关键词或相似细胞查询
+- 高表达基因索引：初始化向量库时从 `.h5ad` 原始表达矩阵 `X` 分块读取真实表达值，写入每个细胞的 `top_genes`，优先使用 `var/feature_name`、`gene_symbol` 等基因符号列
+- 多种检索策略：细胞向量检索、Embedding API 文本检索、元数据过滤、关键词匹配检索
 - SSE 流式回答：大模型回答逐字实时推送，前端实现打字机效果
+- 查询过程可视化：AI 聊天页面展示“解析意图 → 执行查询 → 整理来源 → 生成回答”的进度，并在回答下方展示真实检索来源
 - 多轮对话：支持会话上下文，每轮自动注入检索到的细胞数据作为上下文
 - 对话历史持久化：支持 SQLite 持久化存储 + 内存缓存双存储
 - 会话管理：支持会话列表、查看、重命名、删除
 - LLM 角色预设：生信分析专家、严谨数据统计员、通俗科普助手
 - RAG 溯源：展示检索到的相似细胞及其高表达基因，便于验证回答依据
 - 支持智谱 GLM 和 OpenAI 兼容接口（DeepSeek、阿里通义等）
+
+> 旧版本已经初始化过的 ChromaDB Collection 可能没有 `top_genes` 字段。若 AI 提示“高表达基因数据暂无”，请在 AI 细胞助手页面点击“重建基因索引”，或调用 `POST /api/vectordb/init` 并设置 `force=true`、`top_genes=20` 重新写入向量库。
 
 ### 6. Web API 服务
 
@@ -154,6 +159,7 @@ http://127.0.0.1:5000
 │   ├── data_reader.py              # 数据读取（DataLoader）与多数据集管理（DatasetManager）
 │   ├── ann_indexer.py              # ANN 索引构建与检索（FAISS/HNSWLIB/NumPy）
 │   ├── vector_store.py             # ChromaDB 向量数据库封装
+│   ├── natural_language_query.py   # 自然语言细胞查询解析与执行
 │   ├── llm_client.py               # 大模型 API 客户端（智谱 GLM / OpenAI 兼容）
 │   ├── rag_engine.py               # RAG 检索增强生成引擎
 │   ├── prompt_builder.py           # Prompt 工程与角色预设
