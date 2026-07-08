@@ -1802,8 +1802,8 @@
         html = html.replace(/<\/blockquote>\n<blockquote>/g, '<br>');
 
         // Tables: | col1 | col2 | → simple table
-        html = html.replace(/^\|(.+)\|$/gm, (line) => {
-            const cells = line.split('|').filter(c => c.trim() !== '');
+        html = html.replace(/^\s*\|(.+)\|\s*$/gm, (line) => {
+            const cells = line.trim().split('|').filter(c => c.trim() !== '');
             const isSep = cells.every(c => /^[-: ]+$/.test(c.trim()));
             if (isSep) return '\x00TBSEP\x00';  // separator row marker
             const td = cells.map(c => `<td>${c.trim()}</td>`).join('');
