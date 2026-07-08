@@ -58,6 +58,11 @@ class FlaskAppTests(unittest.TestCase):
         self.original_index_dir = app_module.INDEX_DIR
         self.original_default_data_path = app_module.DEFAULT_DATA_PATH
         self.original_user_db_path = app_module.USER_DB_PATH
+        self.original_engine_runtime_config = {
+            "index_config": dict(app_module._ENGINE_RUNTIME_CONFIG["index_config"]),
+            "omp_num_threads": app_module._ENGINE_RUNTIME_CONFIG["omp_num_threads"],
+            "use_gpu": app_module._ENGINE_RUNTIME_CONFIG["use_gpu"],
+        }
 
         app_module.DATA_DIR = self.data_dir
         app_module.INDEX_DIR = self.index_dir
@@ -68,6 +73,14 @@ class FlaskAppTests(unittest.TestCase):
         app_module._BENCHMARK_INDEX_CACHE.clear()
         app_module._USER_STORE = None
         app_module._USER_STORE_PATH = None
+        app_module._ENGINE_RUNTIME_CONFIG.clear()
+        app_module._ENGINE_RUNTIME_CONFIG.update(
+            {
+                "index_config": app_module.IndexConfig(backend="auto", index_type="flat", metric="l2").to_dict(),
+                "omp_num_threads": 1,
+                "use_gpu": False,
+            }
+        )
 
         self.app = app_module.create_app()
         self.app.config.update(TESTING=True)
@@ -83,6 +96,8 @@ class FlaskAppTests(unittest.TestCase):
         app_module._BENCHMARK_INDEX_CACHE.clear()
         app_module._USER_STORE = None
         app_module._USER_STORE_PATH = None
+        app_module._ENGINE_RUNTIME_CONFIG.clear()
+        app_module._ENGINE_RUNTIME_CONFIG.update(self.original_engine_runtime_config)
         self.tmpdir.cleanup()
 
     def login_admin(self) -> dict:
@@ -285,6 +300,43 @@ class FlaskAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("cell_index or cell_id is required", response.get_json()["error"])
+
+    def test_admin_can_update_engine_config_defaults(self) -> None:
+        self.login_admin()
+
+        update_response = self.client.patch(
+            "/api/engine/config",
+            json={
+                "index_backend": "numpy",
+                "index_type": "brute",
+                "index_metric": "cosine",
+                "omp_num_threads": 2,
+                "use_gpu": False,
+            },
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        update_payload = update_response.get_json()
+        self.assertEqual(update_payload["status"], "updated")
+        self.assertEqual(update_payload["index_backend"], "numpy")
+        self.assertEqual(update_payload["index_type"], "brute")
+        self.assertEqual(update_payload["index_metric"], "cosine")
+        self.assertEqual(update_payload["omp_num_threads"], 2)
+
+        search_response = self.client.post(
+            "/api/search",
+            json={
+                "dataset_id": "tiny",
+                "cell_id": "cell-0",
+                "k": 2,
+            },
+        )
+
+        self.assertEqual(search_response.status_code, 200)
+        search_payload = search_response.get_json()
+        self.assertEqual(search_payload["index_backend"], "numpy")
+        self.assertEqual(search_payload["index_type"], "brute")
+        self.assertEqual(search_payload["index_metric"], "cosine")
 
     def test_search_filters_results_by_metadata_field(self) -> None:
         self.login_admin()

@@ -116,7 +116,7 @@
 
     <!-- ================= 居中模态弹窗：全局 ANN 引擎设置 ================= -->
     <div class="modal fade" id="engineSettingsModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content" style="background-color: #141A30; color: white; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 15px 35px rgba(0,0,0,0.5);">
                 <div class="modal-header border-bottom border-secondary">
                     <h5 class="modal-title fw-bold"><i class="fa-solid fa-server me-2" style="color: #4A90E2;"></i>ANN 检索引擎高级配置</h5>
@@ -124,41 +124,62 @@
                 </div>
                 <div class="modal-body p-4">
                     
-                    <!-- 设置项 1：硬件加速 -->
-                    <div class="d-flex justify-content-between align-items-center mb-4">
+                    <div id="engineConfigStatus" class="alert py-2 px-3 mb-3" style="display:none; border:1px solid rgba(255,255,255,0.12); background:rgba(74,144,226,0.12); color:#dbeafe;"></div>
+
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold" for="engineBackendSelect">索引后端</label>
+                            <select id="engineBackendSelect" class="form-select" style="background-color: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.14); color: white;">
+                                <option value="auto">auto 自动选择</option>
+                                <option value="faiss">FAISS</option>
+                                <option value="hnswlib">HNSWLib</option>
+                                <option value="numpy">NumPy brute</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold" for="engineTypeSelect">索引类型</label>
+                            <select id="engineTypeSelect" class="form-select" style="background-color: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.14); color: white;">
+                                <option value="flat">flat 精确</option>
+                                <option value="brute">brute 暴力检索</option>
+                                <option value="hnsw">hnsw 图索引</option>
+                                <option value="ivf_flat">ivf_flat 倒排索引</option>
+                                <option value="pq">pq 压缩索引</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold" for="engineMetricSelect">默认距离度量</label>
+                            <select id="engineMetricSelect" class="form-select" style="background-color: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.14); color: white;">
+                                <option value="l2">L2 欧氏距离</option>
+                                <option value="ip">内积 Inner Product</option>
+                                <option value="cosine">余弦相似度</option>
+                                <option value="correlation">相关系数距离</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center mb-4 p-3 rounded" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
                         <div>
-                            <div class="fw-bold mb-1">启用 GPU 硬件加速 (CUDA)</div>
-                            <small style="color: #8A96A8;">大幅提升高维张量点积计算速度，需 NVIDIA 显卡支持。</small>
+                            <div class="fw-bold mb-1">请求 GPU 硬件加速 (CUDA)</div>
+                            <small id="engineGpuHint" style="color: #8A96A8;">后端会检测 FAISS GPU 能力；不可用时自动保持 CPU 检索。</small>
                         </div>
                         <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" role="switch" checked style="width: 40px; height: 20px; cursor: pointer; border-color: #4A90E2;">
+                            <input id="engineGpuToggle" class="form-check-input" type="checkbox" role="switch" style="width: 42px; height: 22px; cursor: pointer; border-color: #4A90E2;">
                         </div>
                     </div>
 
-                    <!-- 设置项 2：距离度量标准 -->
-                    <div class="mb-4">
-                        <div class="fw-bold mb-2">默认距离度量算法 (Distance Metric)</div>
-                        <select class="form-select" style="background-color: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white;">
-                            <option value="L2">L2 欧氏距离 (Euclidean Distance)</option>
-                            <option value="IP" selected>内积 / 余弦相似度 (Inner Product / Cosine)</option>
-                            <option value="L1">L1 曼哈顿距离 (Manhattan Distance)</option>
-                        </select>
-                    </div>
-
-                    <!-- 设置项 3：最大并发线程数 -->
                     <div class="mb-3">
                         <div class="d-flex justify-content-between mb-2">
-                            <span class="fw-bold">引擎最大并发线程池 (OMP_NUM_THREADS)</span>
-                            <span class="badge bg-secondary" id="thread-val">16 Threads</span>
+                            <span class="fw-bold">引擎最大并发线程数 (OMP_NUM_THREADS)</span>
+                            <span class="badge bg-secondary" id="engineThreadVal">16 Threads</span>
                         </div>
-                        <input type="range" class="form-range" min="1" max="32" step="1" value="16" oninput="document.getElementById('thread-val').innerText = this.value + ' Threads'">
-                        <small style="color: #8A96A8;">调整 FAISS 底层检索时调用的物理核心数。</small>
+                        <input id="engineThreadSlider" type="range" class="form-range" min="1" max="64" step="1" value="16">
+                        <small id="engineCapabilityText" style="color: #8A96A8;">用于 FAISS/OpenMP/BLAS 底层并行计算。</small>
                     </div>
 
                 </div>
                 <div class="modal-footer border-top border-secondary">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" style="background-color: transparent; border: none;">取消</button>
-                    <button type="button" class="btn" data-bs-dismiss="modal" style="background-color: var(--nankai-purple); color: white;" onclick="alert('系统提示：引擎底层参数已热更新生效！')">应用并重启引擎</button>
+                    <button id="engineConfigApplyBtn" type="button" class="btn" style="background-color: var(--nankai-purple); color: white;">应用配置</button>
                 </div>
             </div>
         </div>
@@ -202,6 +223,108 @@
             event.preventDefault();
             await fetch('/api/auth/logout', { method: 'POST' });
             window.location.href = '/login';
+        });
+    </script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const modal = document.getElementById('engineSettingsModal');
+            if (!modal) return;
+
+            const controls = {
+                backend: document.getElementById('engineBackendSelect'),
+                type: document.getElementById('engineTypeSelect'),
+                metric: document.getElementById('engineMetricSelect'),
+                gpu: document.getElementById('engineGpuToggle'),
+                gpuHint: document.getElementById('engineGpuHint'),
+                threads: document.getElementById('engineThreadSlider'),
+                threadVal: document.getElementById('engineThreadVal'),
+                capability: document.getElementById('engineCapabilityText'),
+                status: document.getElementById('engineConfigStatus'),
+                apply: document.getElementById('engineConfigApplyBtn'),
+            };
+
+            function setEngineStatus(message, isError = false) {
+                if (!controls.status) return;
+                controls.status.textContent = message;
+                controls.status.style.display = message ? '' : 'none';
+                controls.status.style.background = isError ? 'rgba(232,62,140,0.14)' : 'rgba(74,144,226,0.12)';
+                controls.status.style.color = isError ? '#fecdd3' : '#dbeafe';
+            }
+
+            function updateThreadLabel() {
+                if (controls.threadVal && controls.threads) {
+                    controls.threadVal.textContent = `${controls.threads.value} Threads`;
+                }
+            }
+
+            function applyEngineConfigToForm(data) {
+                const cfg = data.index_config || {};
+                if (controls.backend) controls.backend.value = data.index_backend || cfg.backend || 'auto';
+                if (controls.type) controls.type.value = data.index_type || cfg.index_type || 'flat';
+                if (controls.metric) controls.metric.value = data.index_metric || cfg.metric || 'l2';
+                if (controls.gpu) controls.gpu.checked = Boolean(data.use_gpu);
+                if (controls.threads) {
+                    controls.threads.max = String(data.capabilities?.max_threads || 64);
+                    controls.threads.value = String(data.omp_num_threads || 1);
+                }
+                updateThreadLabel();
+
+                const caps = data.capabilities || {};
+                if (controls.gpuHint) {
+                    controls.gpuHint.textContent = caps.faiss_gpu_available
+                        ? `FAISS GPU 可用：${caps.faiss_gpu_count || 1} 个设备。`
+                        : '当前后端未检测到 FAISS GPU，保存后仍会使用 CPU 检索。';
+                }
+                if (controls.capability) {
+                    controls.capability.textContent = `CPU ${caps.cpu_count || '-'} 核；FAISS ${caps.faiss_available ? '可用' : '不可用'}；HNSWLib ${caps.hnswlib_available ? '可用' : '不可用'}。`;
+                }
+            }
+
+            async function loadEngineConfig() {
+                try {
+                    setEngineStatus('正在读取后端引擎配置...');
+                    const res = await fetch('/api/engine/config');
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || '读取配置失败');
+                    applyEngineConfigToForm(data);
+                    setEngineStatus('');
+                } catch (err) {
+                    setEngineStatus(err.message || '读取配置失败', true);
+                }
+            }
+
+            async function saveEngineConfig() {
+                const payload = {
+                    index_backend: controls.backend?.value,
+                    index_type: controls.type?.value,
+                    index_metric: controls.metric?.value,
+                    use_gpu: Boolean(controls.gpu?.checked),
+                    omp_num_threads: Number(controls.threads?.value || 1),
+                };
+
+                try {
+                    controls.apply.disabled = true;
+                    setEngineStatus('正在应用配置并刷新内存索引缓存...');
+                    const res = await fetch('/api/engine/config', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || '应用配置失败');
+                    applyEngineConfigToForm(data);
+                    setEngineStatus('配置已应用，后续检索将使用新的默认参数。');
+                } catch (err) {
+                    setEngineStatus(err.message || '应用配置失败', true);
+                } finally {
+                    controls.apply.disabled = false;
+                }
+            }
+
+            controls.threads?.addEventListener('input', updateThreadLabel);
+            controls.apply?.addEventListener('click', saveEngineConfig);
+            modal.addEventListener('shown.bs.modal', loadEngineConfig);
         });
     </script>
 

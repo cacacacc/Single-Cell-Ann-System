@@ -20,6 +20,7 @@ if _sys.platform == "darwin":
 import json
 import logging
 import math
+import threading
 import time
 from datetime import timedelta
 from functools import wraps
@@ -42,6 +43,7 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
+from backend import ann_indexer as ann_indexer_module
 from backend.ann_indexer import ANNIndexer, IndexConfig, PCAReducer
 from backend.data_reader import DataLoader
 from backend.vector_store import (
@@ -79,6 +81,7 @@ ALLOWED_EXTENSIONS = {".h5ad"}
 _DATASET_CACHE: Dict[str, DataLoader] = {}
 _INDEX_CACHE: Dict[Tuple[str, str], Tuple[ANNIndexer, Tuple[Any, ...]]] = {}
 _BENCHMARK_INDEX_CACHE: Dict[Tuple[str, str, Tuple[Any, ...]], ANNIndexer] = {}
+_ENGINE_CONFIG_LOCK = threading.Lock()
 _BENCHMARK_HISTORY_PATH = DATA_DIR / "benchmark_history.json"
 USER_DB_PATH: Optional[Path] = None
 DEFAULT_ADMIN_USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")
@@ -127,8 +130,165 @@ def _backup_index_path(index_path: Path) -> Path:
     return Path(f"{index_path}.npz")
 
 
+def _default_engine_threads() -> int:
+    raw = os.getenv("CELL_INDEX_OMP_NUM_THREADS") or os.getenv("OMP_NUM_THREADS")
+    if raw not in (None, ""):
+        try:
+            return max(1, min(int(raw), 64))
+        except (TypeError, ValueError):
+            logger.warning("Invalid CELL_INDEX_OMP_NUM_THREADS/OMP_NUM_THREADS value: %r", raw)
+    return max(1, min(os.cpu_count() or 1, 32))
+
+
+def _engine_bool(value: Any, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    raise ValueError("use_gpu must be a boolean")
+
+
+def _initial_engine_runtime_config() -> Dict[str, Any]:
+    return {
+        "index_config": IndexConfig.from_env().to_dict(),
+        "omp_num_threads": _default_engine_threads(),
+        "use_gpu": _engine_bool(os.getenv("CELL_INDEX_USE_GPU"), default=False),
+    }
+
+
+_ENGINE_RUNTIME_CONFIG: Dict[str, Any] = _initial_engine_runtime_config()
+
+
 def _index_config_from_env() -> IndexConfig:
-    return IndexConfig.from_env()
+    with _ENGINE_CONFIG_LOCK:
+        return IndexConfig.from_dict(dict(_ENGINE_RUNTIME_CONFIG["index_config"]))
+
+
+def _apply_engine_thread_count(thread_count: int) -> None:
+    value = str(thread_count)
+    for env_name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[env_name] = value
+    faiss = ann_indexer_module.faiss
+    if faiss is not None and hasattr(faiss, "omp_set_num_threads"):
+        try:
+            faiss.omp_set_num_threads(thread_count)
+        except Exception:
+            logger.exception("Failed to apply FAISS OMP thread count")
+
+
+def _faiss_gpu_count() -> int:
+    faiss = ann_indexer_module.faiss
+    if faiss is None or not hasattr(faiss, "get_num_gpus"):
+        return 0
+    try:
+        return int(faiss.get_num_gpus())
+    except Exception:
+        logger.exception("Failed to query FAISS GPU count")
+        return 0
+
+
+def _engine_capabilities() -> Dict[str, Any]:
+    return {
+        "faiss_available": ann_indexer_module.faiss is not None,
+        "hnswlib_available": ann_indexer_module.hnswlib is not None,
+        "numpy_available": True,
+        "faiss_gpu_available": _faiss_gpu_count() > 0,
+        "faiss_gpu_count": _faiss_gpu_count(),
+        "cpu_count": os.cpu_count() or 1,
+        "max_threads": 64,
+    }
+
+
+def _engine_config_payload() -> Dict[str, Any]:
+    with _ENGINE_CONFIG_LOCK:
+        index_config = dict(_ENGINE_RUNTIME_CONFIG["index_config"])
+        omp_num_threads = int(_ENGINE_RUNTIME_CONFIG["omp_num_threads"])
+        use_gpu = bool(_ENGINE_RUNTIME_CONFIG["use_gpu"])
+    capabilities = _engine_capabilities()
+    return {
+        "index_config": index_config,
+        "index_backend": index_config["backend"],
+        "index_type": index_config["index_type"],
+        "index_metric": index_config["metric"],
+        "omp_num_threads": omp_num_threads,
+        "use_gpu": use_gpu,
+        "gpu_available": capabilities["faiss_gpu_available"],
+        "gpu_active": use_gpu and capabilities["faiss_gpu_available"],
+        "capabilities": capabilities,
+        "cache": {
+            "named_index_count": len(_INDEX_CACHE),
+            "transient_index_count": len(_BENCHMARK_INDEX_CACHE),
+        },
+    }
+
+
+def _engine_index_overrides_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    source: Dict[str, Any] = {}
+    nested = payload.get("index_config")
+    if isinstance(nested, dict):
+        source.update(nested)
+    source.update(payload)
+
+    mapping = {
+        "index_backend": "backend",
+        "backend": "backend",
+        "index_type": "index_type",
+        "type": "index_type",
+        "index_metric": "metric",
+        "metric": "metric",
+        "nlist": "nlist",
+        "nprobe": "nprobe",
+        "m": "m",
+        "ef_construction": "ef_construction",
+        "ef_search": "ef_search",
+        "pq_m": "pq_m",
+        "pq_nbits": "pq_nbits",
+    }
+    overrides: Dict[str, Any] = {}
+    for payload_key, config_key in mapping.items():
+        value = source.get(payload_key)
+        if value not in (None, ""):
+            overrides[config_key] = value
+    return overrides
+
+
+def _update_engine_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+    index_overrides = _engine_index_overrides_from_payload(payload)
+    thread_count = _parse_optional_int(payload, "omp_num_threads")
+    if thread_count is None:
+        thread_count = _parse_optional_int(payload, "threads")
+    if thread_count is not None and not 1 <= thread_count <= 64:
+        raise ValueError("omp_num_threads must be between 1 and 64")
+
+    use_gpu = None
+    if "use_gpu" in payload:
+        use_gpu = _engine_bool(payload.get("use_gpu"))
+
+    with _ENGINE_CONFIG_LOCK:
+        current_index_config = IndexConfig.from_dict(dict(_ENGINE_RUNTIME_CONFIG["index_config"]))
+        next_index_config = current_index_config.update(**index_overrides) if index_overrides else current_index_config
+        next_threads = int(thread_count if thread_count is not None else _ENGINE_RUNTIME_CONFIG["omp_num_threads"])
+        next_use_gpu = bool(use_gpu if use_gpu is not None else _ENGINE_RUNTIME_CONFIG["use_gpu"])
+
+        index_changed = next_index_config.to_dict() != _ENGINE_RUNTIME_CONFIG["index_config"]
+        gpu_changed = next_use_gpu != bool(_ENGINE_RUNTIME_CONFIG["use_gpu"])
+
+        _ENGINE_RUNTIME_CONFIG["index_config"] = next_index_config.to_dict()
+        _ENGINE_RUNTIME_CONFIG["omp_num_threads"] = next_threads
+        _ENGINE_RUNTIME_CONFIG["use_gpu"] = next_use_gpu
+
+    _apply_engine_thread_count(next_threads)
+    if index_changed or gpu_changed:
+        _INDEX_CACHE.clear()
+        _BENCHMARK_INDEX_CACHE.clear()
+
+    return _engine_config_payload()
 
 
 def _config_cache_key(config: IndexConfig) -> Tuple[Any, ...]:
@@ -960,6 +1120,7 @@ def api_root():
             "message": "Single-Cell ANN API",
             "endpoints": [
                 "/api/health",
+                "/api/engine/config",
                 "/api/metadata",
                 "/api/search",
                 "/api/auth/login",
@@ -976,6 +1137,22 @@ def api_root():
             },
         }
     )
+
+
+@app.get("/api/engine/config")
+@login_required
+def get_engine_config():
+    return _json_response(_engine_config_payload())
+
+
+@app.patch("/api/engine/config")
+@admin_required
+def update_engine_config():
+    try:
+        payload = _request_payload()
+        return _json_response({"status": "updated", **_update_engine_runtime_config(payload)})
+    except (TypeError, ValueError) as exc:
+        return _json_response({"error": str(exc)}, 400)
 
 
 @app.get("/api/health")
