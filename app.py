@@ -60,6 +60,7 @@ from backend.rag_engine import (
 )
 from backend.natural_language_query import (
     DEFAULT_LIMIT as NLQ_DEFAULT_LIMIT,
+    NaturalQueryPlan,
     execute_natural_cell_query,
     parse_natural_cell_query,
 )
@@ -2559,6 +2560,23 @@ def _execute_natural_language_cell_query(
     )
 
 
+def _looks_like_cell_query(question: str, plan: NaturalQueryPlan) -> bool:
+    """Return True only for questions that should execute structured cell lookup."""
+    text = str(question or "").casefold()
+    if plan.conditions or plan.gene_keywords or plan.seed_cell_id:
+        return True
+    explicit_markers = [
+        "查询", "查找", "检索", "筛选", "过滤", "搜索", "找出", "返回", "显示",
+        "高表达", "低表达", "表达", "相似细胞", "类似细胞", "前",
+        "query", "search", "find", "filter", "show", "return",
+        "express", "expression", "highly expressed", "similar cell", "top",
+    ]
+    cell_markers = ["细胞", "cell", "cell_type", "cell type", "tissue", "organ", "gene", "基因"]
+    has_explicit_intent = any(marker in text for marker in explicit_markers)
+    has_cell_scope = any(marker in text for marker in cell_markers)
+    return has_explicit_intent and has_cell_scope
+
+
 @app.post("/api/cells/query")
 @login_required
 def natural_cells_query():
@@ -2803,14 +2821,15 @@ def chat_api():
         if query_vector is None:
             keywords = _extract_question_keywords(question)
             logger.info("/api/chat 关键词: question='%s' → %s", question[:80], keywords)
-            natural_query_result = _execute_natural_language_cell_query(
-                question,
-                loader,
-                resolved_id,
-                limit=n_results,
-                use_rep=use_rep,
-            )
-            retrieved_cells = natural_query_result.get("results") or []
+            natural_query_plan = parse_natural_cell_query(question, loader, limit=n_results)
+            if _looks_like_cell_query(question, natural_query_plan):
+                natural_query_result = execute_natural_cell_query(
+                    natural_query_plan,
+                    loader,
+                    store=store,
+                    use_rep=use_rep,
+                )
+                retrieved_cells = natural_query_result.get("results") or []
 
         # ── LLM Controls ──
         temperature = payload.get("temperature")
@@ -2945,9 +2964,7 @@ def chat_stream_api():
             retrieved: List[Dict[str, Any]] = []
             natural_query_plan: Optional[Dict[str, Any]] = None
             try:
-                yield "data: [PROGRESS] parse\n\n"
                 if query_vector is not None:
-                    yield "data: [PROGRESS] query\n\n"
                     retrieved = store.query_similar(
                         query_vector=query_vector,
                         n_results=n_results,
@@ -2956,24 +2973,27 @@ def chat_stream_api():
                 else:
                     keywords = _extract_question_keywords(question)
                     logger.info("RAG 关键词提取: question='%s' → keywords=%s", question[:80], keywords)
-                    yield "data: [PROGRESS] query\n\n"
-                    natural_query_result = _execute_natural_language_cell_query(
-                        question,
-                        loader,
-                        resolved_id,
-                        limit=n_results,
-                        use_rep=use_rep,
-                    )
-                    natural_query_plan = natural_query_result.get("plan")
-                    yield f"data: [NL_QUERY] {json.dumps(natural_query_plan, ensure_ascii=False)}\n\n"
-                    retrieved = natural_query_result.get("results") or []
+                    parsed_plan = parse_natural_cell_query(question, loader, limit=n_results)
+                    if _looks_like_cell_query(question, parsed_plan):
+                        yield "data: [PROGRESS] parse\n\n"
+                        yield "data: [PROGRESS] query\n\n"
+                        natural_query_result = execute_natural_cell_query(
+                            parsed_plan,
+                            loader,
+                            store=store,
+                            use_rep=use_rep,
+                        )
+                        natural_query_plan = natural_query_result.get("plan")
+                        yield f"data: [NL_QUERY] {json.dumps(natural_query_plan, ensure_ascii=False)}\n\n"
+                        retrieved = natural_query_result.get("results") or []
+                    else:
+                        retrieved = store.query_by_keywords(keywords=keywords, n_results=n_results)
                     if not retrieved:
                         logger.warning("关键词无匹配，回退到全库采样 %d 条细胞", n_results)
-                        retrieved = store.query_by_keywords(keywords=keywords, n_results=n_results)
-                        if not retrieved:
-                            retrieved = store.query_by_metadata(where={}, limit=n_results)
+                        retrieved = store.query_by_metadata(where={}, limit=n_results)
 
-                yield "data: [PROGRESS] sources\n\n"
+                if natural_query_plan is not None:
+                    yield "data: [PROGRESS] sources\n\n"
                 yield f"data: [SOURCES] {json.dumps(retrieved, ensure_ascii=False)}\n\n"
 
                 history = _CHAT_HISTORY.get(session_id) if session_id else None
@@ -2994,7 +3014,8 @@ def chat_stream_api():
                         system_prompt=system_prompt_override,
                     )
 
-                yield "data: [PROGRESS] answer\n\n"
+                if natural_query_plan is not None:
+                    yield "data: [PROGRESS] answer\n\n"
                 for chunk in llm_client.stream_chat(
                     messages=messages,
                     temperature=temperature,

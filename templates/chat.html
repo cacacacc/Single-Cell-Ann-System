@@ -1351,7 +1351,6 @@
     // ===================================================================
     async function streamChat(question, typingMsg) {
         const controls = getLLMControls();
-        updateQueryProgress(typingMsg, 'request_sent');
         const res = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1431,10 +1430,12 @@
                     try {
                         currentSources = JSON.parse(data.slice(10));
                     } catch (e) { /* ignore parse errors */ }
-                    updateQueryProgress(typingMsg, 'sources', {
-                        plan: currentNaturalQuery,
-                        sourceCount: currentSources.length,
-                    });
+                    if (currentNaturalQuery) {
+                        updateQueryProgress(typingMsg, 'sources', {
+                            plan: currentNaturalQuery,
+                            sourceCount: currentSources.length,
+                        });
+                    }
                     continue;
                 }
 
@@ -1475,7 +1476,6 @@
     // ===================================================================
     async function fallbackNonStream(question, typingMsg) {
         const controls = getLLMControls();
-        updateQueryProgress(typingMsg, 'request_sent');
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1520,11 +1520,11 @@
         }
         if (data.natural_query) {
             currentNaturalQuery = data.natural_query;
+            updateQueryProgress(typingMsg, 'sources', {
+                plan: currentNaturalQuery,
+                sourceCount: currentSources.length,
+            });
         }
-        updateQueryProgress(typingMsg, 'sources', {
-            plan: currentNaturalQuery,
-            sourceCount: currentSources.length,
-        });
         removeTypingIndicator(typingMsg);
         if (data.answer) {
             appendMessage('assistant', data.answer);
@@ -1620,7 +1620,6 @@
         `;
         chatMessages.appendChild(row);
         scrollToBottom();
-        updateQueryProgress(row, 'start');
         return row;
     }
 
@@ -1630,6 +1629,9 @@
 
     function updateQueryProgress(row, stage, payload) {
         if (!row || !row.parentNode) return;
+        const queryStages = new Set(['parse', 'query', 'nl_query', 'sources', 'answer', 'done']);
+        if (!queryStages.has(stage) && !payload?.plan) return;
+        if ((stage === 'sources' || stage === 'answer' || stage === 'done') && !payload?.plan) return;
         const bubble = row.querySelector('.msg-bubble');
         if (!bubble) return;
         const state = buildQueryProgressState(stage, payload);
@@ -1805,6 +1807,9 @@
             // First row after sep becomes thead
             return `<table>${tableHtml}</table>`;
         });
+        // Remove any table separator markers that were not adjacent to the row
+        // group matched above, such as the standard header/separator/body layout.
+        html = html.replace(/\x00TBSEP\x00\n?/g, '');
 
         // Unordered lists
         html = html.replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
