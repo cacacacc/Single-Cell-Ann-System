@@ -1510,30 +1510,41 @@
     // === 框选模式切换按钮 ===
     let brushModeActive = false;
     const brushToggleBtn = document.getElementById('brushToggleBtn');
+    function setUmapZoomLocked(locked) {
+        myChart.setOption({
+            dataZoom: [
+                {
+                    type: 'inside',
+                    xAxisIndex: 0,
+                    disabled: locked,
+                    zoomOnMouseWheel: !locked,
+                    moveOnMouseMove: !locked,
+                    moveOnMouseWheel: !locked
+                },
+                {
+                    type: 'inside',
+                    yAxisIndex: 0,
+                    disabled: locked,
+                    zoomOnMouseWheel: !locked,
+                    moveOnMouseMove: !locked,
+                    moveOnMouseWheel: !locked
+                },
+                { type: 'slider', show: false }
+            ]
+        });
+    }
     brushToggleBtn.addEventListener('click', function () {
         brushModeActive = !brushModeActive;
         if (brushModeActive) {
             this.classList.add('brush-active');
             this.innerHTML = '<i class="fa-solid fa-check-square me-1"></i>框选中';
             // 框选模式下禁用 dataZoom，直接拖拽即可框选
-            myChart.setOption({
-                dataZoom: [
-                    { type: 'inside', xAxisIndex: 0, disabled: true },
-                    { type: 'inside', yAxisIndex: 0, disabled: true },
-                    { type: 'slider', show: false }
-                ]
-            });
+            setUmapZoomLocked(true);
         } else {
             this.classList.remove('brush-active');
             this.innerHTML = '<i class="fa-regular fa-square me-1"></i>框选';
             // 恢复 dataZoom
-            myChart.setOption({
-                dataZoom: [
-                    { type: 'inside', xAxisIndex: 0, disabled: false },
-                    { type: 'inside', yAxisIndex: 0, disabled: false },
-                    { type: 'slider', show: false }
-                ]
-            });
+            setUmapZoomLocked(false);
         }
     });
 
@@ -2337,13 +2348,7 @@
         if (event.key === 'Shift' && !shiftHeld) {
             shiftHeld = true;
             // 禁用 inside dataZoom，防止框选时图表跟随拖拽移动
-            myChart.setOption({
-                dataZoom: [
-                    { type: 'inside', xAxisIndex: 0, disabled: true },
-                    { type: 'inside', yAxisIndex: 0, disabled: true },
-                    { type: 'slider', show: false }
-                ]
-            });
+            setUmapZoomLocked(true);
         }
     });
     document.addEventListener('keyup', (event) => {
@@ -2351,13 +2356,7 @@
             shiftHeld = false;
             // 如果不是框选模式，恢复 dataZoom
             if (!brushModeActive) {
-                myChart.setOption({
-                    dataZoom: [
-                        { type: 'inside', xAxisIndex: 0, disabled: false },
-                        { type: 'inside', yAxisIndex: 0, disabled: false },
-                        { type: 'slider', show: false }
-                    ]
-                });
+                setUmapZoomLocked(false);
             }
         }
     });
@@ -2367,16 +2366,22 @@
         const shouldBrush = event.shiftKey || brushModeActive;
         if (!shouldBrush || event.button !== 0) return;
         event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        setUmapZoomLocked(true);
         brushStart = { x: event.clientX, y: event.clientY };
         umapBrushRect.style.left = `${event.clientX}px`;
         umapBrushRect.style.top = `${event.clientY}px`;
         umapBrushRect.style.width = '0px';
         umapBrushRect.style.height = '0px';
         umapBrushRect.style.display = 'block';
-    });
+    }, true);
 
     document.addEventListener('mousemove', (event) => {
         if (!brushStart) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
         const left = Math.min(brushStart.x, event.clientX);
         const top = Math.min(brushStart.y, event.clientY);
         const width = Math.abs(event.clientX - brushStart.x);
@@ -2385,26 +2390,23 @@
         umapBrushRect.style.top = `${top}px`;
         umapBrushRect.style.width = `${width}px`;
         umapBrushRect.style.height = `${height}px`;
-    });
+    }, true);
 
     document.addEventListener('mouseup', (event) => {
         if (!brushStart) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
         const rect = { startX: brushStart.x, startY: brushStart.y, endX: event.clientX, endY: event.clientY };
         brushStart = null;
         umapBrushRect.style.display = 'none';
         // 如果不是框选模式（即用 Shift 临时框选），恢复 dataZoom
         if (!brushModeActive) {
-            myChart.setOption({
-                dataZoom: [
-                    { type: 'inside', xAxisIndex: 0, disabled: false },
-                    { type: 'inside', yAxisIndex: 0, disabled: false },
-                    { type: 'slider', show: false }
-                ]
-            });
+            setUmapZoomLocked(false);
         }
         if (Math.abs(rect.endX - rect.startX) < 8 || Math.abs(rect.endY - rect.startY) < 8) return;
         updateSelectionSummary(cellsInsideBrushRect(rect));
-    });
+    }, true);
 
     selectionSeeds.addEventListener('click', (event) => {
         const pill = event.target.closest('[data-cell-id]');
