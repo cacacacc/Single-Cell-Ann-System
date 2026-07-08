@@ -362,6 +362,30 @@
         border-color: rgba(231,76,60,0.2);
         color: #E74C3C;
     }
+    .msg-action-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .inline-action-button {
+        border: 1px solid rgba(74,144,226,0.45);
+        background: rgba(74,144,226,0.14);
+        color: #BBD6FA;
+        border-radius: 8px;
+        padding: 7px 12px;
+        font-size: 0.82rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: background 0.2s, border-color 0.2s, color 0.2s;
+    }
+    .inline-action-button:hover {
+        background: rgba(74,144,226,0.24);
+        border-color: #4A90E2;
+        color: #fff;
+    }
 
     .msg-bubble p { margin: 0 0 8px 0; }
     .msg-bubble p:last-child { margin-bottom: 0; }
@@ -548,6 +572,20 @@
         text-align: center; font-size: 0.72rem; color: #5A6478;
         margin-top: 6px;
     }
+    .chat-input-hint .hint-action {
+        margin-left: 8px;
+        border: 1px solid rgba(74,144,226,0.35);
+        background: rgba(74,144,226,0.1);
+        color: #8DBAF2;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font-size: 0.72rem;
+        cursor: pointer;
+    }
+    .chat-input-hint .hint-action:hover {
+        color: #fff;
+        border-color: #4A90E2;
+    }
 
     /* ================= Typing Indicator ================= */
     .typing-indicator {
@@ -565,6 +603,82 @@
     @keyframes typingBounce {
         0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
         30% { transform: translateY(-8px); opacity: 1; }
+    }
+    .query-progress {
+        min-width: min(520px, 78vw);
+    }
+    .query-progress-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #ffffff;
+        font-weight: 700;
+        font-size: 0.92rem;
+        margin-bottom: 10px;
+    }
+    .query-progress-title i {
+        color: #4A90E2;
+    }
+    .query-progress-steps {
+        display: grid;
+        gap: 8px;
+    }
+    .query-progress-step {
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr);
+        gap: 8px;
+        align-items: start;
+        color: #8A96A8;
+        font-size: 0.82rem;
+        line-height: 1.4;
+    }
+    .query-progress-step .step-icon {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1px solid rgba(138,150,168,0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.62rem;
+        color: #8A96A8;
+        margin-top: 1px;
+    }
+    .query-progress-step.active {
+        color: #ffffff;
+    }
+    .query-progress-step.active .step-icon {
+        border-color: #4A90E2;
+        color: #4A90E2;
+        box-shadow: 0 0 10px rgba(74,144,226,0.25);
+    }
+    .query-progress-step.done {
+        color: #C8D2E6;
+    }
+    .query-progress-step.done .step-icon {
+        background: rgba(46,204,113,0.16);
+        border-color: rgba(46,204,113,0.55);
+        color: #2ecc71;
+    }
+    .query-progress-detail {
+        color: #6f7c92;
+        font-size: 0.76rem;
+        margin-top: 2px;
+        word-break: break-word;
+    }
+    .query-progress-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 4px;
+    }
+    .query-progress-tags span {
+        border: 1px solid rgba(74,144,226,0.28);
+        background: rgba(74,144,226,0.08);
+        color: #A9C8F5;
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 0.72rem;
     }
 
     /* ================= Status Banner ================= */
@@ -586,6 +700,10 @@
         background: rgba(245,166,35,0.08);
         border-color: rgba(245,166,35,0.2);
         color: #F5A623;
+    }
+    .chat-status-banner .inline-action-button {
+        margin-left: 10px;
+        padding: 5px 10px;
     }
 
     /* ================= LLM Settings Sidebar (right) ================= */
@@ -762,14 +880,14 @@
                 <div class="welcome-icon"><i class="fa-solid fa-robot"></i></div>
                 <h3>你好，我是 AI 细胞助手</h3>
                 <p style="max-width:480px;">
-                    我可以根据单细胞数据库中的细胞类型、高表达基因和元数据信息，
+                    我可以根据单细胞数据库中的细胞类型、组织来源和元数据信息，
                     回答关于细胞功能、分型和生物学意义的问题。
                 </p>
                 <div class="suggestions" id="welcomeSuggestions">
-                    <span class="suggestion-chip" onclick="askSuggestion(this)">帮我分析一下包含 ALB 基因的高表达细胞主要属于什么类型？</span>
-                    <span class="suggestion-chip" onclick="askSuggestion(this)">Hepatocyte 和 Kupffer cell 在基因表达上有什么主要差异？</span>
-                    <span class="suggestion-chip" onclick="askSuggestion(this)">这些相似细胞主要分布在哪些组织或器官中？</span>
-                    <span class="suggestion-chip" onclick="askSuggestion(this)">检索结果中最常见的细胞类型有什么生物学功能？</span>
+                    <span class="suggestion-chip" onclick="askSuggestion(this)">查询 cell_type 为 Hepatocyte 的前 10 个细胞，并概括它们的主要特征</span>
+                    <span class="suggestion-chip" onclick="askSuggestion(this)">找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型</span>
+                    <span class="suggestion-chip" onclick="askSuggestion(this)">查询 cell_type 为 Kupffer cell 且 AgeGroup 为 Adult 的前 10 个细胞，并解释其功能</span>
+                    <span class="suggestion-chip" onclick="askSuggestion(this)">查询 sex 为 female 的前 10 个细胞，按细胞类型总结分布</span>
                 </div>
             </div>
         </div>
@@ -879,10 +997,11 @@
     let sessionId = generateSessionId();
     let currentAbortController = null;
     let currentSources = [];
+    let currentNaturalQuery = null;
     let isStreaming = false;
 
     // System state (populated by init)
-    let sysVDB = { available: false, populated: false, count: 0, collection: '' };
+    let sysVDB = { available: false, populated: false, count: 0, collection: '', topGenesAvailable: false };
     let sysLLM = { configured: false, provider: '', model: '' };
     let sysDataset = { id: '', filename: '', nCells: 0 };
     let datasets = [];
@@ -993,9 +1112,11 @@
             sysVDB.populated = data.is_populated === true;
             sysVDB.count = data.count || 0;
             sysVDB.collection = data.collection_name || '';
+            sysVDB.topGenesAvailable = data.top_genes_available === true;
         } catch (err) {
             sysVDB.available = false;
             sysVDB.populated = false;
+            sysVDB.topGenesAvailable = false;
         }
     }
 
@@ -1005,6 +1126,8 @@
         btnSend.disabled = !canSend;
 
         const btnInitVDB = document.getElementById('btnInitVDB');
+        const initButtonHtml = '<button type="button" class="hint-action" onclick="initVectorDB()"><i class="fa-solid fa-database"></i> 立即初始化</button>';
+        const rebuildButtonHtml = '<button type="button" class="hint-action" onclick="initVectorDB()"><i class="fa-solid fa-rotate"></i> 重建基因索引</button>';
 
         if (!sysVDB.available && !sysVDB.populated) {
             // ChromaDB 未安装或无数据集
@@ -1013,11 +1136,19 @@
         } else if (!sysVDB.populated) {
             // 已安装但未初始化 — 显示一键初始化按钮
             btnInitVDB.style.display = 'flex';
-            chatInputHint.innerHTML = '⚠️ 向量数据库未初始化，点击右上角 <strong>初始化向量数据库</strong> 按钮即可完成（约需 1-2 分钟）。';
+            btnInitVDB.innerHTML = '<i class="fa-solid fa-database"></i> 初始化向量数据库';
+            btnInitVDB.title = '将数据集向量和高表达基因信息写入 ChromaDB，完成后即可使用 AI 问答';
+            chatInputHint.innerHTML = `⚠️ 向量数据库未初始化，初始化后才能使用 AI 查询。${initButtonHtml}`;
         } else {
-            btnInitVDB.style.display = 'none';
+            btnInitVDB.style.display = sysVDB.topGenesAvailable ? 'none' : 'flex';
+            if (!sysVDB.topGenesAvailable) {
+                btnInitVDB.innerHTML = '<i class="fa-solid fa-rotate"></i> 重建基因索引';
+                btnInitVDB.title = '当前向量数据库缺少高表达基因信息，点击重建后可支持基因高表达查询';
+            }
             if (!sysLLM.configured) {
                 chatInputHint.innerHTML = '💡 LLM 未配置，但您仍可提问 — 系统将回退到向量检索展示结果（不含 AI 生成回答）。';
+            } else if (!sysVDB.topGenesAvailable) {
+                chatInputHint.innerHTML = `⚠️ 当前向量数据库缺少高表达基因信息；元数据查询可用，基因高表达查询需要重建。${rebuildButtonHtml}`;
             } else {
                 chatInputHint.innerHTML = 'AI 细胞助手基于 RAG 技术检索单细胞数据库后生成回答，请核对关键信息。';
             }
@@ -1066,7 +1197,8 @@
                     dataset_id: dsId,
                     use_rep: 'X_pca',
                     distance_metric: 'cosine',
-                    force: false,
+                    force: sysVDB.populated && !sysVDB.topGenesAvailable,
+                    top_genes: 20,
                 }),
             });
             const data = await res.json();
@@ -1152,7 +1284,12 @@
 
         // Pre-flight checks
         if (!sysVDB.populated) {
-            showStatus('❌ 向量数据库未初始化，请先点击上方「一键初始化」按钮。', 'error');
+            showStatus(
+                '❌ 向量数据库未初始化，初始化后才能使用 AI 查询。'
+                + '<button type="button" class="inline-action-button" onclick="initVectorDB()">'
+                + '<i class="fa-solid fa-database"></i> 立即初始化向量数据库</button>',
+                'error'
+            );
             return;
         }
         if (!sysDataset.id) {
@@ -1175,6 +1312,7 @@
         btnStop.style.display = 'flex';
         currentAbortController = new AbortController();
         currentSources = [];
+        currentNaturalQuery = null;
 
         try {
             if (sysLLM.configured) {
@@ -1201,6 +1339,8 @@
         if (currentAbortController) {
             currentAbortController.abort();
         }
+        const typingMsg = document.getElementById('typingIndicator');
+        if (typingMsg) removeTypingIndicator(typingMsg);
         isStreaming = false;
         btnSend.disabled = false;
         btnStop.style.display = 'none';
@@ -1211,6 +1351,7 @@
     // ===================================================================
     async function streamChat(question, typingMsg) {
         const controls = getLLMControls();
+        updateQueryProgress(typingMsg, 'request_sent');
         const res = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1239,8 +1380,8 @@
             throw new Error(errData.error || `服务器错误 (HTTP ${res.status})`);
         }
 
-        removeTypingIndicator(typingMsg);
-        const { bubble, contentEl } = appendStreamingBubble();
+        let bubble = null;
+        let contentEl = null;
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -1260,13 +1401,28 @@
                 const data = line.slice(6).trim();
 
                 if (data === '[DONE]') {
-                    finalizeAssistantBubble(bubble, fullText);
+                    if (bubble) finalizeAssistantBubble(bubble, fullText);
                     return;
+                }
+
+                if (data.startsWith('[PROGRESS]')) {
+                    const stage = data.slice(10).trim();
+                    updateQueryProgress(typingMsg, stage, {
+                        plan: currentNaturalQuery,
+                        sourceCount: currentSources.length,
+                    });
+                    continue;
                 }
 
                 if (data.startsWith('[FORMATTED]')) {
                     // 后端对换行符做了转义（\n → \\n），这里还原
                     fullText = data.slice(12).replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
+                    if (!bubble) {
+                        removeTypingIndicator(typingMsg);
+                        const created = appendStreamingBubble();
+                        bubble = created.bubble;
+                        contentEl = created.contentEl;
+                    }
                     contentEl.innerHTML = renderMarkdown(fullText);
                     continue;
                 }
@@ -1275,6 +1431,21 @@
                     try {
                         currentSources = JSON.parse(data.slice(10));
                     } catch (e) { /* ignore parse errors */ }
+                    updateQueryProgress(typingMsg, 'sources', {
+                        plan: currentNaturalQuery,
+                        sourceCount: currentSources.length,
+                    });
+                    continue;
+                }
+
+                if (data.startsWith('[NL_QUERY]')) {
+                    try {
+                        currentNaturalQuery = JSON.parse(data.slice(10));
+                    } catch (e) { /* ignore parse errors */ }
+                    updateQueryProgress(typingMsg, 'nl_query', {
+                        plan: currentNaturalQuery,
+                        sourceCount: currentSources.length,
+                    });
                     continue;
                 }
 
@@ -1284,13 +1455,19 @@
 
                 // 后端对换行符做了转义（\n → \\n），这里还原后再拼接
                 const decodedChunk = data.replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
+                if (!bubble) {
+                    removeTypingIndicator(typingMsg);
+                    const created = appendStreamingBubble();
+                    bubble = created.bubble;
+                    contentEl = created.contentEl;
+                }
                 fullText += decodedChunk;
                 contentEl.innerHTML = renderMarkdown(fullText);
                 scrollToBottom();
             }
         }
 
-        finalizeAssistantBubble(bubble, fullText);
+        if (bubble) finalizeAssistantBubble(bubble, fullText);
     }
 
     // ===================================================================
@@ -1298,6 +1475,7 @@
     // ===================================================================
     async function fallbackNonStream(question, typingMsg) {
         const controls = getLLMControls();
+        updateQueryProgress(typingMsg, 'request_sent');
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1315,9 +1493,9 @@
         });
 
         const data = await res.json();
-        removeTypingIndicator(typingMsg);
 
         if (!res.ok) {
+            removeTypingIndicator(typingMsg);
             if (res.status === 501) throw new Error('CHROMADB_NOT_INSTALLED');
             if (data.action === 'init_vectordb') throw new Error('VDB_NOT_INIT');
 
@@ -1337,11 +1515,19 @@
             throw new Error(data.error || '请求失败');
         }
 
-        if (data.answer) {
-            appendMessage('assistant', data.answer);
-        }
         if (data.retrieved_cells && data.retrieved_cells.length > 0) {
             currentSources = data.retrieved_cells;
+        }
+        if (data.natural_query) {
+            currentNaturalQuery = data.natural_query;
+        }
+        updateQueryProgress(typingMsg, 'sources', {
+            plan: currentNaturalQuery,
+            sourceCount: currentSources.length,
+        });
+        removeTypingIndicator(typingMsg);
+        if (data.answer) {
+            appendMessage('assistant', data.answer);
         }
     }
 
@@ -1355,13 +1541,27 @@
                 msg = '❌ **ChromaDB 未安装**\n\n请在服务器上执行：\n```\npip install chromadb\n```\n然后刷新页面。';
                 break;
             case 'VDB_NOT_INIT':
-                msg = '❌ **向量数据库未初始化**\n\n请点击上方状态栏中的「一键初始化」按钮，将细胞数据写入 ChromaDB。';
-                break;
+                msg = '❌ **向量数据库未初始化**\n\n需要先将当前数据集写入 ChromaDB，完成后即可使用自然语言查询。';
+                appendInitAction(appendMessage('assistant', msg, true));
+                return;
             default:
                 msg = `❌ **请求失败**\n\n${err.message || '未知错误'}\n\n请检查后端日志或稍后重试。`;
                 break;
         }
         appendMessage('assistant', msg, true);
+    }
+
+    function appendInitAction(row) {
+        const bubble = row?.querySelector('.msg-bubble');
+        if (!bubble) return;
+        const actions = document.createElement('div');
+        actions.className = 'msg-action-row';
+        actions.innerHTML = `
+            <button type="button" class="inline-action-button" onclick="initVectorDB()">
+                <i class="fa-solid fa-database"></i> 立即初始化向量数据库
+            </button>
+        `;
+        bubble.appendChild(actions);
     }
 
     // ===================================================================
@@ -1420,11 +1620,81 @@
         `;
         chatMessages.appendChild(row);
         scrollToBottom();
+        updateQueryProgress(row, 'start');
         return row;
     }
 
     function removeTypingIndicator(row) {
         if (row && row.parentNode) row.remove();
+    }
+
+    function updateQueryProgress(row, stage, payload) {
+        if (!row || !row.parentNode) return;
+        const bubble = row.querySelector('.msg-bubble');
+        if (!bubble) return;
+        const state = buildQueryProgressState(stage, payload);
+        bubble.innerHTML = renderQueryProgress(state);
+        scrollToBottom();
+    }
+
+    function buildQueryProgressState(stage, payload) {
+        const steps = [
+            { key: 'parse', label: '解析自然语言查询意图', detail: '识别细胞类型、组织来源、基因关键词和数量限制' },
+            { key: 'query', label: '执行细胞查询', detail: '在单细胞数据库中匹配元数据、基因关键词或相似细胞' },
+            { key: 'sources', label: '整理检索来源', detail: '汇总命中的细胞、元数据和可用的基因信息' },
+            { key: 'answer', label: '生成回答', detail: '基于真实查询结果组织分析结论' },
+        ];
+        const order = { start: 0, request_sent: 1, parse: 0, query: 1, nl_query: 2, sources: 3, answer: 4, done: 4 };
+        const progress = order[stage] ?? 0;
+        return {
+            progress,
+            steps,
+            plan: payload?.plan || null,
+            sourceCount: payload?.sourceCount,
+        };
+    }
+
+    function renderQueryProgress(state) {
+        const stepHtml = state.steps.map((step, idx) => {
+            const done = idx < state.progress;
+            const active = idx === state.progress;
+            const cls = done ? 'done' : active ? 'active' : '';
+            const icon = done ? '<i class="fa-solid fa-check"></i>' : active ? '<i class="fa-solid fa-spinner fa-spin"></i>' : '';
+            const extra = renderQueryProgressExtra(step.key, state);
+            return `<div class="query-progress-step ${cls}">
+                <div class="step-icon">${icon}</div>
+                <div>
+                    <div>${step.label}</div>
+                    <div class="query-progress-detail">${step.detail}</div>
+                    ${extra}
+                </div>
+            </div>`;
+        }).join('');
+        return `<div class="query-progress">
+            <div class="query-progress-title"><i class="fa-solid fa-database"></i> 正在进行真实细胞查询</div>
+            <div class="query-progress-steps">${stepHtml}</div>
+        </div>`;
+    }
+
+    function renderQueryProgressExtra(stepKey, state) {
+        if (stepKey === 'parse' && state.plan) {
+            const tags = [];
+            if (Array.isArray(state.plan.conditions)) {
+                state.plan.conditions.forEach(c => tags.push(`${c.field}=${c.value}`));
+            }
+            if (Array.isArray(state.plan.gene_keywords)) {
+                state.plan.gene_keywords.forEach(g => tags.push(`基因 ${g}`));
+            }
+            if (state.plan.seed_cell_id) tags.push(`种子细胞 ${state.plan.seed_cell_id}`);
+            if (state.plan.limit) tags.push(`返回 ${state.plan.limit} 条`);
+            if (tags.length) {
+                return `<div class="query-progress-tags">${tags.map(t => `<span>${escapeHtml(t)}</span>`).join('')}</div>`;
+            }
+        }
+        if (stepKey === 'sources' && Number.isFinite(state.sourceCount)) {
+            return `<div class="query-progress-detail">已获取 ${state.sourceCount} 条细胞记录，可在回答下方查看来源。</div>`;
+        }
+        return '';
     }
 
     function appendStreamingBubble() {
@@ -1762,6 +2032,7 @@
         if (!sources || sources.length === 0) return '';
         let html = '<div class="inline-sources">';
         html += `<div class="inline-sources-header"><i class="fa-solid fa-microscope"></i> RAG 检索到的 Top ${sources.length} 相似细胞</div>`;
+        html += renderNaturalQuerySummary(currentNaturalQuery);
 
         sources.forEach((cell, idx) => {
             const sim = formatSimilarity(cell.distance);
@@ -1785,8 +2056,24 @@
         return html;
     }
 
+    function renderNaturalQuerySummary(plan) {
+        if (!plan) return '';
+        const pieces = [];
+        if (Array.isArray(plan.conditions) && plan.conditions.length) {
+            pieces.push('条件：' + plan.conditions.map(c => `${c.field}=${c.value}`).join('；'));
+        }
+        if (Array.isArray(plan.gene_keywords) && plan.gene_keywords.length) {
+            pieces.push('基因：' + plan.gene_keywords.join('，'));
+        }
+        if (plan.seed_cell_id) {
+            pieces.push('种子细胞：' + plan.seed_cell_id);
+        }
+        if (!pieces.length) pieces.push('宽泛查询');
+        return `<div class="inline-source-meta" style="margin:8px 0 10px;"><span>自然语言查询：${escapeHtml(pieces.join(' · '))}</span></div>`;
+    }
+
     function formatSimilarity(distance) {
-        if (distance == null) return 'N/A';
+        if (distance == null) return '条件匹配';
         const sim = Math.max(0, Math.min(1, 1 - distance / 2));
         return (sim * 100).toFixed(1) + '%';
     }
@@ -1844,12 +2131,12 @@
         welcome.innerHTML = `
             <div class="welcome-icon"><i class="fa-solid fa-robot"></i></div>
             <h3>你好，我是 AI 细胞助手</h3>
-            <p style="max-width:480px;">我可以根据单细胞数据库中的细胞类型、高表达基因和元数据信息，回答关于细胞功能、分型和生物学意义的问题。</p>
+            <p style="max-width:480px;">我可以根据单细胞数据库中的细胞类型、组织来源和元数据信息，回答关于细胞功能、分型和生物学意义的问题。</p>
             <div class="suggestions" id="welcomeSuggestions">
-                <span class="suggestion-chip" onclick="askSuggestion(this)">帮我分析一下包含 ALB 基因的高表达细胞主要属于什么类型？</span>
-                <span class="suggestion-chip" onclick="askSuggestion(this)">Hepatocyte 和 Kupffer cell 在基因表达上有什么主要差异？</span>
-                <span class="suggestion-chip" onclick="askSuggestion(this)">这些相似细胞主要分布在哪些组织或器官中？</span>
-                <span class="suggestion-chip" onclick="askSuggestion(this)">检索结果中最常见的细胞类型有什么生物学功能？</span>
+                <span class="suggestion-chip" onclick="askSuggestion(this)">查询 cell_type 为 Hepatocyte 的前 10 个细胞，并概括它们的主要特征</span>
+                <span class="suggestion-chip" onclick="askSuggestion(this)">找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型</span>
+                <span class="suggestion-chip" onclick="askSuggestion(this)">查询 cell_type 为 Kupffer cell 且 AgeGroup 为 Adult 的前 10 个细胞，并解释其功能</span>
+                <span class="suggestion-chip" onclick="askSuggestion(this)">查询 sex 为 female 的前 10 个细胞，按细胞类型总结分布</span>
             </div>`;
         chatMessages.appendChild(welcome);
         currentSources = [];

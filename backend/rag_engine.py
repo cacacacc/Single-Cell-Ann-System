@@ -213,6 +213,7 @@ class RAGEngine:
         n_results: Optional[int] = None,
         where_filter: Optional[Dict[str, Any]] = None,
         keywords: Optional[List[str]] = None,
+        retrieved_cells: Optional[List[Dict[str, Any]]] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None,
@@ -245,13 +246,15 @@ class RAGEngine:
 
         # ── ① 向量化用户问题 ──────────────────────────────────
         query_vectorized = False
-        if query_vector is None:
+        if retrieved_cells is None and query_vector is None:
             query_vector = self._try_embed_question(question)
             query_vectorized = query_vector is not None
 
         # ── ② 向量检索（或关键词回退）──────────────────────
         t_retrieve = time.perf_counter()
-        if query_vector is not None:
+        if retrieved_cells is not None:
+            retrieved = retrieved_cells
+        elif query_vector is not None:
             retrieved = self._store.query_similar(
                 query_vector=query_vector,
                 n_results=k,

@@ -4,6 +4,7 @@
 
 ```text
 backend/vector_store.py    # ChromaDB 向量数据库封装
+backend/natural_language_query.py  # 自然语言细胞查询解析与执行
 backend/prompt_builder.py  # 细胞特征 Prompt 工程
 backend/llm_client.py      # 大模型 API 接入层
 backend/rag_engine.py      # RAG 完整流程引擎
@@ -23,7 +24,10 @@ backend/rag_engine.py      # RAG 完整流程引擎
         │
         ├─ [可选] 指定 cell_index / cell_id → 使用该细胞向量作为查询
         │
-        └─ [默认] 调用 LLM Embedding API 将问题文本转为向量
+        └─ [默认] natural_language_query.py 解析查询意图
+                ├─ 元数据条件：cell_type、tissue、AgeGroup、sex 等
+                ├─ 基因关键词：ALB、APOA1、CYP3A4 等高表达基因
+                └─ 宽泛问题：回退到关键词/元数据检索
                 │
                 ▼
         ChromaDB 向量检索（vector_store.py）
@@ -47,7 +51,8 @@ backend/rag_engine.py      # RAG 完整流程引擎
 
 | 文件 | 职责 |
 |---|---|
-| `vector_store.py` | ChromaDB 客户端封装；将 DataLoader 中的细胞向量批量写入；提供向量相似检索接口 |
+| `vector_store.py` | ChromaDB 客户端封装；将 DataLoader 中的细胞向量、元数据和真实 `top_genes` 批量写入；提供向量相似检索、元数据检索和关键词检索接口 |
+| `natural_language_query.py` | 将自然语言问题解析为结构化查询计划，支持元数据条件、基因关键词、返回数量和种子细胞 ID，并执行真实细胞查询 |
 | `prompt_builder.py` | 将检索到的细胞数据（类型/基因/元数据）格式化为可读文本；自动统计检索结果细胞类型分布；组装 OpenAI-compatible messages 列表 |
 | `llm_client.py` | 统一封装智谱 GLM SDK 和 OpenAI SDK；通过环境变量切换厂商；提供 `chat()`（阻塞）、`stream_chat()`（流式）和 `embed()` 接口 |
 | `rag_engine.py` | 串联以上三个模块；管理多轮对话历史（session_id）；对外暴露 `ask()` 单一接口 |
@@ -59,10 +64,11 @@ backend/data_reader.py (DataLoader)
         │
         │  populate_from_loader(loader) 调用：
         │    loader.get_vectors()     ← 获取全量 PCA 向量矩阵
-        │    loader.get_vector()      ← 获取单细胞原始表达向量（计算高表达基因用）
+        │    loader.get_X_block()     ← 分块读取原始表达矩阵（计算高表达基因用）
+        │    loader.get_gene_names()  ← 获取基因符号/特征名
         │    loader.get_cell_info()   ← 获取细胞元数据（cell_type、tissue 等）
         │    loader.obs_columns       ← 获取 obs 字段列表
-        │    loader.adata.var_names   ← 获取基因名称列表
+        │    loader.var_names         ← 获取基因/特征 ID
         ▼
 backend/vector_store.py (CellVectorStore)
         │
@@ -147,6 +153,7 @@ LLM_MODEL=deepseek-chat
 | POST | `/api/vectordb/init` | 将数据集细胞向量写入 ChromaDB | 登录用户 |
 | GET | `/api/vectordb/status` | 查询向量库状态（数量/是否就绪/use_rep） | 登录用户 |
 | POST | `/api/vectordb/query` | 直接向量检索（不经 LLM） | 登录用户 |
+| POST | `/api/cells/query` | 自然语言细胞查询（不经 LLM，返回结构化结果） | 登录用户 |
 | DELETE | `/api/vectordb/collection` | 清空向量库 | 管理员 |
 | **POST** | **`/api/chat`** | **RAG 问答核心接口（阻塞，返回完整 JSON）** | 登录用户 |
 | **POST** | **`/api/chat/stream`** | **RAG 问答流式接口（SSE，逐字返回）** | 登录用户 |
@@ -166,7 +173,7 @@ LLM_MODEL=deepseek-chat
 ```bash
 curl -X POST http://localhost:5000/api/vectordb/init \
   -H "Content-Type: application/json" \
-  -d '{"use_rep": "X_pca", "distance_metric": "cosine"}'
+  -d '{"use_rep": "X_pca", "distance_metric": "cosine", "top_genes": 20}'
 ```
 
 首次使用或更换数据集后调用，将细胞数据写入 ChromaDB。初始化完成后数据持久化在 `chroma_db/` 目录，**重启服务不需要重新初始化**。
@@ -177,6 +184,14 @@ curl -X POST http://localhost:5000/api/vectordb/init \
 | `distance_metric` | string | `"cosine"` | 距离函数：`cosine` / `l2` / `ip` |
 | `force` | bool | `false` | `true` 时先清空再重写 |
 | `top_genes` | int | `20` | 每个细胞记录前 N 个高表达基因 |
+
+初始化时会从 `.h5ad` 原始表达矩阵 `X` 分块计算每个细胞表达量最高的基因，并写入 `metadata.top_genes` 和 `document`。如果向量库是在旧版本中创建的，可能缺少 `top_genes`，此时需要使用 `force=true` 重建：
+
+```bash
+curl -X POST http://localhost:5000/api/vectordb/init \
+  -H "Content-Type: application/json" \
+  -d '{"use_rep": "X_pca", "distance_metric": "cosine", "top_genes": 20, "force": true}'
+```
 
 ### 4.3 RAG 问答核心接口
 
@@ -210,7 +225,7 @@ curl -X POST http://localhost:5000/api/vectordb/init \
 
 > `cell_index` / `cell_id` 与 `question` 的关系：
 > - 提供 `cell_index` 或 `cell_id`：用该细胞的向量做相似检索，问题直接喂给 LLM
-> - 都不提供：系统调用 Embedding API 把问题文本转向量后检索
+> - 都不提供：系统先解析自然语言细胞查询；若识别出 `cell_type`、`tissue`、`AgeGroup`、`sex` 等元数据条件或 `ALB` 等基因关键词，会执行真实数据库查询，并把命中细胞作为 RAG 上下文
 
 **响应**
 
@@ -229,6 +244,13 @@ curl -X POST http://localhost:5000/api/vectordb/init \
     }
   ],
   "context_used": "## 检索到的相似细胞数据...",
+  "natural_query": {
+    "mode": "keyword",
+    "limit": 5,
+    "conditions": [],
+    "gene_keywords": ["ALB"],
+    "warnings": []
+  },
   "query_vectorized": false,
   "elapsed_ms": 1823.4,
   "retrieve_ms": 12.1,
@@ -251,12 +273,16 @@ curl -X POST http://localhost:5000/api/vectordb/init \
 data: 这批细胞高表达
 data:  ALB、APOA1
 data: ，为肝细胞...
+data: [PROGRESS] sources
+data: [NL_QUERY] {"mode":"keyword","gene_keywords":["ALB"],"limit":5,...}
 data: [FORMATTED] ## 分析结果\n\n这批细胞高表达 **ALB**...
 data: [SOURCES] [{"rank":1,"cell_id":"ACGT-1","cell_type":"Hepatocyte",...}]
 data: [DONE]
 ```
 
 - 每个 `data:` 事件包含一个文本片段
+- `[PROGRESS]` 事件：查询进度，可取 `parse`、`query`、`sources`、`answer`
+- `[NL_QUERY]` 事件：自然语言解析后的结构化查询计划，便于前端展示“系统真实查询了什么”
 - `[FORMATTED]` 事件：流结束后发送 Markdown 格式化后的完整文本（含基因名加粗、标题分段等增强）
 - `[SOURCES]` 事件：发送检索到的相似细胞 JSON 数组，前端可渲染为溯源卡片
 - 最后一个事件固定为 `data: [DONE]`，表示流结束
@@ -302,7 +328,56 @@ while (true) {
 
 返回与指定细胞最相似的 Top-K 个细胞，结构同 `retrieved_cells` 数组。
 
-### 4.6 对话会话管理
+### 4.6 自然语言细胞查询（不经 LLM）
+
+**POST /api/cells/query**
+
+```json
+{
+  "dataset_id": "liver",
+  "question": "找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型",
+  "limit": 20,
+  "use_rep": "X_pca"
+}
+```
+
+该接口只负责“查细胞”，不会调用大模型生成解释。适合调试 AI 回答是否基于真实检索结果。
+
+支持的常见问法：
+
+- `查询 cell_type 为 Hepatocyte 的前 10 个细胞`
+- `查询 cell_type 为 Kupffer cell 且 AgeGroup 为 Adult 的前 10 个细胞`
+- `找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型`
+- `查询 sex 为 female 的前 10 个细胞，按细胞类型总结分布`
+
+响应示例：
+
+```json
+{
+  "dataset_id": "liver",
+  "elapsed_ms": 18.4,
+  "plan": {
+    "question": "找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型",
+    "mode": "keyword",
+    "limit": 20,
+    "conditions": [],
+    "gene_keywords": ["ALB"],
+    "warnings": []
+  },
+  "count": 20,
+  "results": [
+    {
+      "rank": 1,
+      "cell_id": "AAAC...",
+      "cell_type": "Hepatocyte",
+      "top_genes": "ALB,APOA1,FABP1,...",
+      "match_reasons": ["keyword=ALB"]
+    }
+  ]
+}
+```
+
+### 4.7 对话会话管理
 
 ```bash
 # 列出所有对话会话（SQLite + 内存合并，按最近更新倒序）
@@ -328,7 +403,7 @@ GET /api/chat/history?session_id=xxx
 DELETE /api/chat/history?session_id=xxx
 ```
 
-### 4.7 LLM 辅助接口
+### 4.8 LLM 辅助接口
 
 ```bash
 # 查看当前 LLM 配置（不含 API Key 明文）
@@ -381,6 +456,16 @@ results = store.query_by_metadata(
     where={"cell_type": {"$eq": "T cell"}},
     limit=20,
 )
+
+# 基因/文本关键词检索（匹配 document 和 top_genes）
+results = store.query_by_keywords(
+    keywords=["ALB"],
+    n_results=20,
+)
+
+# 检查旧 Collection 是否包含 top_genes
+info = store.get_collection_info()
+print(info["top_genes_available"])
 ```
 
 ### 5.3 注意事项
@@ -388,7 +473,8 @@ results = store.query_by_metadata(
 - **向量维度必须一致**：查询向量的维度须与写入时使用的 `use_rep` 维度相同（`X_pca` 默认 50 维）。
 - **`distance_metric` 一旦写入不可更改**：需更换时须先调用 `DELETE /api/vectordb/collection` 清空后重新初始化。
 - **持久化目录**：数据在 `chroma_db/` 目录，重启服务无需重新写入；手动删除该目录后需重新初始化。
-- **`force=True` 的代价**：先删除整个 Collection 再重建，肝脏数据集（~5000 细胞）写入约 30 秒。
+- **`force=True` 的代价**：先删除整个 Collection 再重建，示例肝脏数据集（69,032 细胞）需要分批读取表达矩阵并重新写入 ChromaDB，耗时取决于磁盘、CPU 和 ChromaDB 状态。
+- **基因高表达查询依赖 `top_genes`**：旧 Collection 如果 `top_genes_available=false`，元数据查询仍可用，但 `ALB` 这类高表达基因查询需要重建向量库。
 
 ---
 
@@ -402,12 +488,18 @@ curl -X POST http://localhost:5000/api/llm/ping
 # 步骤二：验证向量数据库是否就绪
 curl http://localhost:5000/api/vectordb/status
 # 返回 "is_populated": true 表示数据已写入，可以开始问答
+# 返回 "top_genes_available": true 表示可使用基因高表达查询
 # 若为 false，先调用 POST /api/vectordb/init 初始化
 
 # 步骤三：发起一次问答测试
 curl -X POST http://localhost:5000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"question": "数据集中有哪些细胞类型？", "cell_index": 0}'
+
+# 步骤四：验证自然语言基因查询
+curl -X POST http://localhost:5000/api/cells/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "找 ALB 高表达的前 5 个细胞，判断它们主要属于什么细胞类型", "limit": 5}'
 ```
 
 ---
@@ -431,3 +523,6 @@ A：已支持双存储。内存中通过 `ChatHistory` 缓存（最多 5 轮，T
 
 **Q：如何使用关键词检索回退？**  
 A：当请求中不带 `cell_index` / `cell_id` 时，系统会先尝试调用 Embedding API 将问题文本转为向量。如果 Embedding 调用失败或 LLM 未配置 Embedding 模型，系统会自动从问题中提取基因名和细胞类型关键词，通过 ChromaDB 文档字段进行关键词匹配检索。如果关键词也无匹配结果，则回退到全库随机采样。
+
+**Q：数据集中明明有 ALB，为什么 AI 仍说没有高表达基因数据？**
+A：通常是因为当前 ChromaDB Collection 是旧版本创建的，里面没有 `top_genes` 元数据。先调用 `GET /api/vectordb/status`，如果 `top_genes_available=false`，请在 AI 细胞助手页面点击“重建基因索引”，或调用 `POST /api/vectordb/init` 并设置 `force=true`、`top_genes=20`。

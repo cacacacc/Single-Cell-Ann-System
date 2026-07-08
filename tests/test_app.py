@@ -31,7 +31,10 @@ class FlaskAppTests(unittest.TestCase):
                 ],
                 dtype=np.float32,
             ),
-            obs={"cell_type": ["query", "a", "b", "c"]},
+            obs={
+                "cell_type": ["query", "a", "b", "c"],
+                "tissue": ["seed", "liver", "liver", "heart"],
+            },
         )
         adata.obs_names = ["cell-0", "cell-1", "cell-2", "cell-3"]
         adata.obsm["X_pca"] = np.array(
@@ -340,6 +343,26 @@ class FlaskAppTests(unittest.TestCase):
         self.assertEqual(payload["total"], 4)
         self.assertEqual(payload["next_offset"], 3)
         self.assertEqual([cell["cell_id"] for cell in payload["cells"]], ["cell-1", "cell-2"])
+
+    def test_natural_language_cell_query_filters_metadata(self) -> None:
+        self.login_admin()
+
+        response = self.client.post(
+            "/api/cells/query",
+            json={
+                "dataset_id": "tiny",
+                "question": "查询 tissue 为 liver 的前 10 个细胞",
+                "limit": 10,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["dataset_id"], "tiny")
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual([row["cell_id"] for row in payload["results"]], ["cell-1", "cell-2"])
+        self.assertEqual(payload["plan"]["conditions"][0]["field"], "tissue")
+        self.assertEqual(payload["plan"]["conditions"][0]["value"], "liver")
 
     def test_umap_endpoint_returns_sampled_points(self) -> None:
         self.login_admin()

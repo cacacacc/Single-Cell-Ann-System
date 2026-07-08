@@ -229,6 +229,22 @@ class CellVectorStore:
         for batch_idx, batch_start in enumerate(range(0, n_cells, batch_size)):
             batch_end = min(batch_start + batch_size, n_cells)
             batch_vectors = vectors[batch_start:batch_end]
+            batch_top_genes: List[List[str]] = [[] for _ in range(batch_end - batch_start)]
+            if has_gene_info:
+                try:
+                    raw_block = loader.get_X_block(batch_start, batch_end)
+                    batch_top_genes = self._top_expressed_genes_block(
+                        raw_block,
+                        gene_names,
+                        top_n=top_genes,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "批次 %d/%d 高表达基因计算失败，top_genes 将置空: %s",
+                        batch_idx + 1,
+                        n_batches,
+                        exc,
+                    )
 
             ids = []
             embeddings = []
@@ -257,17 +273,7 @@ class CellVectorStore:
                         meta[field] = str(val)
 
                 # 高表达基因列表（字符串形式存入元数据）
-                if has_gene_info:
-                    try:
-                        vec_raw = loader.get_vector(global_idx, use_rep="X")
-                        top_gene_names = self._top_expressed_genes(
-                            vec_raw, gene_names, top_n=top_genes
-                        )
-                    except (ValueError, KeyError):
-                        top_gene_names = []
-                    meta["top_genes"] = ",".join(top_gene_names)
-                else:
-                    meta["top_genes"] = ""
+                meta["top_genes"] = ",".join(batch_top_genes[local_idx])
 
                 # ChromaDB document 字段（可作为文本内容用于混合检索）
                 doc_text = self._build_document_text(cell_info, meta.get("top_genes", ""))
@@ -407,6 +413,38 @@ class CellVectorStore:
             )
         return results
 
+    def get_by_cell_ids(self, cell_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch stored ChromaDB records by cell ID.
+
+        This is used to enrich deterministic metadata query results with fields
+        that only exist in the vector store, such as ``top_genes`` and
+        ``document``.
+        """
+        ids = [str(cell_id) for cell_id in cell_ids if str(cell_id).strip()]
+        if not ids or self.count() == 0:
+            return {}
+
+        raw = self._collection.get(
+            ids=ids,
+            include=["metadatas", "documents"],
+        )
+        found_ids = raw.get("ids", [])
+        metadatas = raw.get("metadatas", [])
+        documents = raw.get("documents", [])
+
+        records: Dict[str, Dict[str, Any]] = {}
+        for chroma_id, meta, doc in zip(found_ids, metadatas, documents):
+            meta = meta or {}
+            records[str(chroma_id)] = {
+                "cell_id": chroma_id,
+                "cell_index": meta.get("cell_index", -1),
+                "cell_type": meta.get("cell_type", "unknown"),
+                "top_genes": meta.get("top_genes", ""),
+                "document": doc,
+                "metadata": meta,
+            }
+        return records
+
     def query_by_keywords(
         self,
         keywords: List[str],
@@ -455,31 +493,35 @@ class CellVectorStore:
 
         # 对每个细胞计算关键词命中数
         keywords_lower = [k.lower() for k in keywords]
-        scored: List[tuple] = []  # (score, cell_id, meta, doc)
+        scored: List[tuple] = []  # (score, cell_id, meta, doc, search_text)
         for cid, meta, doc in zip(all_ids, all_metas, all_docs):
+            meta = meta or {}
             search_text = (
                 (doc or "").lower() + " " + (meta.get("top_genes", "") or "").lower()
             )
             score = sum(1 for kw in keywords_lower if kw in search_text)
             if score > 0:
-                scored.append((score, cid, meta, doc))
+                scored.append((score, cid, meta, doc, search_text))
 
         # 按命中数降序
         scored.sort(key=lambda x: -x[0])
         top = scored[:n_results]
 
         results: List[Dict[str, Any]] = []
-        for rank, (score, cid, meta, doc) in enumerate(top, start=1):
+        for rank, (score, cid, meta, doc, search_text) in enumerate(top, start=1):
             results.append(
                 {
                     "rank": rank,
                     "cell_id": cid,
                     "cell_index": meta.get("cell_index", -1),
                     "cell_type": meta.get("cell_type", "unknown"),
-                    "distance": float(1.0 - score / max(len(keywords), 1)),
+                    "score": int(score),
                     "top_genes": meta.get("top_genes", ""),
                     "document": doc,
                     "metadata": meta,
+                    "match_reasons": [
+                        f"keyword={kw}" for kw in keywords_lower if kw in search_text
+                    ],
                 }
             )
         return results
@@ -493,6 +535,16 @@ class CellVectorStore:
         except Exception:
             use_rep_recorded = "unknown"
 
+        top_genes_nonempty = 0
+        try:
+            if self.count() > 0:
+                sample = self._collection.get(limit=min(self.count(), 1000), include=["metadatas"])
+                for meta in sample.get("metadatas", []):
+                    if meta and str(meta.get("top_genes") or "").strip():
+                        top_genes_nonempty += 1
+        except Exception:
+            top_genes_nonempty = 0
+
         return {
             "collection_name": self._collection_name,
             "persist_dir": str(self._persist_dir),
@@ -501,6 +553,9 @@ class CellVectorStore:
             "is_populated": self.is_populated(),
             "chroma_available": _CHROMA_AVAILABLE,
             "use_rep": use_rep_recorded,
+            "top_genes_sampled": min(self.count(), 1000),
+            "top_genes_nonempty_sampled": top_genes_nonempty,
+            "top_genes_available": top_genes_nonempty > 0,
         }
 
     def delete_collection(self) -> None:
@@ -539,7 +594,11 @@ class CellVectorStore:
     def _get_gene_names(self, loader: Any) -> Optional[List[str]]:
         """从 AnnData 获取基因名称列表，用于高表达基因标注。"""
         try:
+            if hasattr(loader, "get_gene_names"):
+                return list(loader.get_gene_names())
             adata = loader.adata
+            if hasattr(adata, "var") and "feature_name" in adata.var.columns:
+                return list(adata.var["feature_name"].astype(str))
             return list(adata.var_names)
         except Exception:
             return None
@@ -558,6 +617,37 @@ class CellVectorStore:
         top_indices = np.argpartition(arr, -top_n)[-top_n:]
         top_indices = top_indices[np.argsort(arr[top_indices])[::-1]]
         return [gene_names[int(i)] for i in top_indices]
+
+    def _top_expressed_genes_block(
+        self,
+        expression_block: np.ndarray,
+        gene_names: List[str],
+        top_n: int = 20,
+    ) -> List[List[str]]:
+        """Return top expressed genes for each row in a dense expression block."""
+        arr = np.asarray(expression_block, dtype=np.float32)
+        if arr.ndim != 2 or arr.shape[1] != len(gene_names) or arr.shape[0] == 0:
+            return [[] for _ in range(arr.shape[0] if arr.ndim >= 1 else 0)]
+
+        top_n = max(0, min(int(top_n), arr.shape[1]))
+        if top_n == 0:
+            return [[] for _ in range(arr.shape[0])]
+
+        top_indices = np.argpartition(arr, -top_n, axis=1)[:, -top_n:]
+        row_values = np.take_along_axis(arr, top_indices, axis=1)
+        order = np.argsort(row_values, axis=1)[:, ::-1]
+        sorted_indices = np.take_along_axis(top_indices, order, axis=1)
+
+        results: List[List[str]] = []
+        for row_idx, row_indices in enumerate(sorted_indices):
+            values = arr[row_idx, row_indices]
+            genes = [
+                gene_names[int(gene_idx)]
+                for gene_idx, value in zip(row_indices, values)
+                if float(value) > 0.0
+            ]
+            results.append(genes)
+        return results
 
     def _build_document_text(
         self,

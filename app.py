@@ -56,6 +56,11 @@ from backend.rag_engine import (
     get_or_create_engine,
     _CHAT_HISTORY,
 )
+from backend.natural_language_query import (
+    DEFAULT_LIMIT as NLQ_DEFAULT_LIMIT,
+    execute_natural_cell_query,
+    parse_natural_cell_query,
+)
 from backend.merged_loader import (
     MergedDataLoader,
     MergedDatasetConfig,
@@ -2340,6 +2345,84 @@ def vectordb_status():
         return _json_response({"error": str(exc)}, 400)
 
 
+def _get_optional_vector_store(dataset_id: str) -> Optional[CellVectorStore]:
+    if not is_chroma_available():
+        return None
+    try:
+        return get_or_create_store(
+            collection_name=_chroma_collection_name(dataset_id),
+            persist_dir=CHROMA_DIR,
+        )
+    except Exception:
+        logger.exception("Failed to open ChromaDB store for natural language query")
+        return None
+
+
+def _execute_natural_language_cell_query(
+    question: str,
+    loader: Any,
+    dataset_id: str,
+    *,
+    limit: int = NLQ_DEFAULT_LIMIT,
+    use_rep: str = "X_pca",
+    seed_cell_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    store = _get_optional_vector_store(dataset_id)
+    plan = parse_natural_cell_query(
+        question,
+        loader,
+        limit=limit,
+        seed_cell_id=seed_cell_id,
+    )
+    return execute_natural_cell_query(
+        plan,
+        loader,
+        store=store,
+        use_rep=use_rep,
+    )
+
+
+@app.post("/api/cells/query")
+@login_required
+def natural_cells_query():
+    """Natural language cell query: question -> structured plan -> matching cells."""
+    try:
+        payload = _request_payload()
+        question = str(payload.get("question") or payload.get("q") or "").strip()
+        if not question:
+            return _json_response({"error": "question cannot be empty"}, 400)
+
+        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+        dataset_path = _resolve_dataset_path(dataset_id)
+        resolved_id = _dataset_id_from_path(dataset_path)
+        use_rep = str(payload.get("use_rep") or "X_pca")
+        limit = _parse_int(payload, "limit", default=NLQ_DEFAULT_LIMIT)
+        seed_cell_id = str(payload.get("cell_id") or "").strip() or None
+
+        loader = _get_loader(resolved_id, dataset_path)
+        t0 = time.perf_counter()
+        query_result = _execute_natural_language_cell_query(
+            question,
+            loader,
+            resolved_id,
+            limit=limit,
+            use_rep=use_rep,
+            seed_cell_id=seed_cell_id,
+        )
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+        return _json_response(
+            {
+                "dataset_id": resolved_id,
+                "elapsed_ms": elapsed_ms,
+                **query_result,
+            }
+        )
+    except (TypeError, ValueError, KeyError, IndexError) as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except Exception as exc:
+        return _json_response({"error": str(exc)}, 500)
+
+
 @app.post("/api/vectordb/query")
 @login_required
 def vectordb_query():
@@ -2538,9 +2621,19 @@ def chat_api():
         # 解析查询向量（可选，不提供则用关键词检索）
         query_vector = _resolve_query_vector(payload, loader, use_rep)
         keywords: Optional[List[str]] = None
+        natural_query_result: Optional[Dict[str, Any]] = None
+        retrieved_cells: Optional[List[Dict[str, Any]]] = None
         if query_vector is None:
             keywords = _extract_question_keywords(question)
             logger.info("/api/chat 关键词: question='%s' → %s", question[:80], keywords)
+            natural_query_result = _execute_natural_language_cell_query(
+                question,
+                loader,
+                resolved_id,
+                limit=n_results,
+                use_rep=use_rep,
+            )
+            retrieved_cells = natural_query_result.get("results") or []
 
         # ── LLM Controls ──
         temperature = payload.get("temperature")
@@ -2563,10 +2656,14 @@ def chat_api():
             n_results=n_results,
             where_filter=where,
             keywords=keywords,
+            retrieved_cells=retrieved_cells,
             temperature=temperature,
             max_tokens=max_tokens,
             system_prompt=system_prompt,
         )
+
+        if natural_query_result is not None:
+            result["natural_query"] = natural_query_result.get("plan")
 
         # 强制 Markdown 格式化
         if result.get("answer"):
@@ -2663,44 +2760,64 @@ def chat_stream_api():
             n_results=n_results,
         )
 
-        # ── 向量化 / 关键词检索 ──
-        if query_vector is not None:
-            retrieved = store.query_similar(
-                query_vector=query_vector,
-                n_results=n_results,
-                where=where,
-            )
-        else:
-            keywords = _extract_question_keywords(question)
-            logger.info("RAG 关键词提取: question='%s' → keywords=%s", question[:80], keywords)
-            retrieved = store.query_by_keywords(keywords=keywords, n_results=n_results)
-            if not retrieved:
-                logger.warning("关键词无匹配，回退到全库采样 %d 条细胞", n_results)
-                retrieved = store.query_by_metadata(where={}, limit=n_results)
-        history = _CHAT_HISTORY.get(session_id) if session_id else None
-        builder = engine.prompt_builder
-        if history:
-            messages = builder.build_messages_with_history(
-                user_question=question,
-                retrieved_cells=retrieved,
-                history=history,
-                extra_system_info=engine.dataset_info,
-                system_prompt=system_prompt_override,
-            )
-        else:
-            messages = builder.build_messages(
-                user_question=question,
-                retrieved_cells=retrieved,
-                extra_system_info=engine.dataset_info,
-                system_prompt=system_prompt_override,
-            )
-
         llm_client = get_llm_client()
 
         # SSE 生成器
         def generate():
             full_text_parts = []
+            retrieved: List[Dict[str, Any]] = []
+            natural_query_plan: Optional[Dict[str, Any]] = None
             try:
+                yield "data: [PROGRESS] parse\n\n"
+                if query_vector is not None:
+                    yield "data: [PROGRESS] query\n\n"
+                    retrieved = store.query_similar(
+                        query_vector=query_vector,
+                        n_results=n_results,
+                        where=where,
+                    )
+                else:
+                    keywords = _extract_question_keywords(question)
+                    logger.info("RAG 关键词提取: question='%s' → keywords=%s", question[:80], keywords)
+                    yield "data: [PROGRESS] query\n\n"
+                    natural_query_result = _execute_natural_language_cell_query(
+                        question,
+                        loader,
+                        resolved_id,
+                        limit=n_results,
+                        use_rep=use_rep,
+                    )
+                    natural_query_plan = natural_query_result.get("plan")
+                    yield f"data: [NL_QUERY] {json.dumps(natural_query_plan, ensure_ascii=False)}\n\n"
+                    retrieved = natural_query_result.get("results") or []
+                    if not retrieved:
+                        logger.warning("关键词无匹配，回退到全库采样 %d 条细胞", n_results)
+                        retrieved = store.query_by_keywords(keywords=keywords, n_results=n_results)
+                        if not retrieved:
+                            retrieved = store.query_by_metadata(where={}, limit=n_results)
+
+                yield "data: [PROGRESS] sources\n\n"
+                yield f"data: [SOURCES] {json.dumps(retrieved, ensure_ascii=False)}\n\n"
+
+                history = _CHAT_HISTORY.get(session_id) if session_id else None
+                builder = engine.prompt_builder
+                if history:
+                    messages = builder.build_messages_with_history(
+                        user_question=question,
+                        retrieved_cells=retrieved,
+                        history=history,
+                        extra_system_info=engine.dataset_info,
+                        system_prompt=system_prompt_override,
+                    )
+                else:
+                    messages = builder.build_messages(
+                        user_question=question,
+                        retrieved_cells=retrieved,
+                        extra_system_info=engine.dataset_info,
+                        system_prompt=system_prompt_override,
+                    )
+
+                yield "data: [PROGRESS] answer\n\n"
                 for chunk in llm_client.stream_chat(
                     messages=messages,
                     temperature=temperature,
@@ -2729,8 +2846,6 @@ def chat_stream_api():
             # 发送格式化后的完整文本（换行符同样需要转义）
             safe_formatted = formatted_text.replace("\\", "\\\\").replace("\n", "\\n")
             yield f"data: [FORMATTED] {safe_formatted}\n\n"
-            # 发送检索来源数据（供前端展示 RAG 溯源）
-            yield f"data: [SOURCES] {json.dumps(retrieved, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
 
         return Response(

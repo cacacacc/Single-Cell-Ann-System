@@ -16,6 +16,7 @@ app.py
 - 查询数据集元信息、细胞列表和 UMAP 坐标
 - 按参数构建或加载 ANN 索引
 - 执行 Top-K 相似细胞检索并返回 JSON 结果
+- 执行自然语言细胞查询，将问题解析为元数据过滤、基因关键词或相似细胞查询
 - 执行 ANN 算法性能评测并保存历史记录
 
 ## 3. 运行环境
@@ -250,15 +251,81 @@ POST /api/vectordb/query
 DELETE /api/vectordb/collection
 ```
 
-`POST /api/vectordb/init` 将数据集细胞向量写入 ChromaDB，首次使用 AI 助手前需调用。初始化后数据持久化在 `chroma_db/` 目录，重启服务不需要重新初始化。
+`POST /api/vectordb/init` 将数据集细胞向量、元数据和高表达基因写入 ChromaDB，首次使用 AI 助手前需调用。初始化后数据持久化在 `chroma_db/` 目录，重启服务不需要重新初始化。
 
-`GET /api/vectordb/status` 返回 Collection 状态（数量、是否就绪、use_rep）。
+常用请求体：
+
+```json
+{
+  "dataset_id": "liver",
+  "use_rep": "X_pca",
+  "distance_metric": "cosine",
+  "top_genes": 20,
+  "force": false
+}
+```
+
+如果旧向量库缺少高表达基因信息，可设置 `force=true` 重建。
+
+`GET /api/vectordb/status` 返回 Collection 状态（数量、是否就绪、use_rep、`top_genes_available`、`top_genes_nonempty_sampled` 等）。
 
 `POST /api/vectordb/query` 直接执行向量检索，不经 LLM。
 
 `DELETE /api/vectordb/collection` 清空向量库，需要管理员权限。
 
-### 6.13 RAG AI 问答
+### 6.13 自然语言细胞查询
+
+```http
+POST /api/cells/query
+Content-Type: application/json
+
+{
+  "dataset_id": "liver",
+  "question": "找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型",
+  "limit": 20,
+  "use_rep": "X_pca"
+}
+```
+
+该接口不调用 LLM，只返回解析计划和真实命中的细胞结果，适合调试自然语言查询能力。
+
+支持能力：
+
+- 元数据条件：如 `cell_type 为 Hepatocyte`、`tissue 为 right lobe of liver`、`AgeGroup 为 Adult`、`sex 为 female`
+- 基因关键词：如 `ALB 高表达`，匹配 ChromaDB 中的 `top_genes` 和文档文本
+- 返回数量：如 `前 10 个细胞`、`top 20`
+- 种子细胞：请求体可传 `cell_id`，用于相似细胞查询后再叠加自然语言条件
+
+返回示例：
+
+```json
+{
+  "dataset_id": "liver",
+  "elapsed_ms": 16.2,
+  "plan": {
+    "question": "找 ALB 高表达的前 20 个细胞，判断它们主要属于什么细胞类型",
+    "limit": 20,
+    "mode": "keyword",
+    "conditions": [],
+    "gene_keywords": ["ALB"],
+    "warnings": []
+  },
+  "count": 20,
+  "results": [
+    {
+      "rank": 1,
+      "cell_id": "AAAC...",
+      "cell_index": 123,
+      "cell_type": "Hepatocyte",
+      "top_genes": "ALB,APOA1,FABP1,...",
+      "match_reasons": ["keyword=ALB"],
+      "metadata": {}
+    }
+  ]
+}
+```
+
+### 6.14 RAG AI 问答
 
 ```http
 POST /api/chat
@@ -267,11 +334,13 @@ POST /api/chat/stream
 
 `/api/chat` 为阻塞式 RAG 问答，返回完整 JSON 结果（answer、retrieved_cells、耗时等）。
 
-`/api/chat/stream` 为 SSE 流式问答，逐字返回大模型回答。流结束后发送 `[FORMATTED]`（Markdown 格式化全文）、`[SOURCES]`（检索来源）和 `[DONE]` 事件。
+当请求不传 `cell_index` / `cell_id` 时，系统会先使用自然语言细胞查询解析问题。例如“查询 cell_type 为 Hepatocyte 的前 10 个细胞”会走元数据过滤，“找 ALB 高表达的前 20 个细胞”会走 `top_genes` 关键词检索。返回 JSON 中会包含 `natural_query` 字段，用于说明实际解析出的查询计划。
+
+`/api/chat/stream` 为 SSE 流式问答，逐字返回大模型回答。流式响应会发送 `[PROGRESS]`（parse/query/sources/answer 查询进度）、`[NL_QUERY]`（自然语言解析计划）、`[FORMATTED]`（Markdown 格式化全文）、`[SOURCES]`（检索来源）和 `[DONE]` 事件。
 
 两个接口均支持以下可选参数：`preset`（角色预设）、`temperature`、`max_tokens`、`session_id`（多轮对话）。
 
-### 6.14 对话会话管理
+### 6.15 对话会话管理
 
 ```http
 GET /api/chat/sessions
@@ -292,7 +361,7 @@ DELETE /api/chat/history?session_id=xxx
 
 `GET /api/chat/history` 和 `DELETE /api/chat/history` 用于查询和清空内存对话历史。
 
-### 6.15 LLM 辅助接口
+### 6.16 LLM 辅助接口
 
 ```http
 GET /api/llm/info
@@ -312,6 +381,8 @@ POST /api/llm/ping
 | `409` | 上传数据集时文件已存在 |
 | `503` | 默认数据集不存在、索引运行时不可用或服务暂不可用 |
 
+自然语言高表达基因查询依赖 ChromaDB 中的 `top_genes` 元数据。如果 `GET /api/vectordb/status` 返回 `top_genes_available=false`，请先通过 `POST /api/vectordb/init` 设置 `force=true` 重建向量库。
+
 ## 8. 与其他后端模块的关系
 
 ```text
@@ -325,6 +396,8 @@ app.py
    +-- backend/ann_indexer.py       构建 ANN 索引并执行 Top-K 检索
    |
    +-- backend/vector_store.py      ChromaDB 向量数据库（AI 问答检索路径）
+   |
+   +-- backend/natural_language_query.py  自然语言细胞查询解析与执行
    |
    +-- backend/rag_engine.py        RAG 流程编排（检索 + Prompt + LLM）
    |

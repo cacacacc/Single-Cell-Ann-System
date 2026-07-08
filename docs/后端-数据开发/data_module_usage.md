@@ -48,6 +48,8 @@ data/liver.h5ad
 | `assay` | 测序方式 |
 | `author_cell_type` | 作者标注的细胞类型 |
 
+`var` 基因信息用于高表达基因索引。当前 `DataLoader` 会保留 `var_names` 和 `var` 列名，并在需要展示基因符号时优先从 `feature_name`、`gene_symbol`、`gene_name`、`symbol`、`name` 等列中读取；若这些列不存在，则回退使用 `var_names`。
+
 
 ---
 
@@ -65,41 +67,41 @@ loader = DataLoader("data/liver.h5ad")
 - 文件后缀不是 `.h5ad` 会抛出 `ValueError`
 
 
-### 3.2 `get_vectors(use_rep=None)` — 获取全量向量矩阵
+### 3.2 `get_vectors(use_rep="X_pca")` — 获取全量降维向量矩阵
 
 ```python
-vectors = loader.get_vectors()           # 使用原始基因表达矩阵 X
 vectors = loader.get_vectors("X_pca")   # 使用 PCA 降维结果（推荐）
+vectors = loader.get_vectors("X_umap")  # 使用 UMAP 坐标
 ```
 
 **返回值：**
 
 ```python
-vectors.shape  # (69032, 33694) 或 (69032, 30)
+vectors.shape  # (69032, 30) 或 (69032, 2)
 vectors.dtype  # float32
 ```
 
 - 返回 2D NumPy 数组，可直接传入 `ANNIndexer.build_index(vectors)`
-- `use_rep` 可选值：`None`（等同 `"X"`）、`"X_pca"`、`"X_umap"`、`"X_tsne"`
+- `use_rep` 可选值：`"X_pca"`、`"X_umap"`、`"X_tsne"` 等 `obsm` 中存在的键
+- 为避免将数 GB 的表达矩阵常驻内存，当前懒加载模式下不建议用 `get_vectors("X")` 获取完整原始表达矩阵；如需读取表达矩阵，请使用 `get_X_block(start, end)` 分块读取
 - 传入不存在的 `use_rep` 会抛出 `KeyError`
 
 
-### 3.3 `get_vector(cell_index, use_rep=None)` — 获取单个细胞向量
+### 3.3 `get_vector(cell_index, use_rep="X_pca")` — 获取单个细胞向量
 
 ```python
-query_vector = loader.get_vector(500)
 query_vector = loader.get_vector(500, use_rep="X_pca")
 ```
 
 **返回值：**
 
 ```python
-query_vector.shape  # (33694,) 或 (30,)
+query_vector.shape  # (30,)
 query_vector.dtype  # float32
 ```
 
 - 返回 1D NumPy 数组，可直接传入 `ANNIndexer.search(query_vector, k)`
-- 直接按行切片，不会展开整个矩阵，对大数据集性能友好
+- 对降维矩阵直接按行切片，不会展开完整表达矩阵，对大数据集性能友好
 - `cell_index` 越界会抛出 `IndexError`
 - `cell_index` 类型不是整数会抛出 `TypeError`
 
@@ -139,6 +141,7 @@ dim = loader.vector_dim("X_pca")    # 30（使用 X_pca）
 ```
 
 - 直接用于初始化 `ANNIndexer(dim=loader.vector_dim("X_pca"))`，无需手动计算
+- `vector_dim()` 不会读取完整 `X`，只返回表达矩阵特征数；真正读取表达值请使用 `get_X_block()`
 
 
 ### 3.6 便捷属性
@@ -148,6 +151,8 @@ dim = loader.vector_dim("X_pca")    # 30（使用 X_pca）
 | `loader.n_cells` | `int` | 细胞总数（69032） |
 | `loader.n_genes` | `int` | 基因数量（33694） |
 | `loader.obs_columns` | `list[str]` | 所有元数据字段名 |
+| `loader.var_names` | `list[str]` | 基因/特征 ID（来自 `adata.var_names`） |
+| `loader.var_columns` | `list[str]` | `adata.var` 中可用的基因注释列 |
 | `loader.available_reps` | `list[str]` | obsm 中可用的降维键名 |
 
 
@@ -162,16 +167,38 @@ idx = loader.cell_index_from_id("AAACCTGAGCAGGTCA-1_2")
 - 首次调用时懒加载构建 ID → 索引映射字典，后续查询为 O(1)
 - 细胞 ID 不存在会抛出 `KeyError`
 
-### 3.8 内部加载机制
+### 3.8 `get_X_block(start, end)` — 分块读取原始表达矩阵
+
+```python
+block = loader.get_X_block(0, 128)
+# block.shape == (128, loader.n_genes)
+# block.dtype == float32
+```
+
+- 从 `.h5ad` 的 backed 文件句柄中按行读取原始表达矩阵 `X`，不会把完整矩阵常驻内存
+- 主要供 ChromaDB 初始化时计算每个细胞的 `top_genes` 使用
+- `start/end` 必须满足 `0 <= start < end <= n_cells`，否则抛出 `IndexError`
+
+### 3.9 `get_gene_names(preferred_columns=None)` — 获取可展示基因名
+
+```python
+genes = loader.get_gene_names()
+```
+
+- 默认按 `feature_name`、`gene_symbol`、`gene_name`、`symbol`、`name` 的顺序选择可读基因符号
+- 若没有可用注释列，则回退使用 `var_names`
+- 返回长度与 `n_genes` 一致，可与 `get_X_block()` 的列顺序一一对应
+
+### 3.10 内部加载机制
 
 `DataLoader` 使用 `_LightAnnDataProxy` 轻量代理代替完整 AnnData 对象。加载策略：
 
 1. 使用 `read_h5ad(path, backed="r")` 延迟读取 HDF5 文件
-2. 仅将 `obsm`（降维向量，通常 < 100MB）和 `obs`（元数据，几 MB）加载到内存
+2. 仅将 `obsm`（降维向量，通常 < 100MB）、`obs`（元数据，几 MB）和轻量 `var` 注释加载到内存
 3. 不展开完整基因表达矩阵 `X`（可能数 GB），大幅降低内存占用
 4. 读取完毕后关闭 HDF5 文件句柄
 
-当需要访问原始表达矩阵时，可通过 `loader.get_vector(cell_index)` 按需读取单行，避免全量加载。
+当需要访问原始表达矩阵时，可通过 `loader.get_X_block(start, end)` 分块读取，避免全量加载。
 
 
 ---
