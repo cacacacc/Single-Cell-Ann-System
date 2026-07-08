@@ -4,11 +4,42 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import anndata as ad
 import numpy as np
 
 import app as app_module
+
+
+class FakeChatStore:
+    def is_populated(self) -> bool:
+        return True
+
+    def query_by_keywords(self, keywords, n_results=5):
+        return []
+
+    def query_by_metadata(self, where=None, limit=5):
+        return [
+            {
+                "rank": 1,
+                "cell_id": "cell-1",
+                "cell_index": 1,
+                "cell_type": "a",
+                "metadata": {"cell_id": "cell-1", "cell_type": "a", "tissue": "liver"},
+            }
+        ][:limit]
+
+    def query_similar(self, query_vector, n_results=5, where=None):
+        return self.query_by_metadata(where=where, limit=n_results)
+
+    def get_by_cell_ids(self, cell_ids):
+        return {}
+
+
+class FakeStreamLLM:
+    def stream_chat(self, **kwargs):
+        yield "测试回答"
 
 
 class FlaskAppTests(unittest.TestCase):
@@ -415,6 +446,45 @@ class FlaskAppTests(unittest.TestCase):
         self.assertEqual([row["cell_id"] for row in payload["results"]], ["cell-1", "cell-2"])
         self.assertEqual(payload["plan"]["conditions"][0]["field"], "tissue")
         self.assertEqual(payload["plan"]["conditions"][0]["value"], "liver")
+
+    def test_chat_stream_regular_question_does_not_emit_query_progress(self) -> None:
+        self.login_admin()
+
+        with (
+            patch.object(app_module, "is_chroma_available", return_value=True),
+            patch.object(app_module, "get_or_create_store", return_value=FakeChatStore()),
+            patch.object(app_module, "get_llm_client", return_value=FakeStreamLLM()),
+        ):
+            response = self.client.post(
+                "/api/chat/stream",
+                json={"dataset_id": "tiny", "question": "请解释一下这个数据集适合做什么分析"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertNotIn("[PROGRESS]", body)
+        self.assertNotIn("[NL_QUERY]", body)
+        self.assertIn("测试回答", body)
+
+    def test_chat_stream_cell_query_emits_query_progress(self) -> None:
+        self.login_admin()
+
+        with (
+            patch.object(app_module, "is_chroma_available", return_value=True),
+            patch.object(app_module, "get_or_create_store", return_value=FakeChatStore()),
+            patch.object(app_module, "get_llm_client", return_value=FakeStreamLLM()),
+        ):
+            response = self.client.post(
+                "/api/chat/stream",
+                json={"dataset_id": "tiny", "question": "查询 tissue 为 liver 的前 2 个细胞"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("[PROGRESS] parse", body)
+        self.assertIn("[PROGRESS] query", body)
+        self.assertIn("[NL_QUERY]", body)
+        self.assertIn('"mode": "metadata"', body)
 
     def test_umap_endpoint_returns_sampled_points(self) -> None:
         self.login_admin()
