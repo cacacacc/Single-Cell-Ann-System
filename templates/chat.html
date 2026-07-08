@@ -1805,6 +1805,9 @@
             // First row after sep becomes thead
             return `<table>${tableHtml}</table>`;
         });
+        // Remove any table separator markers that were not adjacent to the row
+        // group matched above, such as the standard header/separator/body layout.
+        html = html.replace(/\x00TBSEP\x00\n?/g, '');
 
         // Unordered lists
         html = html.replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
