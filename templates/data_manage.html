@@ -125,18 +125,58 @@
         border-color: var(--nankai-purple);
         background-color: rgba(111, 38, 86, 0.1);
     }
+
+    .data-toolbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 1.5rem;
+    }
+    .data-toolbar-title {
+        flex: 0 0 auto;
+        white-space: nowrap;
+        letter-spacing: 1px;
+        line-height: 1.2;
+    }
+    .data-toolbar-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 10px;
+        min-width: 0;
+    }
+    .data-toolbar-actions .cmd-btn {
+        margin-right: 0;
+        white-space: nowrap;
+    }
+    @media (max-width: 1100px) {
+        .data-toolbar {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .data-toolbar-actions {
+            justify-content: flex-start;
+        }
+    }
 </style>
 
 <!-- 顶部操作栏 (Command Bar) -->
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h3 class="fw-bold m-0" style="letter-spacing: 1px;">数据管理中心</h3>
-    <div>
+<div class="data-toolbar">
+    <h3 class="fw-bold m-0 data-toolbar-title">数据管理中心</h3>
+    <div class="data-toolbar-actions">
         {% if current_user and current_user.role == 'admin' %}
         <button class="cmd-btn cmd-btn-primary" data-bs-toggle="offcanvas" data-bs-target="#uploadPanel">
             <i class="fa-solid fa-cloud-arrow-up me-2"></i>上传数据集
         </button>
         <button class="cmd-btn cmd-btn-primary" data-bs-toggle="modal" data-bs-target="#createMergeModal">
             <i class="fa-solid fa-layer-group me-2"></i>合并数据集
+        </button>
+        <button class="cmd-btn cmd-btn-primary" data-bs-toggle="modal" data-bs-target="#preprocessModal" title="按基因名对齐多个 h5ad 的表达矩阵，并生成新的预处理数据集">
+            <i class="fa-solid fa-code-compare me-2"></i>基因对齐预处理
+        </button>
+        <button class="cmd-btn" data-bs-toggle="modal" data-bs-target="#preprocessReportsModal">
+            <i class="fa-regular fa-file-lines me-2"></i>预处理报告
         </button>
         <button class="cmd-btn" onclick="batchDelete()">
             <i class="fa-solid fa-trash me-2"></i>批量删除
@@ -198,6 +238,154 @@
             </div>
             <div class="progress" style="height: 8px; background-color: rgba(255,255,255,0.1);">
                 <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" id="upload-bar" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 预处理报告 Modal ================= -->
+<div class="modal fade" id="preprocessReportsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content" style="background: #1a1a2e; border: 1px solid rgba(111,38,86,0.3);">
+            <div class="modal-header border-bottom border-secondary">
+                <h5 class="modal-title fw-bold"><i class="fa-regular fa-file-lines me-2" style="color: var(--nankai-purple);"></i>预处理报告</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div style="color:#8A96A8; font-size:0.9rem;" class="mb-3">
+                    这里汇总基因对齐预处理的执行记录。可查看可读报告、导出 PDF，或下载结构化报告用于结果复核与流程追踪。
+                </div>
+                <div id="preprocessReportsLoading" class="text-center py-4">
+                    <div class="spinner-border text-primary mb-3" role="status"></div>
+                    <div style="color: #A0AABF;">加载报告列表...</div>
+                </div>
+                <div id="preprocessReportsEmpty" class="text-center py-4" style="display:none;">
+                    <i class="fa-regular fa-file-lines fa-3x mb-3" style="color: rgba(255,255,255,0.1);"></i>
+                    <div style="color:#8A96A8;">暂无预处理报告</div>
+                </div>
+                <div id="preprocessReportsTableWrap" style="display:none; overflow-x:auto;">
+                    <table class="table table-dark-fluent mb-0 w-100">
+                        <thead>
+                            <tr>
+                                <th>报告</th>
+                                <th>对应数据集</th>
+                                <th>对齐方式</th>
+                                <th>细胞 / 基因</th>
+                                <th>生成时间</th>
+                                <th class="text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="preprocessReportsTbody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer border-top border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn cmd-btn-primary" onclick="loadPreprocessReports()">
+                    <i class="fa-solid fa-rotate-right me-1"></i>刷新
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 可读预处理报告 Modal ================= -->
+<div class="modal fade" id="readablePreprocessReportModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content" style="background: #1a1a2e; border: 1px solid rgba(111,38,86,0.3);">
+            <div class="modal-header border-bottom border-secondary">
+                <h5 class="modal-title fw-bold"><i class="fa-regular fa-file-lines me-2" style="color: var(--nankai-purple);"></i>基因对齐预处理报告</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="readablePreprocessReportBody">
+                <div class="text-center py-4" style="color:#8A96A8;">正在加载报告内容...</div>
+            </div>
+            <div class="modal-footer border-top border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-outline-light" id="downloadReadableReportBtn">
+                    <i class="fa-solid fa-download me-1"></i>下载结构化报告
+                </button>
+                <button type="button" class="btn cmd-btn-primary" id="printReadableReportBtn">
+                    <i class="fa-solid fa-file-pdf me-1"></i>导出 PDF
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 基因对齐预处理 Modal ================= -->
+<div class="modal fade" id="preprocessModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content" style="background: #1a1a2e; border: 1px solid rgba(111,38,86,0.3);">
+            <div class="modal-header border-bottom border-secondary">
+                <h5 class="modal-title fw-bold"><i class="fa-solid fa-code-compare me-2" style="color: var(--nankai-purple);"></i>基因对齐预处理</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3 p-3" style="background: rgba(74,144,226,0.08); border: 1px solid rgba(74,144,226,0.22); border-radius: 8px; color: #DCE6F5;">
+                    <div class="fw-bold mb-2"><i class="fa-solid fa-circle-info me-1" style="color:#4A90E2;"></i>使用说明：多数据集基因对齐预处理</div>
+                    <div style="font-size: 0.9rem; line-height: 1.7; color: #AEB8CA;">
+                        将多个 h5ad 数据集按基因名对齐并合并为新的 h5ad 文件，用于解决跨数据集基因维度不一致的问题。
+                        <span class="text-white">inner</span> 仅保留共同基因，结果更保守；
+                        <span class="text-white">outer</span> 保留全部基因，缺失表达值补 0。
+                        完成后，新数据集会加入列表，并生成可读报告与结构化处理记录。
+                    </div>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-7">
+                        <label class="form-label text-muted">选择源数据集（至少 2 个）</label>
+                        <div id="preprocessSourceList" class="p-3" style="background: rgba(255,255,255,0.03); border-radius: 8px; max-height: 260px; overflow-y: auto;">
+                            <div style="color: #8A96A8;">正在加载数据集列表...</div>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label text-muted">输出数据集名称</label>
+                        <input type="text" class="form-control dark-control mb-3" id="preprocessOutputName" value="joint_aligned" placeholder="例如：joint_aligned">
+                        <div class="form-text mb-3" style="color:#8A96A8;">新生成的数据集文件名，例如填写 joint_aligned 会生成 joint_aligned.h5ad。</div>
+                        <label class="form-label text-muted">基因对齐方式</label>
+                        <select class="form-select dark-control mb-3" id="preprocessJoin">
+                            <option value="inner" selected>inner：只保留共同基因</option>
+                            <option value="outer">outer：保留全部基因，缺失补 0</option>
+                        </select>
+                        <div class="form-text mb-3" style="color:#8A96A8;">inner 仅保留各数据集共有基因；outer 保留全部基因，缺失位置补 0。</div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label text-muted">基因保留阈值（min cells）</label>
+                                <input type="number" min="1" class="form-control dark-control" id="preprocessMinCells" value="3">
+                                <div class="form-text" style="color:#8A96A8;">一个基因至少在多少个细胞中出现才保留。</div>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label text-muted">细胞保留阈值（min genes）</label>
+                                <input type="number" min="1" class="form-control dark-control" id="preprocessMinGenes" value="200">
+                                <div class="form-text" style="color:#8A96A8;">一个细胞至少检测到多少个基因才保留。</div>
+                            </div>
+                        </div>
+                        <div class="form-check mt-3">
+                            <input class="form-check-input" type="checkbox" id="preprocessNormalize" checked>
+                            <label class="form-check-label text-white" for="preprocessNormalize">表达总量归一化（normalize total）</label>
+                        </div>
+                        <div class="form-text ms-4" style="color:#8A96A8;">把不同细胞的总表达量拉到统一尺度。</div>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" id="preprocessLog1p" checked>
+                            <label class="form-check-label text-white" for="preprocessLog1p">表达值平滑转换（log1p）</label>
+                        </div>
+                        <div class="form-text ms-4" style="color:#8A96A8;">执行 log(1 + x)，压缩过大的表达值。</div>
+                    </div>
+                </div>
+                <div id="preprocessHint" class="mt-3" style="color: #8A96A8; font-size: 0.88rem;">
+                    默认配置：inner、基因保留阈值 = 3、细胞保留阈值 = 200，并执行表达总量归一化与 log1p 转换。
+                </div>
+                <div id="preprocessProgress" class="mt-3" style="display:none; color:#A0AABF;">
+                    <span class="spinner-border spinner-border-sm me-2"></span>正在读取、清洗并对齐基因，数据集较大时可能需要一段时间...
+                </div>
+                <div id="preprocessError" class="mt-3" style="color: #ff6b6b; display: none;"></div>
+                <div id="preprocessSuccess" class="mt-3" style="display: none;"></div>
+            </div>
+            <div class="modal-footer border-top border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" id="startPreprocessBtn" onclick="startPreprocessDatasets()" style="background-color: var(--nankai-purple); border-color: var(--nankai-purple);">
+                    <i class="fa-solid fa-play me-1"></i>开始预处理
+                </button>
             </div>
         </div>
     </div>
@@ -591,6 +779,215 @@
         });
         selectAll.indeterminate = false;
     });
+
+    // ==================== 基因对齐预处理功能 ====================
+
+    document.getElementById('preprocessReportsModal').addEventListener('show.bs.modal', loadPreprocessReports);
+
+    async function loadPreprocessReports() {
+        const loading = document.getElementById('preprocessReportsLoading');
+        const empty = document.getElementById('preprocessReportsEmpty');
+        const tableWrap = document.getElementById('preprocessReportsTableWrap');
+        const tbody = document.getElementById('preprocessReportsTbody');
+        loading.style.display = 'block';
+        empty.style.display = 'none';
+        tableWrap.style.display = 'none';
+        tbody.innerHTML = '';
+        try {
+            const res = await fetch('/api/datasets/preprocess/reports');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '加载失败');
+            const reports = data.reports || [];
+            loading.style.display = 'none';
+            if (reports.length === 0) { empty.style.display = 'block'; return; }
+            tableWrap.style.display = 'block';
+            tbody.innerHTML = reports.map(report => {
+                const statusBadge = report.dataset_exists
+                    ? '<span class="badge" style="background: rgba(46,204,113,0.18); color:#2ecc71;">数据集存在</span>'
+                    : '<span class="badge" style="background: rgba(255,107,107,0.16); color:#ff6b6b;">仅报告</span>';
+                return `<tr>
+                    <td><div class="fw-bold text-white">${report.name || '-'}</div><small style="color:#8A96A8;">${formatNumber((report.size_bytes || 0) / 1024)} KB</small></td>
+                    <td><div>${report.dataset_id || '-'}</div>${statusBadge}</td>
+                    <td>${report.join || '-'}</td>
+                    <td>${formatNumber(report.total_cells)} / ${formatNumber(report.aligned_genes)}</td>
+                    <td>${report.created_at || report.modified_at || '-'}</td>
+                    <td class="text-center">
+                        <button type="button" class="btn btn-sm btn-outline-light me-1" onclick="viewPreprocessReport('${report.name}')" title="查看可读报告"><i class="fa-regular fa-eye"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-light me-1" onclick="downloadPreprocessReport('${report.name}')" title="下载结构化报告"><i class="fa-solid fa-download"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-light" onclick="deletePreprocessReport('${report.name}')" title="删除报告"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>`;
+            }).join('');
+        } catch (err) {
+            loading.style.display = 'none';
+            empty.style.display = 'block';
+            empty.innerHTML = `<div style="color:#ff6b6b;">报告列表加载失败：${err.message || '未知错误'}</div>`;
+        }
+    }
+
+    function downloadPreprocessReport(reportName) {
+        window.location.href = `/api/datasets/preprocess/reports/${encodeURIComponent(reportName)}?download=true`;
+    }
+
+    async function viewPreprocessReport(reportName) {
+        try {
+            const res = await fetch(`/api/datasets/preprocess/reports/${encodeURIComponent(reportName)}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '报告加载失败');
+            renderReadablePreprocessReport(data);
+            const modal = new bootstrap.Modal(document.getElementById('readablePreprocessReportModal'));
+            modal.show();
+        } catch (err) { alert('报告加载失败：' + (err.message || '未知错误')); }
+    }
+
+    async function deletePreprocessReport(reportName) {
+        if (!confirm(`确定删除报告 "${reportName}" 吗？\n此操作只删除处理报告，不会删除 h5ad 数据集。`)) return;
+        try {
+            const res = await fetch(`/api/datasets/preprocess/reports/${encodeURIComponent(reportName)}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '删除失败');
+            await loadPreprocessReports();
+        } catch (err) { alert('删除报告失败：' + (err.message || '未知错误')); }
+    }
+
+    function reportBoolText(value) { return value ? '是' : '否'; }
+
+    function renderReadablePreprocessReport(payload) {
+        const report = payload.report || {};
+        const datasets = Array.isArray(report.datasets) ? report.datasets : [];
+        const datasetRows = datasets.length
+            ? datasets.map(item => `<tr><td>${item.dataset_id||'-'}</td><td>${formatNumber(item.n_cells_before)}</td><td>${formatNumber(item.n_cells_after)}</td><td>${formatNumber(item.n_genes_before)}</td><td>${formatNumber(item.n_genes_after)}</td></tr>`).join('')
+            : '<tr><td colspan="5" class="text-center" style="color:#8A96A8;">暂无源数据集明细</td></tr>';
+        const datasetStatus = payload.dataset_exists
+            ? '<span style="color:#2ecc71;">已生成对应数据集</span>'
+            : '<span style="color:#ffb020;">未检测到对应数据集</span>';
+        document.getElementById('readablePreprocessReportBody').innerHTML = `
+            <div id="printablePreprocessReport" style="color:#DCE6F5;">
+                <div class="mb-3"><div class="fw-bold text-white" style="font-size:1.05rem;">${payload.dataset_id||'-'}</div><div style="color:#8A96A8; font-size:0.88rem;">报告文件：${payload.name||'-'}</div></div>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4"><span style="color:#8A96A8;">报告状态：</span>${datasetStatus}</div>
+                    <div class="col-md-4"><span style="color:#8A96A8;">生成时间：</span>${report.created_at||payload.modified_at||'-'}</div>
+                    <div class="col-md-4"><span style="color:#8A96A8;">源数据集数量：</span>${formatNumber(report.n_datasets)}</div>
+                    <div class="col-md-4"><span style="color:#8A96A8;">对齐方式：</span>${report.join||'-'}</div>
+                    <div class="col-md-4"><span style="color:#8A96A8;">总细胞数：</span>${formatNumber(report.total_cells)}</div>
+                    <div class="col-md-4"><span style="color:#8A96A8;">对齐后基因数：</span>${formatNumber(report.aligned_genes)}</div>
+                </div>
+                <div class="mb-3 p-3" style="background:rgba(255,255,255,0.03); border-radius:8px;">
+                    <div class="fw-bold mb-2 text-white">处理参数</div>
+                    <div class="row g-2" style="font-size:0.9rem;">
+                        <div class="col-md-6"><span style="color:#8A96A8;">基因保留阈值：</span>${formatNumber(report.min_cells)} 个细胞</div>
+                        <div class="col-md-6"><span style="color:#8A96A8;">细胞保留阈值：</span>${formatNumber(report.min_genes)} 个基因</div>
+                        <div class="col-md-6"><span style="color:#8A96A8;">表达总量归一化：</span>${reportBoolText(report.normalize_total)}</div>
+                        <div class="col-md-6"><span style="color:#8A96A8;">log1p 转换：</span>${reportBoolText(report.log1p)}</div>
+                    </div>
+                </div>
+                <div><div class="fw-bold mb-2 text-white">源数据集明细</div><div style="overflow-x:auto;"><table class="table table-dark-fluent mb-0" style="font-size:0.84rem;"><thead><tr><th>数据集</th><th>细胞数（处理前）</th><th>细胞数（处理后）</th><th>基因数（处理前）</th><th>基因数（处理后）</th></tr></thead><tbody>${datasetRows}</tbody></table></div></div>
+            </div>`;
+        document.getElementById('downloadReadableReportBtn').onclick = () => downloadPreprocessReport(payload.name);
+        document.getElementById('printReadableReportBtn').onclick = () => printReadablePreprocessReport(payload.dataset_id || 'preprocess_report');
+    }
+
+    function printReadablePreprocessReport(title) {
+        const content = document.getElementById('printablePreprocessReport');
+        if (!content) return;
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) { alert('浏览器阻止了新窗口，请允许弹窗后重试。'); return; }
+        printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title} 预处理报告</title><style>body{font-family:Arial,"Microsoft YaHei",sans-serif;color:#222;padding:32px;line-height:1.6;}table{border-collapse:collapse;width:100%;margin-top:8px;}th,td{border:1px solid #d8dde6;padding:8px;text-align:left;}th{background:#f2f4f8;}.text-white,.fw-bold{color:#111!important;font-weight:700;}div{color:#222!important;}span{color:#596579!important;}</style></head><body><h1>基因对齐预处理报告</h1>${content.innerHTML}</body></html>`);
+        printWindow.document.close();
+        printWindow.focus();
+        printWindow.print();
+    }
+
+    document.getElementById('preprocessModal').addEventListener('show.bs.modal', async () => {
+        document.getElementById('preprocessOutputName').value = 'joint_aligned';
+        document.getElementById('preprocessJoin').value = 'inner';
+        document.getElementById('preprocessMinCells').value = '3';
+        document.getElementById('preprocessMinGenes').value = '200';
+        document.getElementById('preprocessNormalize').checked = true;
+        document.getElementById('preprocessLog1p').checked = true;
+        document.getElementById('preprocessError').style.display = 'none';
+        document.getElementById('preprocessSuccess').style.display = 'none';
+        document.getElementById('preprocessSuccess').innerHTML = '';
+        document.getElementById('preprocessProgress').style.display = 'none';
+        await loadPreprocessSourceList();
+    });
+
+    async function loadPreprocessSourceList() {
+        const container = document.getElementById('preprocessSourceList');
+        container.innerHTML = '<div style="color: #8A96A8;">正在加载...</div>';
+        try {
+            const res = await fetch('/api/datasets');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '加载失败');
+            const datasets = (data.datasets || []).filter(ds => !ds.is_merged);
+            if (datasets.length < 2) { container.innerHTML = '<div style="color: #ff6b6b;">至少需要 2 个原始数据集才能进行基因对齐</div>'; return; }
+            container.innerHTML = datasets.map(ds => `<div class="form-check mb-2"><input class="form-check-input preprocess-source-cb" type="checkbox" value="${ds.id}" id="preprocessSrc_${ds.id}"><label class="form-check-label text-white" for="preprocessSrc_${ds.id}">${ds.id} <small style="color: #8A96A8;">(${formatNumber(ds.n_cells)} 细胞, ${formatNumber(ds.n_genes)} 基因)</small></label></div>`).join('');
+        } catch (err) { container.innerHTML = `<div style="color: #ff6b6b;">加载失败：${err.message || '未知错误'}</div>`; }
+    }
+
+    async function startPreprocessDatasets() {
+        const checked = document.querySelectorAll('.preprocess-source-cb:checked');
+        const sourceDatasets = Array.from(checked).map(cb => cb.value);
+        const outputName = document.getElementById('preprocessOutputName').value.trim();
+        const errorEl = document.getElementById('preprocessError');
+        const successEl = document.getElementById('preprocessSuccess');
+        const progressEl = document.getElementById('preprocessProgress');
+        const btn = document.getElementById('startPreprocessBtn');
+        errorEl.style.display = 'none';
+        successEl.style.display = 'none';
+        successEl.innerHTML = '';
+        if (sourceDatasets.length < 2) { errorEl.textContent = '请至少选择 2 个源数据集'; errorEl.style.display = 'block'; return; }
+        if (!outputName) { errorEl.textContent = '请输入输出数据集名称'; errorEl.style.display = 'block'; return; }
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>处理中...';
+        progressEl.style.display = 'block';
+        try {
+            const payload = {
+                source_datasets: sourceDatasets, output_name: outputName,
+                join: document.getElementById('preprocessJoin').value,
+                min_cells: parseInt(document.getElementById('preprocessMinCells').value, 10) || 1,
+                min_genes: parseInt(document.getElementById('preprocessMinGenes').value, 10) || 1,
+                normalize_total: document.getElementById('preprocessNormalize').checked,
+                log1p: document.getElementById('preprocessLog1p').checked,
+            };
+            const res = await fetch('/api/datasets/preprocess', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '预处理失败');
+            renderPreprocessSuccess(data);
+            successEl.style.display = 'block';
+            await loadDatasets();
+        } catch (err) {
+            errorEl.textContent = err.message || '预处理失败';
+            errorEl.style.display = 'block';
+        } finally {
+            progressEl.style.display = 'none';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-play me-1"></i>开始预处理';
+        }
+    }
+
+    function renderPreprocessSuccess(data) {
+        const successEl = document.getElementById('preprocessSuccess');
+        const report = data.report || {};
+        const datasets = Array.isArray(report.datasets) ? report.datasets : [];
+        const sourceNames = datasets.map(item => item.dataset_id).filter(Boolean).join('、') || '-';
+        const datasetRows = datasets.length
+            ? datasets.map(item => `<tr><td class="text-white">${item.dataset_id||'-'}</td><td>${formatNumber(item.n_cells_before)}</td><td>${formatNumber(item.n_cells_after)}</td><td>${formatNumber(item.n_genes_before)}</td><td>${formatNumber(item.n_genes_after)}</td></tr>`).join('')
+            : '<tr><td colspan="5" class="text-center" style="color:#8A96A8;">暂无源数据集明细</td></tr>';
+        successEl.innerHTML = `
+            <div style="border:1px solid rgba(46,204,113,0.25); background:rgba(46,204,113,0.08); border-radius:8px; padding:14px;">
+                <div class="fw-bold mb-3" style="color:#2ecc71;"><i class="fa-solid fa-check-circle me-1"></i>预处理完成</div>
+                <div class="row g-2" style="color:#DCE6F5; font-size:0.9rem;">
+                    <div class="col-md-6"><span style="color:#8A96A8;">新数据集 ID：</span><strong>${data.dataset_id||'-'}</strong></div>
+                    <div class="col-md-6"><span style="color:#8A96A8;">对齐方式：</span>${report.join||'-'}</div>
+                    <div class="col-md-6"><span style="color:#8A96A8;">源数据集数量：</span>${formatNumber(report.n_datasets)}</div>
+                    <div class="col-md-6"><span style="color:#8A96A8;">源数据集：</span>${sourceNames}</div>
+                    <div class="col-md-6"><span style="color:#8A96A8;">总细胞数：</span>${formatNumber(report.total_cells)}</div>
+                    <div class="col-md-6"><span style="color:#8A96A8;">对齐基因数：</span>${formatNumber(report.aligned_genes)}</div>
+                </div>
+                <div class="mt-2" style="color:#8A96A8; font-size:0.84rem;">新数据集已加入列表，可继续构建索引或用于检索分析。</div>
+            </div>`;
+    }
 
     function batchDelete() {
         const checkedBoxes = document.querySelectorAll('#dataset-tbody .row-checkbox:checked');

@@ -117,6 +117,8 @@ def prepare_joint_dataset(
         )
 
     merged = align_and_concat(adatas, dataset_ids=ids, join=join)
+    merged.obs = _sanitize_dataframe_for_h5ad(merged.obs)
+    merged.var = _sanitize_dataframe_for_h5ad(merged.var)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     merged.write_h5ad(output)
@@ -147,6 +149,10 @@ def clean_adata(
     log1p: bool = False,
 ) -> ad.AnnData:
     cleaned = adata.copy()
+    cleaned.obs_names = pd.Index(cleaned.obs_names).astype(str)
+    cleaned.var_names = pd.Index(cleaned.var_names).astype(str)
+    cleaned.obs = _sanitize_dataframe_for_h5ad(cleaned.obs)
+    cleaned.var = _sanitize_dataframe_for_h5ad(cleaned.var)
     cleaned.var_names_make_unique()
     cleaned.obs_names_make_unique()
 
@@ -166,6 +172,16 @@ def clean_adata(
     cleaned.obs["source_cell_id"] = cleaned.obs_names.astype(str)
     cleaned.obs_names = [f"{dataset_id}:{cell_id}" for cell_id in cleaned.obs_names]
     return cleaned
+
+
+def _sanitize_dataframe_for_h5ad(frame: pd.DataFrame) -> pd.DataFrame:
+    sanitized = frame.copy()
+    for column in sanitized.columns:
+        series = sanitized[column]
+        if pd.api.types.is_object_dtype(series.dtype) or isinstance(series.dtype, pd.CategoricalDtype):
+            values = series.astype(object)
+            sanitized[column] = values.map(lambda value: "" if pd.isna(value) else str(value))
+    return sanitized
 
 
 def align_and_concat(
@@ -267,4 +283,3 @@ def _normalize_total(matrix: Any, target_sum: float = 1e4) -> np.ndarray:
 
 def _log1p(matrix: Any) -> np.ndarray:
     return np.log1p(_as_dense_array(matrix).astype(np.float32, copy=False))
-
