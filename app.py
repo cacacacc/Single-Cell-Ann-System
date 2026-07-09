@@ -112,6 +112,10 @@ _USER_STORE_PATH: Optional[Path] = None
 ViewFunc = TypeVar("ViewFunc", bound=Callable[..., Any])
 
 
+def _merged_dir() -> Path:
+    return DATA_DIR / ".merged"
+
+
 def _normalize_dataset_id(dataset_id: Optional[str]) -> Optional[str]:
     if dataset_id is None:
         return None
@@ -122,7 +126,27 @@ def _normalize_dataset_id(dataset_id: Optional[str]) -> Optional[str]:
 
 
 def _is_merged_dataset(dataset_id: str) -> bool:
-    return (MERGED_DIR / f"{dataset_id}.json").exists()
+    return (_merged_dir() / f"{dataset_id}.json").exists()
+
+
+def _normalize_dataset_ids(value: Any) -> List[str]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, str):
+        raw_items = [item.strip() for item in value.split(",")]
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = [str(item).strip() for item in value]
+    else:
+        raise ValueError("dataset_ids must be a list or comma-separated string")
+
+    result: List[str] = []
+    seen = set()
+    for item in raw_items:
+        normalized = _normalize_dataset_id(item)
+        if normalized and normalized not in seen:
+            result.append(normalized)
+            seen.add(normalized)
+    return result
 
 
 def _get_merged_loader(merged_id: str) -> MergedDataLoader:
@@ -135,6 +159,78 @@ def _get_merged_loader(merged_id: str) -> MergedDataLoader:
     merged = MergedDataLoader(config, source_loaders)
     _MERGED_CACHE[merged_id] = merged
     return merged
+
+
+def _ensure_joint_dataset(source_datasets: List[str], use_rep: str) -> str:
+    if len(source_datasets) < 2:
+        raise ValueError("at least 2 source datasets are required for joint search")
+    if any(_is_merged_dataset(ds_id) for ds_id in source_datasets):
+        raise ValueError("joint search source_datasets must be raw datasets, not merged datasets")
+
+    loaders = {}
+    for ds_id in source_datasets:
+        _resolve_dataset_path(ds_id)
+        loaders[ds_id] = _get_loader(ds_id)
+
+    for ds_id, loader in loaders.items():
+        if use_rep not in loader.available_reps:
+            raise ValueError(
+                f"source dataset '{ds_id}' does not have representation '{use_rep}', "
+                f"available: {loader.available_reps}"
+            )
+
+    dims = {ds_id: loader.vector_dim(use_rep) for ds_id, loader in loaders.items()}
+    if len(set(dims.values())) > 1:
+        raise ValueError(f"dimension mismatch across sources for '{use_rep}': {dims}")
+
+    merged_id = _make_merged_id(source_datasets)
+    if not _is_merged_dataset(merged_id):
+        config = MergedDatasetConfig(
+            merged_id=merged_id,
+            name="Joint search: " + ", ".join(source_datasets),
+            source_datasets=source_datasets,
+            use_rep=use_rep,
+        )
+        save_merged_config(DATA_DIR, config)
+        _MERGED_CACHE.pop(merged_id, None)
+        _DATASET_CACHE.pop(merged_id, None)
+    return merged_id
+
+
+def _resolve_search_dataset(payload: Dict[str, Any], use_rep: str) -> Tuple[str, Path, List[str]]:
+    source_datasets = _normalize_dataset_ids(payload.get("dataset_ids"))
+    if len(source_datasets) >= 2:
+        resolved_id = _ensure_joint_dataset(source_datasets, use_rep)
+        return resolved_id, _resolve_dataset_path(resolved_id), source_datasets
+
+    dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
+    dataset_path = _resolve_dataset_path(dataset_id)
+    return _dataset_id_from_path(dataset_path), dataset_path, source_datasets
+
+
+def _cell_index_from_request_id(
+    loader: Any,
+    resolved_id: str,
+    cell_id: str,
+    source_datasets: Optional[List[str]] = None,
+    query_source_dataset: Optional[str] = None,
+) -> int:
+    lookup = str(cell_id).strip()
+    sources = source_datasets or []
+    if sources and ":" not in lookup:
+        if not query_source_dataset:
+            raise ValueError("query_source_dataset is required when joint search cell_id is not prefixed")
+        if query_source_dataset not in sources:
+            raise ValueError("query_source_dataset must be one of dataset_ids")
+        lookup = f"{query_source_dataset}:{lookup}"
+
+    try:
+        return loader.cell_index_from_id(lookup)
+    except KeyError:
+        if not sources and not _is_merged_dataset(resolved_id) and ":" in lookup:
+            _, raw_cell_id = lookup.split(":", 1)
+            return loader.cell_index_from_id(raw_cell_id)
+        raise
 
 
 def _merged_dataset_payload(config: MergedDatasetConfig) -> Dict[str, Any]:
@@ -174,7 +270,7 @@ def _resolve_dataset_path(dataset_id: Optional[str]) -> Path:
         name = _normalize_dataset_id(dataset_id)
         assert name is not None
         if _is_merged_dataset(name):
-            return MERGED_DIR / f"{name}.json"
+            return _merged_dir() / f"{name}.json"
         candidate = DATA_DIR / name
         if candidate.suffix == "":
             candidate = candidate.with_suffix(".h5ad")
@@ -1252,13 +1348,18 @@ def health():
 def metadata():
     try:
         payload = dict(request.args)
-        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
-        dataset_path = _resolve_dataset_path(dataset_id)
-        resolved_id = _dataset_id_from_path(dataset_path)
+        dataset_id_values = request.args.getlist("dataset_ids")
+        if len(dataset_id_values) > 1:
+            payload["dataset_ids"] = dataset_id_values
         use_rep = payload.get("use_rep", DEFAULT_USE_REP)
+        resolved_id, dataset_path, source_datasets = _resolve_search_dataset(payload, use_rep)
         index_name = payload.get("index_name")
         index_config = _index_config_from_payload(payload)
-        return _json_response(_metadata_payload(resolved_id, use_rep, index_config, index_name=index_name))
+        result = _metadata_payload(resolved_id, use_rep, index_config, index_name=index_name)
+        if source_datasets:
+            result["joint_search"] = True
+            result["source_datasets"] = source_datasets
+        return _json_response(result)
     except Exception as exc:
         return _json_response({"error": str(exc)}, 400)
 
@@ -1466,7 +1567,7 @@ def umap_cells():
         for raw_cell_id in cell_ids:
             cell_id = str(raw_cell_id)
             try:
-                idx = loader.cell_index_from_id(cell_id)
+                idx = _cell_index_from_request_id(loader, resolved_id, cell_id)
             except KeyError:
                 missing.append(cell_id)
                 continue
@@ -1774,10 +1875,8 @@ def search():
     try:
         total_start_time = time.perf_counter()
         payload = _request_payload()
-        dataset_id = _normalize_dataset_id(payload.get("dataset_id"))
-        dataset_path = _resolve_dataset_path(dataset_id)
-        resolved_id = _dataset_id_from_path(dataset_path)
         use_rep = payload.get("use_rep") or DEFAULT_USE_REP
+        resolved_id, dataset_path, source_datasets = _resolve_search_dataset(payload, use_rep)
         index_name = payload.get("index_name")
         index_config = _index_config_from_payload(payload)
 
@@ -1802,7 +1901,14 @@ def search():
         if cell_index_value is None or cell_index_value == "":
             if cell_id_value is None or str(cell_id_value).strip() == "":
                 raise ValueError("cell_index or cell_id is required")
-            cell_index = loader.cell_index_from_id(str(cell_id_value))
+            query_source_dataset = _normalize_dataset_id(payload.get("query_source_dataset"))
+            cell_index = _cell_index_from_request_id(
+                loader,
+                resolved_id,
+                str(cell_id_value),
+                source_datasets=source_datasets,
+                query_source_dataset=query_source_dataset,
+            )
         else:
             cell_index = _parse_int(payload, "cell_index", required=True)
 
@@ -1864,6 +1970,8 @@ def search():
         total_elapsed_ms = round((time.perf_counter() - total_start_time) * 1000.0, 2)
         response_payload = {
             "dataset_id": resolved_id,
+            "dataset_ids": source_datasets,
+            "joint_search": bool(source_datasets),
             "query_cell": cell_index,
             "cell_id": query_cell_id,
             "k": k,
@@ -2381,7 +2489,14 @@ def _resolve_query_vector(
     if cell_index_value is not None and cell_index_value != "":
         cell_index = int(cell_index_value)
     elif cell_id_value is not None and str(cell_id_value).strip():
-        cell_index = loader.cell_index_from_id(str(cell_id_value))
+        cell_id_lookup = str(cell_id_value).strip()
+        try:
+            cell_index = loader.cell_index_from_id(cell_id_lookup)
+        except KeyError:
+            if ":" not in cell_id_lookup:
+                raise
+            _, raw_cell_id = cell_id_lookup.split(":", 1)
+            cell_index = loader.cell_index_from_id(raw_cell_id)
 
     if cell_index is None:
         return None

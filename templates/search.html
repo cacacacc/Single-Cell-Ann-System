@@ -433,6 +433,18 @@
                     <select class="form-select dark-control" id="datasetSelect">
                         <option value="" disabled selected>正在加载数据集...</option>
                     </select>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="jointSearchToggle">
+                        <label class="form-check-label" for="jointSearchToggle" style="color: #A0AABF;">
+                            多数据集联合检索
+                        </label>
+                    </div>
+                    <div id="jointDatasetPanel" class="mt-2 p-2 d-none" style="background-color: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
+                        <div class="small mb-2" style="color: #8A96A8;">选择 2 个及以上源数据集，系统将自动建立联合索引并跨数据集搜索。</div>
+                        <div id="jointDatasetList" class="d-grid gap-1"></div>
+                        <label class="form-label mt-2 mb-1" style="font-size: 0.8rem; color: #A0AABF;">查询细胞来源数据集</label>
+                        <select class="form-select dark-control" id="querySourceDatasetSelect"></select>
+                    </div>
                 </div>
 
                 <div class="mb-4">
@@ -790,6 +802,10 @@
     const slider = document.getElementById('topKSlider');
     const kValue = document.getElementById('k-value');
     const datasetSelect = document.getElementById('datasetSelect');
+    const jointSearchToggle = document.getElementById('jointSearchToggle');
+    const jointDatasetPanel = document.getElementById('jointDatasetPanel');
+    const jointDatasetList = document.getElementById('jointDatasetList');
+    const querySourceDatasetSelect = document.getElementById('querySourceDatasetSelect');
     const indexBackendSelect = document.getElementById('indexBackendSelect');
     const savedIndexSection = document.getElementById('savedIndexSection');
     const savedIndexSelect = document.getElementById('savedIndexSelect');
@@ -829,6 +845,7 @@
     let currentCellOffset = 0;
     let nextCellOffset = null;
     let prevCellOffset = null;
+    let availableDatasets = [];
     const rerunParams = new URLSearchParams(window.location.search);
     const cellPageSize = 50;
     const indexTypeOptions = {
@@ -852,6 +869,77 @@
         ]
     };
     slider.addEventListener('input', (e) => { kValue.innerText = e.target.value; });
+
+    function isJointSearchEnabled() {
+        return Boolean(jointSearchToggle?.checked);
+    }
+
+    function getSelectedJointDatasetIds() {
+        if (!isJointSearchEnabled()) return [];
+        return Array.from(document.querySelectorAll('.joint-dataset-cb:checked')).map(cb => cb.value);
+    }
+
+    function getActiveDatasetId() {
+        const jointIds = getSelectedJointDatasetIds();
+        return jointIds.length >= 2 ? jointIds.join(',') : datasetSelect.value;
+    }
+
+    function getMetadataParams() {
+        const params = new URLSearchParams({
+            index_backend: indexBackendSelect.value,
+            index_type: indexTypeSelect.value,
+            index_metric: indexMetricSelect.value,
+            pq_m: pqMInput.value,
+            pq_nbits: pqNbitsInput.value
+        });
+        const jointIds = getSelectedJointDatasetIds();
+        if (jointIds.length >= 2) {
+            params.set('dataset_ids', jointIds.join(','));
+        } else if (datasetSelect.value) {
+            params.set('dataset_id', datasetSelect.value);
+        }
+        return params;
+    }
+
+    function updateQuerySourceOptions() {
+        if (!querySourceDatasetSelect) return;
+        const selectedIds = getSelectedJointDatasetIds();
+        const fallbackIds = datasetSelect.value ? [datasetSelect.value] : [];
+        const ids = selectedIds.length ? selectedIds : fallbackIds;
+        const previous = querySourceDatasetSelect.value;
+        querySourceDatasetSelect.innerHTML = ids
+            .map(id => `<option value="${id}">${id}</option>`)
+            .join('');
+        if (ids.includes(previous)) {
+            querySourceDatasetSelect.value = previous;
+        } else if (ids.includes(datasetSelect.value)) {
+            querySourceDatasetSelect.value = datasetSelect.value;
+        }
+    }
+
+    async function refreshForDatasetMode() {
+        const datasetId = datasetSelect.value;
+        const jointIds = getSelectedJointDatasetIds();
+        const effectiveId = jointIds.length >= 2 ? jointIds.join(',') : datasetId;
+        if (!effectiveId) return;
+        if (jointIds.length >= 2) {
+            await refreshMetadata();
+            cellBrowserStatus.innerText = '联合检索使用源数据集细胞 ID';
+            cellBrowserList.innerHTML = '<div class="p-3" style="color: #8A96A8; font-size: 0.85rem;">请输入源数据集中的 Cell ID，或使用“source_dataset:cell_id”格式。</div>';
+            prevCellsBtn.disabled = true;
+            nextCellsBtn.disabled = true;
+            currentUmapPoints = [];
+            currentUmapCategories = [];
+            forcedUmapPointMap = new Map();
+            legendContainer.innerHTML = '<div style="color: #8A96A8; font-size: 0.85rem;">联合检索不加载统一 UMAP；结果表中会显示来源数据集。</div>';
+            myChart.clear();
+            return;
+        }
+        await checkExistingIndex(datasetId);
+        await refreshMetadata();
+        await loadCells(0);
+        await loadUmap();
+    }
 
     function suggestedPqM(dim, preferred) {
         if (!Number.isFinite(dim) || dim <= 0) return 1;
@@ -888,17 +976,10 @@
     }
 
     async function refreshMetadata() {
-        const datasetId = datasetSelect.value;
-        if (!datasetId) return;
+        const activeDatasetId = getActiveDatasetId();
+        if (!activeDatasetId) return;
         try {
-            const params = new URLSearchParams({
-                dataset_id: datasetId,
-                index_backend: indexBackendSelect.value,
-                index_type: indexTypeSelect.value,
-                index_metric: indexMetricSelect.value,
-                pq_m: pqMInput.value,
-                pq_nbits: pqNbitsInput.value
-            });
+            const params = getMetadataParams();
             const res = await fetch(`/api/metadata?${params.toString()}`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'metadata failed');
@@ -1569,13 +1650,16 @@
                 datasetSelect.disabled = true;
                 return;
             }
+            availableDatasets = data.datasets || [];
             datasetSelect.innerHTML = data.datasets
                 .map(ds => `<option value="${ds.id}">${ds.filename}</option>`)
                 .join('');
+            renderJointDatasetList();
             const rerunDataset = rerunParams.get('dataset_id');
             if (rerunDataset && data.datasets.some(ds => ds.id === rerunDataset)) {
                 datasetSelect.value = rerunDataset;
             }
+            updateQuerySourceOptions();
             await checkExistingIndex(datasetSelect.value);
             await refreshMetadata();
             applyRerunParams();
@@ -1585,6 +1669,31 @@
             datasetSelect.innerHTML = '<option value="" disabled selected>加载失败</option>';
             datasetSelect.disabled = true;
         }
+    }
+
+    function renderJointDatasetList() {
+        if (!jointDatasetList) return;
+        const rawDatasets = (availableDatasets || []).filter(ds => !ds.is_merged);
+        if (rawDatasets.length < 2) {
+            jointDatasetList.innerHTML = '<div style="color: #ff6b6b; font-size: 0.85rem;">至少需要 2 个原始数据集</div>';
+            return;
+        }
+        jointDatasetList.innerHTML = rawDatasets.map(ds => {
+            const checked = ds.id === datasetSelect.value ? 'checked' : '';
+            return `
+                <label class="form-check-label d-flex align-items-center gap-2" style="color: #D6DCE8; font-size: 0.85rem;">
+                    <input class="form-check-input joint-dataset-cb" type="checkbox" value="${ds.id}" ${checked}>
+                    <span>${ds.id}</span>
+                    <small style="color: #8A96A8;">${ds.n_cells ? Number(ds.n_cells).toLocaleString() + ' cells' : ''}</small>
+                </label>
+            `;
+        }).join('');
+        document.querySelectorAll('.joint-dataset-cb').forEach(cb => {
+            cb.addEventListener('change', async () => {
+                updateQuerySourceOptions();
+                await refreshForDatasetMode();
+            });
+        });
     }
 
     async function checkExistingIndex(datasetId) {
@@ -1673,10 +1782,25 @@
 
     datasetSelect.addEventListener('change', async () => {
         const datasetId = datasetSelect.value;
-        await checkExistingIndex(datasetId);
-        await refreshMetadata();
-        await loadCells(0);
-        await loadUmap();
+        const datasetCb = document.querySelector(`.joint-dataset-cb[value="${CSS.escape(datasetId)}"]`);
+        if (datasetCb && !datasetCb.checked) datasetCb.checked = true;
+        updateQuerySourceOptions();
+        await refreshForDatasetMode();
+    });
+
+    jointSearchToggle.addEventListener('change', async () => {
+        jointDatasetPanel.classList.toggle('d-none', !isJointSearchEnabled());
+        savedIndexSection.classList.toggle('d-none', isJointSearchEnabled());
+        updateQuerySourceOptions();
+        if (isJointSearchEnabled()) {
+            const checked = getSelectedJointDatasetIds();
+            if (checked.length < 2) {
+                const candidates = Array.from(document.querySelectorAll('.joint-dataset-cb'));
+                candidates.slice(0, 2).forEach(cb => { cb.checked = true; });
+                updateQuerySourceOptions();
+            }
+        }
+        await refreshForDatasetMode();
     });
 
     prevCellsBtn.addEventListener('click', () => {
@@ -1725,6 +1849,8 @@
         const topK = parseInt(slider.value);
         const cellId = queryCellIdInput.value.trim();
         const datasetId = datasetSelect.value;
+        const jointIds = getSelectedJointDatasetIds();
+        const jointMode = isJointSearchEnabled() && jointIds.length >= 2;
         const indexBackend = indexBackendSelect.value;
         const indexType = indexTypeSelect.value;
         const indexMetric = indexMetricSelect.value;
@@ -1733,6 +1859,10 @@
 
         if (!datasetId) {
             alert('请先选择数据集');
+            return;
+        }
+        if (isJointSearchEnabled() && jointIds.length < 2) {
+            alert('联合检索请至少选择 2 个源数据集');
             return;
         }
         if (!cellId) {
@@ -1757,12 +1887,16 @@
                 cell_id: cellId,
                 k: topK,
             };
+            if (jointMode) {
+                payload.dataset_ids = jointIds;
+                payload.query_source_dataset = querySourceDatasetSelect.value || datasetId;
+            }
             if (filterField) {
                 payload.filter_field = filterField;
                 payload.filter_value = filterValue;
             }
 
-            if (useSavedIndex) {
+            if (useSavedIndex && !jointMode) {
                 // Use pre-built index — just pass the index name
                 payload.index_name = savedIndexSelect.value;
             } else {

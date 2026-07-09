@@ -51,6 +51,7 @@ class FlaskAppTests(unittest.TestCase):
         self.data_dir.mkdir()
         self.index_dir.mkdir()
         self.dataset_path = self.data_dir / "tiny.h5ad"
+        self.dataset2_path = self.data_dir / "tiny2.h5ad"
 
         adata = ad.AnnData(
             X=np.array(
@@ -88,6 +89,39 @@ class FlaskAppTests(unittest.TestCase):
         )
         adata.write_h5ad(self.dataset_path)
 
+        adata2 = ad.AnnData(
+            X=np.array(
+                [
+                    [0.0, 0.0, 0.0],
+                    [2.0, 0.0, 0.0],
+                    [0.0, 2.0, 0.0],
+                ],
+                dtype=np.float32,
+            ),
+            obs={
+                "cell_type": ["query2", "a2", "b2"],
+                "tissue": ["seed2", "liver2", "heart2"],
+            },
+        )
+        adata2.obs_names = ["cell-a", "cell-b", "cell-c"]
+        adata2.obsm["X_pca"] = np.array(
+            [
+                [0.2, 0.0],
+                [1.2, 0.0],
+                [0.0, 1.8],
+            ],
+            dtype=np.float32,
+        )
+        adata2.obsm["X_umap"] = np.array(
+            [
+                [0.2, 0.0],
+                [1.2, 0.0],
+                [0.0, 1.8],
+            ],
+            dtype=np.float32,
+        )
+        adata2.write_h5ad(self.dataset2_path)
+
         self.original_data_dir = app_module.DATA_DIR
         self.original_index_dir = app_module.INDEX_DIR
         self.original_default_data_path = app_module.DEFAULT_DATA_PATH
@@ -105,6 +139,7 @@ class FlaskAppTests(unittest.TestCase):
         app_module._DATASET_CACHE.clear()
         app_module._INDEX_CACHE.clear()
         app_module._BENCHMARK_INDEX_CACHE.clear()
+        app_module._MERGED_CACHE.clear()
         app_module._USER_STORE = None
         app_module._USER_STORE_PATH = None
         app_module._ENGINE_RUNTIME_CONFIG.clear()
@@ -128,6 +163,7 @@ class FlaskAppTests(unittest.TestCase):
         app_module._DATASET_CACHE.clear()
         app_module._INDEX_CACHE.clear()
         app_module._BENCHMARK_INDEX_CACHE.clear()
+        app_module._MERGED_CACHE.clear()
         app_module._USER_STORE = None
         app_module._USER_STORE_PATH = None
         app_module._ENGINE_RUNTIME_CONFIG.clear()
@@ -249,7 +285,7 @@ class FlaskAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         datasets = response.get_json()["datasets"]
-        self.assertEqual(len(datasets), 1)
+        self.assertEqual(len(datasets), 2)
         self.assertEqual(datasets[0]["id"], "tiny")
         self.assertEqual(datasets[0]["index_status"], "missing")
 
@@ -291,6 +327,51 @@ class FlaskAppTests(unittest.TestCase):
         self.assertEqual(len(search_payload["results"]), 2)
         self.assertEqual(search_payload["results"][0]["cell_id"], "cell-1")
         self.assertIn("snapshot_id", search_payload)
+
+    def test_joint_dataset_search_builds_cross_dataset_index(self) -> None:
+        self.login_admin()
+
+        response = self.client.post(
+            "/api/search",
+            json={
+                "dataset_ids": ["tiny", "tiny2"],
+                "query_source_dataset": "tiny",
+                "cell_id": "cell-0",
+                "k": 3,
+                "index_backend": "numpy",
+                "index_type": "brute",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["joint_search"])
+        self.assertEqual(payload["dataset_ids"], ["tiny", "tiny2"])
+        self.assertTrue(payload["dataset_id"].startswith("merged_"))
+        self.assertEqual(payload["cell_id"], "tiny:cell-0")
+        result_ids = [row["cell_id"] for row in payload["results"]]
+        self.assertIn("tiny2:cell-a", result_ids)
+        self.assertTrue(all(row["source_dataset"] in {"tiny", "tiny2"} for row in payload["results"]))
+
+    def test_single_dataset_search_accepts_prefixed_cell_id(self) -> None:
+        self.login_admin()
+
+        response = self.client.post(
+            "/api/search",
+            json={
+                "dataset_id": "tiny",
+                "cell_id": "other_dataset:cell-0",
+                "k": 2,
+                "index_backend": "numpy",
+                "index_type": "brute",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["dataset_id"], "tiny")
+        self.assertEqual(payload["cell_id"], "cell-0")
+        self.assertEqual(len(payload["results"]), 2)
 
     def test_search_snapshot_is_saved_and_can_be_deleted(self) -> None:
         self.login_admin()
