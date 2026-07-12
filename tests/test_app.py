@@ -1,3 +1,10 @@
+"""Integration-style tests for Flask routes and app-level helper behavior.
+
+The tests use tiny in-memory h5ad files and lightweight fake stores/LLMs so the
+route layer can be exercised without depending on external vector databases or
+networked model providers.
+"""
+
 from __future__ import annotations
 
 import math

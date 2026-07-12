@@ -1,3 +1,5 @@
+"""Tests for ANNIndexer validation, search ordering, metrics and persistence."""
+
 from __future__ import annotations
 
 import tempfile

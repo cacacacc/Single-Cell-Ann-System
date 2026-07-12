@@ -1,3 +1,5 @@
+"""Tests for prompt construction from deterministic cell query results."""
+
 from __future__ import annotations
 
 import unittest

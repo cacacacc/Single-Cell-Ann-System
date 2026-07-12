@@ -1,3 +1,5 @@
+"""Tests for multi-dataset .h5ad cleaning, gene alignment and reports."""
+
 from __future__ import annotations
 
 import tempfile

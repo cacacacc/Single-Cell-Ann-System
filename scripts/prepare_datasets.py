@@ -1,3 +1,11 @@
+"""Command-line helper for creating a gene-aligned joint .h5ad dataset.
+
+This script is a thin wrapper around ``backend.dataset_preprocessor``.  It is
+useful for offline preprocessing or reproducible demos where multiple source
+datasets need to be cleaned, gene-aligned, merged and accompanied by a JSON
+report outside the Flask UI.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -8,6 +16,7 @@ from backend.dataset_preprocessor import prepare_joint_dataset
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI options and keep defaults aligned with the web UI workflow."""
     parser = argparse.ArgumentParser(
         description="Clean and align multiple single-cell .h5ad datasets."
     )
@@ -43,6 +52,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run preprocessing and print the structured report to stdout."""
     args = parse_args()
     report = prepare_joint_dataset(
         [Path(item) for item in args.inputs],

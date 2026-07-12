@@ -1,3 +1,5 @@
+"""Tests for DataLoader gene helpers and ChromaDB vector-store enrichment."""
+
 from __future__ import annotations
 
 import tempfile

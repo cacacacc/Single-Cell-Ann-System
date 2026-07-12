@@ -1,3 +1,12 @@
+"""Flask entrypoint for the Single-Cell ANN/RAG web application.
+
+This file wires together the web routes, dataset/index lifecycle, user/session
+management, benchmark APIs, natural-language cell queries and streaming RAG
+chat endpoints.  Most domain logic lives in ``backend/``; route handlers here
+mainly validate request payloads, call those backend services, cache expensive
+objects, and serialize responses for the templates.
+"""
+
 from __future__ import annotations
 
 import os

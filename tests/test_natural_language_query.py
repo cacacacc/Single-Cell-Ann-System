@@ -1,3 +1,5 @@
+"""Tests for rule-based natural-language cell query parsing and execution."""
+
 from __future__ import annotations
 
 import unittest
