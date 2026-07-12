@@ -209,6 +209,66 @@ class FlaskAppTests(unittest.TestCase):
         self.assertTrue(payload["authenticated"])
         self.assertEqual(payload["user"]["username"], "admin")
 
+    def test_admin_can_preprocess_datasets_with_gene_alignment(self) -> None:
+        second_path = self.data_dir / "tiny_second.h5ad"
+        second = ad.AnnData(
+            X=np.array([[2.0, 3.0]], dtype=np.float32),
+            obs={"cell_type": ["x"], "tissue": ["liver"]},
+        )
+        second.var_names = ["1", "2"]
+        second.obs_names = ["other-0"]
+        second.write_h5ad(second_path)
+
+        self.login_admin()
+        response = self.client.post(
+            "/api/datasets/preprocess",
+            json={
+                "source_datasets": ["tiny", "tiny_second"],
+                "output_name": "aligned_test",
+                "join": "inner",
+                "min_cells": 1,
+                "min_genes": 1,
+                "normalize_total": False,
+                "log1p": False,
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.get_json()
+        self.assertEqual(payload["dataset_id"], "aligned_test")
+        self.assertEqual(payload["report"]["aligned_genes"], 2)
+        self.assertTrue((self.data_dir / "aligned_test.h5ad").exists())
+        self.assertTrue((self.data_dir / "aligned_test_report.json").exists())
+
+        list_response = self.client.get("/api/datasets/preprocess/reports")
+        self.assertEqual(list_response.status_code, 200)
+        reports = list_response.get_json()["reports"]
+        self.assertEqual(reports[0]["name"], "aligned_test_report.json")
+        self.assertTrue(reports[0]["dataset_exists"])
+
+        detail_response = self.client.get("/api/datasets/preprocess/reports/aligned_test_report.json")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.get_json()["report"]["aligned_genes"], 2)
+
+    def test_admin_can_delete_orphan_preprocess_report(self) -> None:
+        report_path = self.data_dir / "orphan_report.json"
+        report_path.write_text(
+            '{"output_path":"data/orphan.h5ad","join":"inner","n_datasets":2,'
+            '"total_cells":10,"aligned_genes":3,"datasets":[]}',
+            encoding="utf-8",
+        )
+
+        self.login_admin()
+        list_response = self.client.get("/api/datasets/preprocess/reports")
+        self.assertEqual(list_response.status_code, 200)
+        report = list_response.get_json()["reports"][0]
+        self.assertEqual(report["name"], "orphan_report.json")
+        self.assertFalse(report["dataset_exists"])
+
+        delete_response = self.client.delete("/api/datasets/preprocess/reports/orphan_report.json")
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertFalse(report_path.exists())
+
     def test_register_login_and_update_profile(self) -> None:
         user = self.register_user("researcher_01")
 

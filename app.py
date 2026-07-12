@@ -27,6 +27,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
+
 # 自动加载项目根目录的 .env 文件（Windows/Mac/Linux 通用）
 # 需安装：pip install python-dotenv
 try:
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 from anndata import read_h5ad
-from flask import Flask, Response, jsonify, redirect, render_template, request, session, stream_with_context, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, session, stream_with_context, url_for
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -74,6 +75,7 @@ from backend.merged_loader import (
     delete_merged_config,
     _make_merged_id,
 )
+from backend.dataset_preprocessor import prepare_joint_dataset
 from backend.user_store import (
     AuthenticationError,
     DuplicateUserError,
@@ -1642,6 +1644,151 @@ def upload_dataset():
     if current:
         _notify_admins("info", "新数据集上传", f"{filename} 已上传，数据集 ID: {dataset_id}")
     return _json_response({"status": "uploaded", "dataset_id": dataset_id}, 201)
+
+
+@app.post("/api/datasets/preprocess")
+@admin_required
+def preprocess_datasets():
+    try:
+        payload = _request_payload()
+        source_datasets = payload.get("source_datasets") or []
+        join = str(payload.get("join") or "inner").strip().lower()
+        output_name = str(payload.get("output_name") or "joint_aligned").strip()
+        min_cells = _parse_int(payload, "min_cells", default=3)
+        min_genes = _parse_int(payload, "min_genes", default=200)
+        normalize_total = _parse_bool(payload.get("normalize_total"), default=True)
+        log1p = _parse_bool(payload.get("log1p"), default=True)
+
+        if not isinstance(source_datasets, list) or len(source_datasets) < 2:
+            return _json_response({"error": "at least 2 source datasets are required"}, 400)
+        if join not in {"inner", "outer"}:
+            return _json_response({"error": "join must be either 'inner' or 'outer'"}, 400)
+        if min_cells < 1 or min_genes < 1:
+            return _json_response({"error": "min_cells and min_genes must be >= 1"}, 400)
+
+        safe_stem = secure_filename(output_name)
+        if not safe_stem:
+            return _json_response({"error": "output_name is required"}, 400)
+        if safe_stem.endswith(".h5ad"):
+            safe_stem = safe_stem[:-5]
+        if not safe_stem:
+            return _json_response({"error": "output_name is invalid"}, 400)
+
+        output_path = DATA_DIR / f"{safe_stem}.h5ad"
+        report_path = DATA_DIR / f"{safe_stem}_report.json"
+        if output_path.exists() or report_path.exists():
+            return _json_response({"error": "output dataset or report already exists"}, 409)
+
+        input_paths = []
+        dataset_ids = []
+        for raw_id in source_datasets:
+            ds_id = _normalize_dataset_id(str(raw_id))
+            if ds_id is None or _is_merged_dataset(ds_id):
+                return _json_response({"error": f"source dataset is invalid: {raw_id}"}, 400)
+            try:
+                path = _resolve_dataset_path(ds_id)
+            except FileNotFoundError:
+                return _json_response({"error": f"source dataset not found: {ds_id}"}, 404)
+            input_paths.append(path)
+            dataset_ids.append(_dataset_id_from_path(path))
+
+        report = prepare_joint_dataset(
+            input_paths,
+            output_path,
+            join=join,  # type: ignore[arg-type]
+            dataset_ids=dataset_ids,
+            min_cells=min_cells,
+            min_genes=min_genes,
+            normalize_total=normalize_total,
+            log1p=log1p,
+            report_path=report_path,
+        )
+
+        dataset_id = _dataset_id_from_path(output_path)
+        _DATASET_CACHE.pop(dataset_id, None)
+        return _json_response(
+            {
+                "status": "preprocessed",
+                "dataset_id": dataset_id,
+                "output_path": str(output_path),
+                "report_path": str(report_path),
+                "report": report.to_dict(),
+            },
+            201,
+        )
+    except ValueError as exc:
+        return _json_response({"error": str(exc)}, 400)
+    except Exception as exc:
+        app.logger.exception("Failed to preprocess datasets")
+        return _json_response({"error": str(exc)}, 500)
+
+
+def _preprocess_report_payload(path: Path, include_report: bool = False) -> Dict[str, Any]:
+    report: Dict[str, Any] = {}
+    error = None
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        error = str(exc)
+
+    stem = path.name[:-12] if path.name.endswith("_report.json") else path.stem
+    output_path = DATA_DIR / f"{stem}.h5ad"
+    payload: Dict[str, Any] = {
+        "name": path.name,
+        "dataset_id": stem,
+        "report_path": str(path),
+        "dataset_exists": output_path.exists(),
+        "dataset_filename": output_path.name,
+        "size_bytes": path.stat().st_size,
+        "modified_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(path.stat().st_mtime)),
+        "join": report.get("join"),
+        "n_datasets": report.get("n_datasets"),
+        "total_cells": report.get("total_cells"),
+        "aligned_genes": report.get("aligned_genes"),
+        "created_at": report.get("created_at"),
+    }
+    if error:
+        payload["error"] = error
+    if include_report:
+        payload["report"] = report
+    return payload
+
+
+@app.get("/api/datasets/preprocess/reports")
+@admin_required
+def list_preprocess_reports():
+    reports = [
+        _preprocess_report_payload(path)
+        for path in sorted(DATA_DIR.glob("*_report.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    ]
+    return _json_response({"reports": reports})
+
+
+@app.get("/api/datasets/preprocess/reports/<path:report_name>")
+@admin_required
+def get_preprocess_report(report_name: str):
+    safe_name = secure_filename(report_name)
+    if not safe_name.endswith("_report.json"):
+        return _json_response({"error": "invalid report name"}, 400)
+    path = DATA_DIR / safe_name
+    if not path.exists():
+        return _json_response({"error": "report not found"}, 404)
+    if _parse_bool(request.args.get("download"), default=False):
+        return send_file(path, as_attachment=True, download_name=safe_name)
+    return _json_response(_preprocess_report_payload(path, include_report=True))
+
+
+@app.delete("/api/datasets/preprocess/reports/<path:report_name>")
+@admin_required
+def delete_preprocess_report(report_name: str):
+    safe_name = secure_filename(report_name)
+    if not safe_name.endswith("_report.json"):
+        return _json_response({"error": "invalid report name"}, 400)
+    path = DATA_DIR / safe_name
+    if not path.exists():
+        return _json_response({"error": "report not found"}, 404)
+    path.unlink()
+    return _json_response({"status": "deleted", "report": safe_name})
 
 
 @app.delete("/api/datasets/<dataset_id>")
