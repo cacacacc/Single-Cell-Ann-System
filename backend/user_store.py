@@ -1,3 +1,10 @@
+"""SQLite persistence layer for users, search snapshots, chat history and notices.
+
+The Flask routes call ``UserStore`` instead of touching SQLite directly.  This
+keeps validation, password hashing, last-admin protection and row-to-dict
+serialization in one place, which makes the web layer thinner and safer.
+"""
+
 from __future__ import annotations
 
 import re
@@ -31,10 +38,12 @@ class LastAdminError(UserStoreError):
 
 
 def utc_now() -> str:
+    """Return a compact UTC timestamp string for database audit fields."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def normalize_username(username: str) -> str:
+    """Normalize usernames to lowercase and enforce the accepted id format."""
     cleaned = (username or "").strip().lower()
     if not USERNAME_RE.fullmatch(cleaned):
         raise UserStoreError("账号需为 3-32 位字母、数字、下划线或短横线")
@@ -42,6 +51,7 @@ def normalize_username(username: str) -> str:
 
 
 def validate_password(password: str) -> None:
+    """Apply the minimum password rule shared by create/change/reset flows."""
     if len(password or "") < 8:
         raise UserStoreError("密码长度至少为 8 位")
 
@@ -68,6 +78,7 @@ def row_to_user(row: sqlite3.Row) -> Dict[str, Any]:
 
 
 def row_to_search_snapshot(row: sqlite3.Row) -> Dict[str, Any]:
+    """Serialize a saved search row and rebuild the payload needed to rerun it."""
     filter_field = row["filter_field"] or ""
     filter_value = row["filter_value"] or ""
     index_name = row["index_name"] or ""
@@ -111,11 +122,14 @@ def row_to_search_snapshot(row: sqlite3.Row) -> Dict[str, Any]:
 
 
 class UserStore:
+    """Small repository object wrapping all user-facing SQLite tables."""
+
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Open a connection, commit on success, and always close it."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -132,6 +146,7 @@ class UserStore:
         default_admin_name: str = "系统管理员",
         default_admin_email: str = "admin@example.com",
     ) -> None:
+        """Create tables/indexes and ensure at least one admin account exists."""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -279,6 +294,7 @@ class UserStore:
         return row_to_user(row) if row else None
 
     def authenticate(self, username: str, password: str) -> Dict[str, Any]:
+        """Validate credentials and update the user's last-login timestamp."""
         normalized = normalize_username(username)
         with self._connect() as conn:
             row = conn.execute(
@@ -369,6 +385,7 @@ class UserStore:
         role: Optional[str] = None,
         is_active: Optional[bool] = None,
     ) -> Dict[str, Any]:
+        """Update profile/status fields while preventing removal of last admin."""
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             if row is None:
@@ -458,6 +475,7 @@ class UserStore:
         total_elapsed_ms: Optional[float] = None,
         result_count: int = 0,
     ) -> Dict[str, Any]:
+        """Persist enough search parameters for the UI to rerun a past query."""
         now = utc_now()
         with self._connect() as conn:
             user = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -529,6 +547,7 @@ class UserStore:
         title: str = "新对话",
         dataset_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Create a chat session if it does not exist and return its row."""
         now = utc_now()
         with self._connect() as conn:
             conn.execute(
@@ -585,6 +604,7 @@ class UserStore:
         content: str,
         title_from_first_user: bool = True,
     ) -> None:
+        """Append one chat message and keep the session title/timestamp fresh."""
         now = utc_now()
         with self._connect() as conn:
             # 若 session 不存在则自动创建
@@ -651,6 +671,7 @@ class UserStore:
     def add_notification(
         self, user_id: int, noti_type: str, title: str, content: str = ""
     ) -> Dict[str, Any]:
+        """Create an unread notification for a user."""
         now = utc_now()
         with self._connect() as conn:
             cursor = conn.execute(
@@ -730,6 +751,7 @@ class UserStore:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _ensure_other_active_admin(self, conn: sqlite3.Connection, user_id: int) -> None:
+        """Raise if ``user_id`` is the only currently active admin account."""
         row = conn.execute(
             """
             SELECT COUNT(*) AS count

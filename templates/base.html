@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+    {# 全站基础布局：引入公共样式、图表库和每个页面共享的导航/顶栏。 #}
     <meta charset="UTF-8">
     <title>单细胞近邻检索系统</title>
     <link href="https://cdn.bootcdn.net/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
@@ -10,7 +11,7 @@
 </head>
 <body>
 
-    <!-- 侧边栏 -->
+    <!-- 侧边栏：所有业务页面共享的主导航；管理员菜单由后端 current_user 控制。 -->
     <nav class="sidebar">
         <div class="sidebar-brand">
             <div class="logo-box">
@@ -48,7 +49,7 @@
 
     <!-- 右侧内容 -->
     <main class="main-content">
-        <!-- 顶部状态栏-->
+        <!-- 顶部状态栏：展示引擎状态、全局搜索占位、引擎设置入口、通知和用户操作。 -->
         <header class="topbar">
             <!-- 左侧：引擎状态与时间 -->
             <div class="topbar-left">
@@ -111,10 +112,13 @@
             </div>
         </header>
 
+        {# 子模板主体内容插槽。 #}
         {% block content %}{% endblock %}
     </main>
 
-    <!-- ================= 居中模态弹窗：全局 ANN 引擎设置 ================= -->
+    <!-- ================= 居中模态弹窗：全局 ANN 引擎设置 =================
+         表单字段对应 /api/engine/config，可调整默认索引配置、线程数和 GPU 请求开关。
+    -->
     <div class="modal fade" id="engineSettingsModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content" style="background-color: #141A30; color: white; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 15px 35px rgba(0,0,0,0.5);">
@@ -184,7 +188,7 @@
             </div>
         </div>
     </div>
-    <!-- 时钟脚本 -->
+    <!-- 时钟脚本：每秒刷新顶部状态栏时间，仅影响本地展示。 -->
     <script>
         setInterval(() => {
             const now = new Date();
@@ -198,7 +202,7 @@
         }, 1000);
     </script>
 
-    <!-- 自动高亮当前菜单栏的魔法脚本 -->
+    <!-- 自动高亮当前菜单栏：根据当前 URL 给匹配导航项追加 active class。 -->
     <script>
         document.addEventListener("DOMContentLoaded", function() {
             // 1. 获取浏览器当前的网址路径 (比如 "/" 或者 "/data")
@@ -219,6 +223,7 @@
     <script src="https://cdn.bootcdn.net/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
 
     <script>
+        // 退出登录：调用后端清理 session，再跳回登录页。
         document.getElementById('logoutLink')?.addEventListener('click', async function(event) {
             event.preventDefault();
             await fetch('/api/auth/logout', { method: 'POST' });
@@ -227,6 +232,7 @@
     </script>
 
     <script>
+        // 全局 ANN 引擎配置弹窗：打开时读取配置，点击应用时 PATCH 到后端并清理后端索引缓存。
         document.addEventListener('DOMContentLoaded', () => {
             const modal = document.getElementById('engineSettingsModal');
             if (!modal) return;
@@ -436,14 +442,14 @@
         loadNotifications();
     }
 
-    // 下拉菜单打开时刷新列表
+    // 下拉菜单打开时刷新列表，避免用户看到过期通知。
     document.getElementById('notificationDropdown')?.addEventListener('shown.bs.dropdown', loadNotifications);
 
-    // 页面加载时初始化
+    // 页面加载时初始化一次列表和未读数。
     loadUnreadCount();
     loadNotifications();
 
-    // 每 30 秒轮询未读数
+    // 每 30 秒轮询未读数；列表内容只在下拉打开或手动刷新时更新。
     setInterval(loadUnreadCount, 30000);
     </script>
 

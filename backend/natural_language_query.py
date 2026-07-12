@@ -1,3 +1,11 @@
+"""Rule-based natural-language query planning for cell search.
+
+This module turns a short user question into a deterministic query plan before
+the RAG layer asks an LLM to explain the results.  The parser deliberately uses
+transparent rules instead of model calls so filters, limits, seed cell ids and
+gene keywords are reproducible and easy to test.
+"""
+
 from __future__ import annotations
 
 import re
@@ -34,6 +42,8 @@ FIELD_ALIASES = {
 
 @dataclass
 class NaturalQueryCondition:
+    """One metadata condition inferred from a user question."""
+
     field: str
     value: str
     operator: str = "eq"
@@ -50,6 +60,13 @@ class NaturalQueryCondition:
 
 @dataclass
 class NaturalQueryPlan:
+    """Executable plan produced by ``parse_natural_cell_query``.
+
+    ``mode`` is a hint for UI/debug output. Actual execution may combine modes:
+    for example, a gene keyword query can still be narrowed by metadata
+    conditions.
+    """
+
     question: str
     limit: int = DEFAULT_LIMIT
     conditions: List[NaturalQueryCondition] = field(default_factory=list)
@@ -93,6 +110,7 @@ def _unique_preserve_order(values: Iterable[str]) -> List[str]:
 
 
 def _parse_limit(question: str, fallback: int) -> int:
+    """Extract top-k/limit wording while clamping to a safe upper bound."""
     text = question.casefold()
     patterns = [
         r"(?:top|前|最多|返回|找|查询|显示)\s*(\d{1,4})",
@@ -108,6 +126,7 @@ def _parse_limit(question: str, fallback: int) -> int:
 
 
 def _resolve_alias_to_field(alias: str, obs_columns: Sequence[str]) -> Optional[str]:
+    """Map a user-facing alias such as '细胞类型' onto an actual obs column."""
     alias_norm = alias.casefold().replace(" ", "").replace("_", "")
     columns_by_norm = {
         col.casefold().replace(" ", "").replace("_", ""): col for col in obs_columns
@@ -137,6 +156,7 @@ def _preferred_columns(obs_columns: Sequence[str]) -> List[str]:
 
 
 def _column_values(loader: Any, field: str, max_values: int = VALUE_SCAN_LIMIT) -> List[str]:
+    """Read sample values from one obs column for value-in-question matching."""
     try:
         series = loader.adata.obs[field]
     except Exception:
@@ -174,6 +194,7 @@ def _add_condition(
 
 
 def _extract_explicit_conditions(question: str, obs_columns: Sequence[str]) -> List[NaturalQueryCondition]:
+    """Parse explicit filters like ``cell_type = T cell`` or ``组织: liver``."""
     conditions: List[NaturalQueryCondition] = []
     field_terms = list(obs_columns)
     for canonical, aliases in FIELD_ALIASES.items():
@@ -204,6 +225,7 @@ def _extract_explicit_conditions(question: str, obs_columns: Sequence[str]) -> L
 
 
 def _infer_value_conditions(question: str, loader: Any, obs_columns: Sequence[str]) -> List[NaturalQueryCondition]:
+    """Infer filters by matching known column values mentioned in the question."""
     conditions: List[NaturalQueryCondition] = []
     q_norm = _norm(question)
     preferred = _preferred_columns(obs_columns)
@@ -228,6 +250,7 @@ def _infer_value_conditions(question: str, loader: Any, obs_columns: Sequence[st
 
 
 def _extract_genes(question: str) -> List[str]:
+    """Extract uppercase gene-like tokens while excluding technical stop words."""
     candidates = re.findall(r"(?<![A-Za-z0-9_])([A-Z][A-Z0-9]{1,9})(?![A-Za-z0-9_])", question)
     genes = [item for item in candidates if item.upper() not in GENE_STOP_WORDS]
     return _unique_preserve_order(genes)
@@ -240,6 +263,7 @@ def _extract_text_keywords(question: str) -> List[str]:
 
 
 def _extract_seed_cell_id(question: str, loader: Any) -> Optional[str]:
+    """Find a real cell id for similarity search, validating it with loader."""
     patterns = [
         r"(?:cell_id|cell id|细胞\s*ID|细胞)\s*[=:：]?\s*([A-Za-z0-9_.:\-]+)",
         r"(?:similar to|相似于|类似于|以)\s*([A-Za-z0-9_.:\-]+)",
@@ -273,6 +297,7 @@ def parse_natural_cell_query(
     limit: int = DEFAULT_LIMIT,
     seed_cell_id: Optional[str] = None,
 ) -> NaturalQueryPlan:
+    """Convert free-form text into a structured cell query plan."""
     text = _clean_text(question)
     obs_columns = list(getattr(loader, "obs_columns", []) or [])
     parsed_limit = _parse_limit(text, limit)
@@ -302,6 +327,7 @@ def parse_natural_cell_query(
 
 
 def _metadata_matches(cell_info: Dict[str, Any], conditions: Sequence[NaturalQueryCondition]) -> Tuple[bool, List[str]]:
+    """Return whether one cell satisfies all metadata conditions."""
     reasons: List[str] = []
     for condition in conditions:
         actual = cell_info.get(condition.field)
@@ -391,6 +417,14 @@ def execute_natural_cell_query(
     store: Any = None,
     use_rep: str = "X_pca",
 ) -> Dict[str, Any]:
+    """Execute a natural query plan against a loader and optional vector store.
+
+    Execution is intentionally layered:
+    1. collect vector-store keyword hits for gene/top-gene terms;
+    2. run similarity search when a seed cell id is present;
+    3. fill remaining slots with deterministic metadata scanning;
+    4. enrich metadata-scan rows with Chroma-only fields such as top genes.
+    """
     limit = max(1, min(int(plan.limit or DEFAULT_LIMIT), MAX_LIMIT))
     warnings = list(plan.warnings)
     results: List[Dict[str, Any]] = []

@@ -1,3 +1,11 @@
+"""Utilities for preparing multiple .h5ad datasets for joint analysis.
+
+The main application usually performs "joint search" by stacking existing
+vector representations, but this module handles the heavier offline workflow:
+clean raw AnnData objects, align their gene spaces, concatenate them, and emit a
+small JSON report that records what changed for each source dataset.
+"""
+
 from __future__ import annotations
 
 import json
@@ -16,6 +24,8 @@ GeneJoinMode = Literal["inner", "outer"]
 
 @dataclass(frozen=True)
 class DatasetSummary:
+    """Before/after cell and gene counts for one input dataset."""
+
     dataset_id: str
     source_path: str
     n_cells_before: int
@@ -26,6 +36,8 @@ class DatasetSummary:
 
 @dataclass(frozen=True)
 class JointDatasetReport:
+    """Machine-readable report for a generated joint .h5ad file."""
+
     output_path: str
     join: GeneJoinMode
     n_datasets: int
@@ -146,6 +158,12 @@ def clean_adata(
     normalize_total: bool = False,
     log1p: bool = False,
 ) -> ad.AnnData:
+    """Return a cleaned copy of one AnnData object.
+
+    The function performs conservative per-dataset filtering, optional library
+    size normalization/log transform, and prefixes obs names with ``dataset_id``
+    so cell ids remain unique after concatenation.
+    """
     cleaned = adata.copy()
     cleaned.var_names_make_unique()
     cleaned.obs_names_make_unique()
@@ -174,6 +192,11 @@ def align_and_concat(
     dataset_ids: Sequence[str],
     join: GeneJoinMode = "inner",
 ) -> ad.AnnData:
+    """Align gene columns across datasets and concatenate cells.
+
+    ``join="inner"`` keeps only shared genes. ``join="outer"`` keeps the union
+    of genes and fills missing expression values with zeros.
+    """
     if not adatas:
         raise ValueError("adatas cannot be empty")
     if len(adatas) != len(dataset_ids):
@@ -215,6 +238,7 @@ def _dataset_id(path: Path) -> str:
 
 
 def _aligned_gene_names(adatas: Sequence[ad.AnnData], *, join: GeneJoinMode) -> List[str]:
+    """Compute the sorted gene intersection or union requested by ``join``."""
     gene_sets = [set(map(str, item.var_names)) for item in adatas]
     if join == "inner":
         genes = set.intersection(*gene_sets)
@@ -226,6 +250,7 @@ def _aligned_gene_names(adatas: Sequence[ad.AnnData], *, join: GeneJoinMode) -> 
 
 
 def _reindex_genes(adata: ad.AnnData, genes: Sequence[str]) -> ad.AnnData:
+    """Reorder one dataset to the shared gene list, zero-filling absent genes."""
     current = pd.Index(map(str, adata.var_names))
     positions = current.get_indexer(genes)
     existing_mask = positions >= 0

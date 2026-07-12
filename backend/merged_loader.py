@@ -1,3 +1,11 @@
+"""In-memory loader facade for cross-dataset joint search.
+
+``MergedDataLoader`` does not create a physical merged .h5ad file. Instead, it
+stitches several existing ``DataLoader`` instances into one duck-typed loader so
+ANN indexing, vector search and metadata lookup can treat multiple datasets as a
+single search space.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -15,12 +23,15 @@ MERGED_DIR_NAME = ".merged"
 
 
 def _make_merged_id(source_ids: List[str]) -> str:
+    """Create a stable id for the unordered set of source dataset ids."""
     key = "-".join(sorted(source_ids))
     return "merged_" + hashlib.md5(key.encode()).hexdigest()[:12]
 
 
 @dataclass
 class MergedDatasetConfig:
+    """Persisted metadata describing one logical merged dataset."""
+
     merged_id: str
     name: str
     source_datasets: List[str]
@@ -83,7 +94,7 @@ def delete_merged_config(data_dir: Path, merged_id: str) -> None:
 
 
 class _MergedLightAnnDataProxy:
-    """合并数据集的 AnnData 兼容代理。"""
+    """合并数据集的 AnnData 兼容代理，仅暴露下游需要的轻量属性。"""
 
     def __init__(
         self,
@@ -105,7 +116,11 @@ class _MergedLightAnnDataProxy:
 
 
 class MergedDataLoader:
-    """将多个 DataLoader 的向量合并为统一接口，实现与 DataLoader 相同的鸭子类型。"""
+    """将多个 DataLoader 的向量合并为统一接口，实现与 DataLoader 相同的鸭子类型。
+
+    全局索引是每个源数据集索引区间的拼接；返回给前端的 cell_id 会加上
+    ``<dataset_id>:`` 前缀，避免不同数据集的原始细胞名冲突。
+    """
 
     def __init__(self, config: MergedDatasetConfig, source_loaders: Dict[str, Any]) -> None:
         if len(config.source_datasets) < 2:
@@ -147,6 +162,7 @@ class MergedDataLoader:
         self._adata_proxy: Optional[_MergedLightAnnDataProxy] = None
 
     def _resolve(self, global_index: int) -> Tuple[str, Any, int]:
+        """Map a merged/global row index back to ``(dataset_id, loader, local_idx)``."""
         if global_index < 0 or global_index >= self._total_cells:
             raise IndexError(
                 f"global_index {global_index} 超出范围 [0, {self._total_cells})"
@@ -196,6 +212,7 @@ class MergedDataLoader:
         return self._obs_names
 
     def get_vectors(self, use_rep: Optional[str] = None) -> np.ndarray:
+        """Stack the selected representation from every source loader."""
         rep = use_rep or self._use_rep
         arrays = []
         for _, loader in self._sources:
@@ -211,6 +228,7 @@ class MergedDataLoader:
         return loader.get_vector(local_idx, use_rep=rep)
 
     def get_cell_info(self, cell_index: int) -> Dict[str, Any]:
+        """Return metadata for a global cell index with source dataset attached."""
         ds_id, loader, local_idx = self._resolve(cell_index)
         info = loader.get_cell_info(local_idx)
         orig_id = info.get("cell_id", "")
@@ -219,6 +237,7 @@ class MergedDataLoader:
         return info
 
     def cell_index_from_id(self, cell_id: str) -> int:
+        """Resolve prefixed cell ids such as ``dataset_a:AAAC...``."""
         if self._cell_id_to_index is None:
             self._cell_id_to_index = {}
             for idx, name in enumerate(self.obs_names):
@@ -229,6 +248,7 @@ class MergedDataLoader:
 
     @property
     def adata(self) -> _MergedLightAnnDataProxy:
+        """Build and cache a lightweight AnnData-like view for query code."""
         if self._adata_proxy is None:
             obsm: Dict[str, np.ndarray] = {}
             common_reps = self.available_reps

@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 
 {% block content %}
+{# AI 细胞助手页：基于 ChromaDB/RAG/LLM 的流式问答界面，支持历史会话和模型参数控制。 #}
 <style>
+    /* 本页样式完整定义聊天布局、历史侧栏、右侧 LLM 参数侧栏和 Markdown 消息渲染。 */
     /* ================= Chat Layout ================= */
     .chat-container {
         display: flex;
@@ -819,10 +821,14 @@
     }
 </style>
 
-<!-- ==================== Chat Layout ==================== -->
+<!-- ==================== Chat Layout ====================
+     主容器内包含：左侧历史会话、中央聊天区、右侧 LLM 参数设置。
+-->
 <div class="chat-container" id="chatContainer">
 
-    <!-- ========== History Sidebar (inside chat-container) ========== -->
+    <!-- ========== History Sidebar (inside chat-container) ==========
+         会话列表由 /api/chat/sessions 加载；点击后再拉取该 session 的消息。
+    -->
     <div class="history-sidebar" id="historySidebar">
         <div class="history-sidebar-header">
             <div class="history-sidebar-title">
@@ -843,7 +849,9 @@
     </div>
 
     <div class="chat-main" id="chatMain">
-        <!-- ========== Chat Header ========== -->
+        <!-- ========== Chat Header ==========
+             顶部操作区负责选择数据集、初始化向量库、清空/新建会话和打开参数侧栏。
+        -->
         <div class="chat-header">
             <div class="chat-header-left">
                 <button class="btn-toggle-history" id="btnToggleHistory" onclick="toggleHistorySidebar()" title="历史对话">
@@ -877,6 +885,7 @@
             </div>
         </div>
 
+        <!-- 消息流容器：欢迎页、用户消息、assistant 流式输出和来源卡片都渲染到这里。 -->
         <div class="chat-messages" id="chatMessages">
             <div class="chat-welcome" id="chatWelcome">
                 <div class="welcome-icon"><i class="fa-solid fa-robot"></i></div>
@@ -894,7 +903,9 @@
             </div>
         </div>
 
-        <!-- ========== Input Area ========== -->
+        <!-- ========== Input Area ==========
+             Enter 发送，Shift+Enter 换行；生成中可通过 AbortController 停止流式响应。
+        -->
         <div class="chat-input-area">
             <div class="chat-status-banner" id="chatStatusBanner"></div>
             <div class="chat-input-row">
@@ -920,7 +931,9 @@
         </div>
     </div>
 
-    <!-- ==================== LLM Settings Sidebar (right) ==================== -->
+    <!-- ==================== LLM Settings Sidebar (right) ====================
+         这些控件随每次聊天请求传给后端，用于覆盖 prompt preset、temperature 和 max_tokens。
+    -->
     <div class="llm-sidebar" id="llmSidebar">
         <div class="llm-sidebar-header">
             <div class="llm-sidebar-title">
@@ -995,6 +1008,7 @@
 
 {% block scripts %}
 <script>
+    // 聊天脚本职责：初始化系统状态、维护会话、流式接收回答、渲染 Markdown 和 RAG 来源。
     // ==================== State ====================
     let sessionId = generateSessionId();
     let currentAbortController = null;
@@ -1002,7 +1016,7 @@
     let currentNaturalQuery = null;
     let isStreaming = false;
 
-    // System state (populated by init)
+    // System state (populated by init)：反映数据集、向量库、LLM 当前可用性。
     let sysVDB = { available: false, populated: false, count: 0, collection: '', topGenesAvailable: false };
     let sysLLM = { configured: false, provider: '', model: '' };
     let sysDataset = { id: '', filename: '', nCells: 0 };
@@ -1012,7 +1026,7 @@
     let launchQuestion = launchParams.get('question') || '';
     let launchDatasetId = launchParams.get('dataset_id') || '';
 
-    // DOM refs
+    // DOM refs：缓存高频访问元素，避免每次交互重复查询 DOM。
     const chatMessages  = document.getElementById('chatMessages');
     const chatWelcome   = document.getElementById('chatWelcome');
     const chatInput     = document.getElementById('chatInput');

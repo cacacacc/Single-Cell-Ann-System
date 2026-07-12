@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{# 个人中心：展示当前用户资料、修改密码，并列出该用户最近的检索快照。 #}
 <style>
     .profile-header {
         background: linear-gradient(135deg, rgba(74, 144, 226, 0.1) 0%, rgba(111, 38, 86, 0.1) 100%);
@@ -109,6 +110,7 @@
 </style>
 
 <div class="row">
+    <!-- 顶部用户摘要：头像、角色、状态和注册信息来自 Flask 注入的 current_user。 -->
     <div class="col-12">
         <h3 class="fw-bold mb-4" style="letter-spacing: 1px;">
             <i class="fa-solid fa-id-badge me-2" style="color: #4A90E2;"></i>个人信息中心
@@ -139,6 +141,7 @@
     </div>
 
     <div class="col-md-6">
+        <!-- 基本资料表单：只允许修改展示姓名和邮箱，账号名不可变。 -->
         <div class="dark-card">
             <h5 class="fw-bold text-white mb-4 border-bottom pb-3" style="border-color: rgba(255,255,255,0.05) !important;">
                 基本资料修改
@@ -163,6 +166,7 @@
     </div>
 
     <div class="col-md-6">
+        <!-- 密码表单：需要原密码校验，成功后清空输入框。 -->
         <div class="dark-card">
             <h5 class="fw-bold text-white mb-4 border-bottom pb-3" style="border-color: rgba(255,255,255,0.05) !important;">
                 安全与密码设置
@@ -187,6 +191,7 @@
     </div>
 
     <div class="col-12">
+        <!-- 检索快照列表：保存最近相似检索参数，支持跳转回 search 页复现实验。 -->
         <div class="dark-card">
             <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4" style="border-color: rgba(255,255,255,0.05) !important;">
                 <div>
@@ -207,6 +212,7 @@
 
 {% block scripts %}
 <script>
+    // 个人中心脚本职责：提交资料/密码修改请求，并加载、重跑或删除检索快照。
     function showAlert(id, message, type = 'success') {
         const el = document.getElementById(id);
         el.textContent = message;

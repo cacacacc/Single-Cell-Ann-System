@@ -1,3 +1,11 @@
+"""Approximate-nearest-neighbor indexing utilities for single-cell vectors.
+
+The Flask app uses this module to build, search, save and reload ANN indexes
+over PCA/UMAP/raw expression vectors. It hides optional backend differences
+behind one API: FAISS when available, hnswlib for HNSW fallback, and NumPy
+brute-force search as the always-available deterministic baseline.
+"""
+
 from __future__ import annotations
 
 import json
@@ -44,6 +52,13 @@ def _ensure_int(value: Any, name: str, minimum: int = 1) -> int:
 
 @dataclass(frozen=True)
 class IndexConfig:
+    """User-tunable ANN index parameters.
+
+    ``backend="auto"`` lets the code pick the fastest installed dependency for
+    the selected ``index_type``. IVF uses ``nlist``/``nprobe``; HNSW uses
+    ``m``/``ef_*``; PQ uses ``pq_m``/``pq_nbits``.
+    """
+
     backend: str = "auto"
     index_type: str = "flat"
     metric: str = "l2"
@@ -56,6 +71,7 @@ class IndexConfig:
     pq_nbits: int = 8
 
     def normalized(self) -> "IndexConfig":
+        """Return a validated, lowercase config with numeric fields coerced."""
         backend = _normalize_text(self.backend or "auto")
         index_type = _normalize_text(self.index_type or "flat")
         metric = _normalize_text(self.metric or "l2")
@@ -103,6 +119,7 @@ class IndexConfig:
         }
 
     def update(self, **kwargs: Any) -> "IndexConfig":
+        """Create a new config with non-None overrides applied."""
         data = self.to_dict()
         for key, value in kwargs.items():
             if value is None:
@@ -137,6 +154,7 @@ class IndexConfig:
 
     @classmethod
     def from_env(cls, prefix: str = "CELL_INDEX_") -> "IndexConfig":
+        """Build config from environment variables such as CELL_INDEX_TYPE."""
         def _env(name: str, default: Any) -> Any:
             return os.getenv(f"{prefix}{name}", default)
 
@@ -157,7 +175,12 @@ class IndexConfig:
 
 
 class ANNIndexer:
-    """ANN index wrapper with configurable backends and metrics."""
+    """ANN index wrapper with configurable backends and metrics.
+
+    The instance keeps a copy of indexed vectors even when a native backend is
+    used. That costs memory, but gives portable persistence, exact re-scoring,
+    metadata compatibility checks, and a reliable NumPy fallback.
+    """
 
     def __init__(self, dim: int, config: Optional[IndexConfig] = None):
         self.dim = self._validate_dim(dim)
@@ -205,6 +228,7 @@ class ANNIndexer:
         return self._backend is not None and self._count > 0
 
     def build_index(self, vectors) -> "ANNIndexer":
+        """Validate vectors, choose a backend, and build the concrete index."""
         prepared = self._prepare_vectors(self._validate_vectors(vectors))
         self._vectors = prepared
         self._count = int(prepared.shape[0])
@@ -215,6 +239,12 @@ class ANNIndexer:
         return self
 
     def search(self, query_vector, k: int) -> Tuple[np.ndarray, np.ndarray]:
+        """Return top-k distances and row indices for one query vector.
+
+        Native ANN libraries may use slightly different distance conventions,
+        so candidates from FAISS/hnswlib are re-scored with ``_compute_distances``
+        before returning to callers.
+        """
         self._ensure_index_ready()
         k = self._validate_k(k)
         if k > self._count:
@@ -250,6 +280,7 @@ class ANNIndexer:
         return topk_distances, topk_indices
 
     def save_index(self, index_path, **extra_config) -> None:
+        """Persist native index files plus a portable ``.npz`` vector archive."""
         self._ensure_index_ready()
         path = Path(index_path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -267,6 +298,12 @@ class ANNIndexer:
         self._save_archive(path, backend="numpy", **extra_config)
 
     def load_index(self, index_path) -> "ANNIndexer":
+        """Load an index saved by ``save_index``.
+
+        The portable archive is preferred because it stores normalized config
+        and vectors. Legacy raw FAISS files are still accepted when no archive
+        exists.
+        """
         path = Path(index_path)
         backup_path = self._backup_archive_path(path)
 
@@ -305,6 +342,7 @@ class ANNIndexer:
         raise FileNotFoundError(f"Index file not found: {path}")
 
     def _load_archive(self, archive_path: Path) -> "ANNIndexer":
+        """Restore vectors/config from the backend-independent NumPy archive."""
         with np.load(archive_path, allow_pickle=False) as data:
             vectors = np.asarray(data["vectors"], dtype=np.float32)
             dim = int(np.asarray(data["dim"]).item())
@@ -362,6 +400,7 @@ class ANNIndexer:
         return self
 
     def _save_archive(self, archive_path: Path, backend: str, **extra_config) -> None:
+        """Write the archive used for safe reloads and backend migration."""
         vectors = self._vectors
         if vectors is None:
             vectors = self._extract_vectors_from_index()
@@ -467,6 +506,7 @@ class ANNIndexer:
         return index_type
 
     def _config_matches_saved(self, saved: IndexConfig) -> bool:
+        """Guard against loading an index with incompatible runtime settings."""
         current = self._config.normalized()
         if current.backend != "auto" and current.backend != saved.backend:
             return False
@@ -496,6 +536,7 @@ class ANNIndexer:
         return True
 
     def _prepare_vectors(self, vectors: np.ndarray) -> np.ndarray:
+        """Normalize vectors for cosine/correlation before indexing."""
         if self._config.metric in ("cosine", "correlation"):
             prepared = np.ascontiguousarray(vectors, dtype=np.float32)
             if self._config.metric == "correlation":
@@ -523,6 +564,7 @@ class ANNIndexer:
         return np.ascontiguousarray(vector / norm, dtype=np.float32)
 
     def _select_backend(self) -> str:
+        """Choose the concrete backend requested by ``IndexConfig``."""
         backend = self._config.backend
         index_type = self._config.index_type
 
@@ -611,6 +653,7 @@ class ANNIndexer:
         return faiss.METRIC_L2
 
     def _build_faiss_index(self, vectors: np.ndarray, index_type: str):
+        """Create and train the requested FAISS index type."""
         if faiss is None:
             raise ImportError("faiss is not available")
 

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{# 用户管理页：仅管理员可进入，用于创建用户、修改角色/状态、重置密码和批量禁用。 #}
 <style>
     .table-dark-custom {
         --bs-table-bg: transparent;
@@ -107,6 +108,7 @@
     }
 </style>
 
+<!-- 顶部命令栏：搜索框实时过滤用户，按钮触发添加和批量禁用流程。 -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h3 class="fw-bold m-0" style="letter-spacing: 1px;">
         <i class="fa-solid fa-users-gear me-2" style="color: #4A90E2;"></i>系统用户管理
@@ -128,6 +130,7 @@
 
 <div id="users-alert" class="users-alert"></div>
 
+<!-- 用户表格：tbody 由 /api/users 动态填充，操作列按钮通过事件委托处理。 -->
 <div class="dark-card" style="padding: 0; overflow: hidden;">
     <table class="table table-dark-custom mb-0 w-100">
         <thead>
@@ -158,6 +161,7 @@
     </div>
 </div>
 
+<!-- 添加用户弹窗：创建账号时后端负责用户名唯一性、密码规则和角色校验。 -->
 <div class="modal fade" id="addUserModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content" style="background-color: var(--bg-card); color: white; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 15px 35px rgba(0,0,0,0.5);">
@@ -203,6 +207,7 @@
 
 {% block scripts %}
 <script>
+    // 用户管理脚本职责：加载用户列表、提交新增/编辑/禁用/重置密码等管理请求。
     let users = [];
     let addUserModal;
     const currentUserId = Number('{{ current_user.id }}');

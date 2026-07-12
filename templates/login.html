@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+    {# 独立登录页：不继承 base.html，避免未登录状态加载应用主导航。 #}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 - 单细胞智慧可视化系统</title>
@@ -8,6 +9,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 
     <style>
+        /* 登录页使用独立视觉样式，避免和应用内 dashboard 布局耦合。 */
         :root {
             --nankai-purple: #6F2656;
             --tech-blue: #4A90E2;
@@ -193,6 +195,7 @@
 </head>
 <body>
 
+<!-- 双栏登录布局：左侧产品说明，右侧登录/注册表单。 -->
 <div class="login-container">
     <div class="text-section d-none d-lg-block">
         <i class="fa-solid fa-dna fa-4x"></i>
@@ -201,6 +204,7 @@
     </div>
 
     <div class="form-section">
+        <!-- 玻璃态表单卡片：登录和注册模式共用同一组 DOM，通过脚本切换字段。 -->
         <div class="glass-card">
             <div class="text-center">
                 <h3 id="form-title">欢迎登录</h3>
@@ -273,6 +277,7 @@
 </div>
 
 <script>
+    // 登录页脚本职责：切换登录/注册模式，提交认证请求，并显示后端返回的错误/成功信息。
     const nextUrl = new URLSearchParams(window.location.search).get('next') || '/';
     const alertBox = document.getElementById('auth-alert');
 

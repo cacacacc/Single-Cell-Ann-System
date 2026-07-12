@@ -117,6 +117,7 @@ def _merged_dir() -> Path:
 
 
 def _normalize_dataset_id(dataset_id: Optional[str]) -> Optional[str]:
+    """Validate dataset ids before they are used to build filesystem paths."""
     if dataset_id is None:
         return None
     cleaned = dataset_id.strip()
@@ -150,6 +151,7 @@ def _normalize_dataset_ids(value: Any) -> List[str]:
 
 
 def _get_merged_loader(merged_id: str) -> MergedDataLoader:
+    """Return a cached logical merged loader, creating it from saved config."""
     if merged_id in _MERGED_CACHE:
         return _MERGED_CACHE[merged_id]
     config = load_merged_config(DATA_DIR, merged_id)
@@ -162,6 +164,11 @@ def _get_merged_loader(merged_id: str) -> MergedDataLoader:
 
 
 def _ensure_joint_dataset(source_datasets: List[str], use_rep: str) -> str:
+    """Create or reuse a logical merged dataset for multi-dataset search.
+
+    The merged dataset is represented by a small JSON config; vectors remain in
+    the source loaders and are stacked by ``MergedDataLoader`` on demand.
+    """
     if len(source_datasets) < 2:
         raise ValueError("at least 2 source datasets are required for joint search")
     if any(_is_merged_dataset(ds_id) for ds_id in source_datasets):
@@ -198,6 +205,7 @@ def _ensure_joint_dataset(source_datasets: List[str], use_rep: str) -> str:
 
 
 def _resolve_search_dataset(payload: Dict[str, Any], use_rep: str) -> Tuple[str, Path, List[str]]:
+    """Resolve API payload into the concrete dataset id/path used for search."""
     source_datasets = _normalize_dataset_ids(payload.get("dataset_ids"))
     if len(source_datasets) >= 2:
         resolved_id = _ensure_joint_dataset(source_datasets, use_rep)
@@ -215,6 +223,12 @@ def _cell_index_from_request_id(
     source_datasets: Optional[List[str]] = None,
     query_source_dataset: Optional[str] = None,
 ) -> int:
+    """Resolve a request cell id for raw or joint datasets.
+
+    Joint search requires prefixed ids (``dataset_id:cell_id``). For convenience
+    the API also accepts an unprefixed id when ``query_source_dataset`` says
+    which source dataset it belongs to.
+    """
     lookup = str(cell_id).strip()
     sources = source_datasets or []
     if sources and ":" not in lookup:
@@ -295,6 +309,7 @@ def _backup_index_path(index_path: Path) -> Path:
 
 
 def _default_engine_threads() -> int:
+    """Pick a conservative default thread count for local ANN work."""
     raw = os.getenv("CELL_INDEX_OMP_NUM_THREADS") or os.getenv("OMP_NUM_THREADS")
     if raw not in (None, ""):
         try:
@@ -319,6 +334,7 @@ def _engine_bool(value: Any, default: bool = False) -> bool:
 
 
 def _initial_engine_runtime_config() -> Dict[str, Any]:
+    """Capture mutable ANN runtime settings from env at process startup."""
     return {
         "index_config": IndexConfig.from_env().to_dict(),
         "omp_num_threads": _default_engine_threads(),
@@ -335,6 +351,7 @@ def _index_config_from_env() -> IndexConfig:
 
 
 def _apply_engine_thread_count(thread_count: int) -> None:
+    """Apply thread settings to BLAS/OpenMP env vars and FAISS when available."""
     value = str(thread_count)
     for env_name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         os.environ[env_name] = value
@@ -370,6 +387,7 @@ def _engine_capabilities() -> Dict[str, Any]:
 
 
 def _engine_config_payload() -> Dict[str, Any]:
+    """Return the current ANN runtime config plus local capability flags."""
     with _ENGINE_CONFIG_LOCK:
         index_config = dict(_ENGINE_RUNTIME_CONFIG["index_config"])
         omp_num_threads = int(_ENGINE_RUNTIME_CONFIG["omp_num_threads"])
@@ -393,6 +411,7 @@ def _engine_config_payload() -> Dict[str, Any]:
 
 
 def _engine_index_overrides_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract index config fields from flat or nested request payloads."""
     source: Dict[str, Any] = {}
     nested = payload.get("index_config")
     if isinstance(nested, dict):
@@ -423,6 +442,7 @@ def _engine_index_overrides_from_payload(payload: Dict[str, Any]) -> Dict[str, A
 
 
 def _update_engine_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Update ANN runtime settings and clear caches when index semantics change."""
     index_overrides = _engine_index_overrides_from_payload(payload)
     thread_count = _parse_optional_int(payload, "omp_num_threads")
     if thread_count is None:
@@ -456,6 +476,7 @@ def _update_engine_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _config_cache_key(config: IndexConfig) -> Tuple[Any, ...]:
+    """Build a hashable key for index caches from normalized config values."""
     cfg = config.normalized()
     return (
         cfg.backend,

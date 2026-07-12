@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{# 相似检索页：配置 ANN 参数，执行 Top-K 检索，并联动 UMAP、结果表、AI 助手入口。 #}
 <style>
     /* =================  Flex 布局 ================= */
     .search-layout {
@@ -416,10 +417,12 @@
     }
 </style>
 
-<!-- 采用全新的 Flex 容器 -->
+<!-- 页面主布局：左侧固定参数面板，右侧承载 UMAP 可视化和 Top-K 结果。 -->
 <div class="search-layout">
     
-    <!-- ================= 左侧：参数控制台 (自带完美吸顶) ================= -->
+    <!-- ================= 左侧：参数控制台 (自带吸顶) =================
+         表单字段最终组装为 /api/search 或 /api/cells/query 的请求 payload。
+    -->
     <div class="search-sidebar">
         <!-- 去掉了底部的 mb-4，因为高度由自身决定了 -->
         <div class="dark-card m-0">
@@ -498,7 +501,7 @@
                     <div class="form-text" style="color: #6f7c92;" id="indexBuildHint">选择索引类型后可调整对应高级参数。</div>
                 </div>
 
-                <!-- 已有索引选择器 -->
+                <!-- 已有索引选择器：选择保存过的索引时会覆盖手动配置参数。 -->
                 <div class="mb-4" id="savedIndexSection">
                     <label class="form-label d-flex justify-content-between">
                         <span>选择已有索引</span>
@@ -522,7 +525,7 @@
                 <div class="mb-4">
                     <label class="form-label">高级参数</label>
 
-                    <!-- IVF 参数组 -->
+                    <!-- IVF 参数组：仅 index_type=ivf_flat 时展示。 -->
                     <div id="ivfParamsGroup" class="row g-2 d-none">
                         <div class="col-6">
                             <label class="form-label mb-1" style="font-size: 0.8rem;">nlist</label>
@@ -534,7 +537,7 @@
                         </div>
                     </div>
 
-                    <!-- HNSW 参数组 -->
+                    <!-- HNSW 参数组：仅 index_type=hnsw 时展示。 -->
                     <div id="hnswParamsGroup" class="row g-2 d-none">
                         <div class="col-6">
                             <label class="form-label mb-1" style="font-size: 0.8rem;">M</label>
@@ -550,7 +553,7 @@
                         </div>
                     </div>
 
-                    <!-- PQ 参数组 -->
+                    <!-- PQ 参数组：仅 index_type=pq 时展示。 -->
                     <div id="pqParamsGroup" class="row g-2 d-none">
                         <div class="col-6">
                             <label class="form-label mb-1" style="font-size: 0.8rem;">PQ M</label>
@@ -615,7 +618,7 @@
     <!-- ================= 右侧：大图可视化与数据表 ================= -->
     <div class="search-main">
         
-        <!-- 上部：UMAP 可视化大卡片 -->
+        <!-- 上部：UMAP 可视化大卡片，支持右键菜单、图例过滤、框选和快捷 AI 分析。 -->
         <div class="dark-card mb-4" style="padding: 20px;">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <span class="fw-bold fs-5 text-white">UMAP 预览</span>
@@ -670,7 +673,7 @@
                 </div>
             </div>
 
-            <!-- ECharts 渲染容器 (高度适度收紧到 420px，消除下方过多空白) -->
+            <!-- ECharts 渲染容器：UMAP 背景点、查询细胞和检索结果都绘制在这里。 -->
             <div id="umapChart" class="chart-box" style="width: 100%; height: 420px; position: relative; margin-top: 10px;"></div>
             <div class="umap-interaction-hint">
                 <i class="fa-solid fa-hand-pointer me-1" style="color:#4A90E2;"></i>
@@ -719,7 +722,7 @@
                 <div id="compareList" class="pill-list"><span class="umap-info-text">尚未加入细胞。</span></div>
             </div>
 
-            <!-- 底部自定义图例区 -->
+            <!-- 底部自定义图例区：由 JS 根据当前 UMAP 分类动态生成。 -->
             <div id="custom-legend-box" class="mt-3 p-3" style="background-color: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">
                 <div class="d-flex flex-wrap gap-3" id="legend-container">
                     <!-- JS 动态填入图例 -->
@@ -730,7 +733,7 @@
             </div>
         </div>
 
-        <!-- 下部：数据表格卡片 -->
+        <!-- 下部：Top-K 结果表格，与 UMAP 选中状态双向联动。 -->
         <div class="dark-card" style="padding: 0; overflow: hidden;">
             <div class="px-4 py-3 d-flex justify-content-between align-items-center" style="background-color: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255,255,255,0.05);">
                 <span class="fw-bold fs-5 text-white"><i class="fa-solid fa-table-list me-2" style="color: #4A90E2;"></i>Top-K 详细结果</span>
@@ -766,7 +769,7 @@
     </div>
 </div>
 
-<!-- UMAP 快捷菜单 -->
+<!-- UMAP 快捷菜单：右键某个细胞点后出现，动作由 data-action 分发。 -->
 <div id="umapContextMenu" class="umap-context-menu">
     <div class="umap-context-title" id="umapContextCellId">—</div>
     <span class="umap-context-type" id="umapContextCellType">unknown</span>
@@ -799,6 +802,7 @@
 
 {% block scripts %}
 <script>
+    // 相似检索脚本职责：管理索引参数、数据集/细胞浏览、检索请求、UMAP 交互、CSV 导出和 AI 跳转。
     const slider = document.getElementById('topKSlider');
     const kValue = document.getElementById('k-value');
     const datasetSelect = document.getElementById('datasetSelect');

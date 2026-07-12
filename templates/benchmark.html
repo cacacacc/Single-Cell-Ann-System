@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 
 {% block content %}
+{# 性能评测页：对比不同 ANN 后端/索引类型的延迟、召回率、吞吐和内存占用。 #}
 <style>
+    /* 本页复用“左侧参数面板 + 右侧报告区”的布局，样式局部定义避免影响其他页面。 */
     .search-layout { display: flex; gap: 24px; align-items: flex-start; }
     .search-sidebar { width: 320px; flex-shrink: 0; position: sticky; top: 24px; z-index: 10; }
     .search-main { flex: 1; min-width: 0; }
@@ -82,7 +84,9 @@
     }
 </style>
 
+<!-- 页面主布局：左侧负责发起实验，右侧负责展示图表与统计摘要。 -->
 <div class="search-layout">
+    <!-- 左侧评测参数表单：最终提交到 /api/benchmark。 -->
     <div class="search-sidebar">
         <div class="dark-card m-0">
             <h5 class="fw-bold mb-4" style="letter-spacing: 1px;">
@@ -172,6 +176,7 @@
     </div>
 
     <div class="search-main">
+        <!-- 顶部指标条：从最近一次 benchmark 响应中提取最快耗时、QPS、Recall 和内存。 -->
         <div class="dark-card mb-4 d-flex justify-content-between align-items-center flex-wrap gap-2" style="padding: 15px 25px;">
             <div class="fw-bold fs-5 text-white">
                 <i class="fa-solid fa-chart-line me-2" style="color: #4A90E2;"></i>实验结果评估报告
@@ -187,6 +192,7 @@
         <div id="benchmarkWarning" class="mb-3" style="color: #F5A623; font-size: 0.85rem; display: none;"></div>
         <div id="pcaInfoBox" class="pca-info-box" style="display: none;"></div>
 
+        <!-- 图表区：ECharts 实例在 scripts block 中初始化并按 benchmark 返回值刷新。 -->
         <div class="dark-card mb-4" style="padding: 20px;">
             <h6 class="text-white mb-3 fw-bold">查询响应时间对比 (Latency)</h6>
             <div id="timeChart" class="chart-box" style="width: 100%; height: 380px;"></div>
@@ -212,6 +218,7 @@
 
 {% block scripts %}
 <script>
+    // 性能评测脚本职责：加载数据集、提交跑分任务、渲染图表、维护历史记录和 CSV 导出。
     const slider = document.getElementById('topKSlider');
     const kValue = document.getElementById('k-value');
     const datasetSelect = document.getElementById('benchmarkDatasetSelect');

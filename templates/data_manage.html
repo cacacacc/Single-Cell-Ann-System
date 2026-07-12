@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{# 数据管理页：管理员上传/删除数据集、构建/管理 ANN 索引，并创建逻辑合并数据集。 #}
 <style>
     /* 针对数据表格的深色科技风格重置 */
     .table-dark-fluent {
@@ -127,7 +128,7 @@
     }
 </style>
 
-<!-- 顶部操作栏 (Command Bar) -->
+<!-- 顶部操作栏 (Command Bar)：管理员可上传、合并、批量删除；所有用户可刷新列表。 -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h3 class="fw-bold m-0" style="letter-spacing: 1px;">数据管理中心</h3>
     <div>
@@ -148,7 +149,7 @@
     </div>
 </div>
 
-<!-- 主内容区：数据表格卡片 -->
+<!-- 主内容区：数据表格卡片，tbody 由 /api/datasets 动态渲染。 -->
 <div class="dark-card" style="padding: 0; overflow: hidden;">
     <table class="table table-dark-fluent mb-0 w-100">
         <thead>
@@ -172,7 +173,9 @@
     </table>
 </div>
 
-<!-- ================= 1. 右侧滑出抽屉：上传数据集 ================= -->
+<!-- ================= 1. 右侧滑出抽屉：上传数据集 =================
+     文件选择/拖拽最终通过 FormData 上传到 /api/datasets。
+-->
 <div class="offcanvas offcanvas-end offcanvas-dark" tabindex="-1" id="uploadPanel" style="width: 450px;">
     <div class="offcanvas-header border-bottom border-secondary">
         <h5 class="offcanvas-title fw-bold"><i class="fa-solid fa-cloud-arrow-up me-2" style="color: var(--nankai-purple);"></i>新增单细胞数据</h5>
@@ -203,7 +206,9 @@
     </div>
 </div>
 
-<!-- ================= 2. 居中模态弹窗：构建索引 ================= -->
+<!-- ================= 2. 居中模态弹窗：构建索引 =================
+     配置项映射 backend.IndexConfig，构建成功后刷新表格索引状态。
+-->
 <div class="modal fade" id="buildIndexModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content" style="background-color: var(--bg-card); color: white; border: 1px solid rgba(255,255,255,0.1);">
@@ -306,7 +311,9 @@
     </div>
 </div>
 
-<!-- ================= 3. 居中模态弹窗：管理索引 ================= -->
+<!-- ================= 3. 居中模态弹窗：管理索引 =================
+     查看同一数据集下的多套已保存索引，并支持删除不再使用的索引文件。
+-->
 <div class="modal fade" id="manageIndicesModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content" style="background-color: var(--bg-card); color: white; border: 1px solid rgba(255,255,255,0.1);">
@@ -347,7 +354,9 @@
     </div>
 </div>
 
-<!-- ================= 合并数据集 Modal ================= -->
+<!-- ================= 合并数据集 Modal =================
+     这里只保存合并配置，真正的向量拼接由后端 MergedDataLoader 按需完成。
+-->
 <div class="modal fade" id="createMergeModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content" style="background: #1a1a2e; border: 1px solid rgba(111,38,86,0.3);">
@@ -390,6 +399,7 @@
 
 {% block scripts %}
 <script>
+    // 数据管理脚本职责：加载数据集列表，处理上传、索引构建/删除、合并数据集创建等交互。
     const isAdmin = {{ 'true' if current_user and current_user.role == 'admin' else 'false' }};
     const datasetTbody = document.getElementById('dataset-tbody');
     const fileInput = document.getElementById('file-input');
